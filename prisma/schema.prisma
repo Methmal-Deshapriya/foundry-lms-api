@@ -1,0 +1,85 @@
+// This is your Prisma schema file (Modern Prisma 7 Edition)
+// It defines the data shapes for Foundry LMS.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User Roles
+enum Role {
+  STUDENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+// User Model: Identity and System Authority
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  phone     Int? // Optional phone number
+  password  String // Note: We will handle hiding this via the Global Omit API
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  enrollments    Enrollment[]
+  actorAuditLogs AuditLog[]   @relation("ActorRelation")
+
+  @@map("users")
+}
+
+// Bootcamp Model: The learning products
+model Bootcamp {
+  id          String   @id @default(uuid())
+  title       String
+  slug        String   @unique
+  description String?
+  price       Float
+  isPublished Boolean  @default(false) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  enrollments Enrollment[]
+
+  @@map("bootcamps")
+}
+
+// Enrollment Model: The "Bridge" linking Students to Bootcamps
+model Enrollment {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  bootcampId String   @map("bootcamp_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bootcamp Bootcamp @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+
+  // Constraint: A student can only be enrolled in a specific bootcamp once
+  @@unique([userId, bootcampId])
+  @@map("enrollments")
+}
+
+// AuditLog Model: Security and accountability tracking
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  description String?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  actor User? @relation("ActorRelation", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
