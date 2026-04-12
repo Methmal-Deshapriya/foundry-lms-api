@@ -7,9 +7,12 @@ import { ApiResponse } from "./utils/responseHandler.js";
 import { NotFoundError } from "./utils/Errors.js";
 import errorHandler from "./middlewares/errorHandler.js";
 
+// 2. Import Module Routes
+import authRoutes from "./routes/v1/auth/auth.routes.js";
+
 const app = express();
 
-// 2. Base Middlewares
+// 3. Base Middlewares
 app.use(express.json());
 app.use(cookieParser());
 
@@ -20,9 +23,11 @@ app.use(
   }),
 );
 
-// 3. Test Routes (To verify our Foundation works)
+// 4. Register Module Routes
+// Every route inside authRoutes will now start with /api/v1/auth
+app.use("/api/v1/auth", authRoutes);
 
-// Success Test: Uses our new ApiResponse utility
+// 5. Test Routes (To verify our Foundation works)
 app.get("/api/health", (req, res) => {
   return ApiResponse.send(res, { 
     status: "UP", 
@@ -30,12 +35,11 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Error Test: Throws a custom error to see if our errorHandler catches it
 app.get("/api/error-test", (req, res) => {
   throw new NotFoundError("Foundry LMS Foundation is working! This error was caught by our Global Error Handler.");
 });
 
-// 4. Global Error Handler (CRITICAL: Must be at the very bottom)
+// 6. Global Error Handler (CRITICAL: Must be at the very bottom)
 app.use(errorHandler);
 
 export default app;

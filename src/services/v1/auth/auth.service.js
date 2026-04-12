@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import * as authRepo from "../../../repositories/v1/auth/auth.repository.js";
+import * as authModel from "../../../models/v1/auth/auth.model.js";
 import { generateToken } from "../../../utils/jwt.js";
 import { ConflictError, ValidationError } from "../../../utils/Errors.js";
 
@@ -46,7 +47,6 @@ export async function registerUser(userData) {
   }
 
   // 3. Hashing: Secure the password before storing it
-  // The '10' is the work factor (salt rounds).
   const hashedPassword = await bcrypt.hash(password, 10);
 
   // 4. Save to Database: Use the repository to create the record
@@ -54,19 +54,21 @@ export async function registerUser(userData) {
     name,
     email,
     password: hashedPassword,
-    role: "STUDENT", // New users default to STUDENT role as per plan
+    role: "STUDENT",
   });
 
-  // 5. Generate Passport (JWT): Create the auth token
+  // 5. Transform to Safe Shape: Sanitize the user object using our Model
+  const safeUser = authModel.toUserResponse(newUser);
+
+  // 6. Generate Passport (JWT): Create the auth token
   const token = generateToken({
-    id: newUser.id,
-    role: newUser.role,
+    id: safeUser.id,
+    role: safeUser.role,
   });
 
-  // 6. Return the "Clean" User and the Token
-  // Note: Prisma 7 will automatically omit the password here because we configured it in utils/prisma.js!
+  // 7. Return the "Clean" User and the Token
   return {
-    user: newUser,
+    user: safeUser,
     token,
   };
 }
