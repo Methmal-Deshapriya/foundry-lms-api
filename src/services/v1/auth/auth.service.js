@@ -10,6 +10,7 @@ import {
   ConflictError,
   ValidationError,
   UnauthorizedError,
+  NotFoundError,
 } from "../../../utils/Errors.js";
 
 /**
@@ -106,7 +107,7 @@ export async function loginService(credentials) {
  * Service: Get the current authenticated user's profile.
  * 1. Find the user by their ID.
  * 2. Return a safe, sanitized user object.
- * 
+ *
  * @param {string} userId - The UUID of the authenticated user.
  * @returns {Promise<object>} The safe user object.
  */
