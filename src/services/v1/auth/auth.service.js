@@ -1,9 +1,16 @@
 import bcrypt from "bcryptjs";
 import * as authRepo from "../../../repositories/v1/auth/auth.repository.js";
 import * as authModel from "../../../models/v1/auth/auth.model.js";
-import { registerSchema, loginSchema } from "../../../constants/v1/auth/auth.schema.js";
+import {
+  registerSchema,
+  loginSchema,
+} from "../../../constants/v1/auth/auth.schema.js";
 import { generateToken } from "../../../utils/jwt.js";
-import { ConflictError, ValidationError, UnauthorizedError } from "../../../utils/Errors.js";
+import {
+  ConflictError,
+  ValidationError,
+  UnauthorizedError,
+} from "../../../utils/Errors.js";
 
 /**
  * Auth Service - The "Brain"
@@ -56,12 +63,13 @@ export async function registerService(userData) {
  * 2. Find the user by email.
  * 3. Verify the password hash.
  * 4. Generate a JWT token.
- * 
+ *
  * @param {object} credentials - The user's login details (email, password).
  * @returns {Promise<object>} The safe user object and the auth token.
  */
 export async function loginService(credentials) {
   // 1. Validation: Use the centralized Zod schema
+
   const validation = loginSchema.safeParse(credentials);
 
   if (!validation.success) {

@@ -22,4 +22,11 @@ router.post("/register", authController.registerController);
  */
 router.post("/login", authController.loginController);
 
+/**
+ * @route   POST /v1/auth/logout
+ * @desc    Log out a user
+ * @access  Public
+ */
+router.post("/logout", authController.logoutController);
+
 export default router;

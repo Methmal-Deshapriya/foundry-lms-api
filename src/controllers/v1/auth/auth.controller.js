@@ -6,7 +6,7 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
  * Handles HTTP requests and responses for authentication.
  */
 
-// Common cookie options for both register and login
+// Common cookie options for both register, login, and logout
 const cookieOptions = {
   httpOnly: true, // Prevents JavaScript from reading the cookie
   secure: process.env.NODE_ENV === "production", // Only sent over HTTPS in production
@@ -25,7 +25,7 @@ export async function registerController(req, res, next) {
     // Set the secure cookie
     res.cookie("token", token, cookieOptions);
 
-    return ApiResponse.send(res, user, null, 201);
+    return ApiResponse.send(res, user, "Registration successful", 201);
   } catch (error) {
     next(error);
   }
@@ -43,6 +43,22 @@ export async function loginController(req, res, next) {
     res.cookie("token", token, cookieOptions);
 
     return ApiResponse.send(res, user, "Login successful");
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Controller: Log out a user.
+ * POST /v1/auth/logout
+ */
+export async function logoutController(req, res, next) {
+  try {
+    // 1. Clear the authentication cookie
+    res.clearCookie("token", cookieOptions);
+
+    // 2. Return a success response
+    return ApiResponse.send(res, null, "Logout successful");
   } catch (error) {
     next(error);
   }

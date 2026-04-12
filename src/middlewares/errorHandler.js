@@ -37,8 +37,14 @@ const errorHandler = (err, req, res, next) => {
     }
   }
 
-  // 4. Send the professional JSON response using our Response Utility.
-  return ApiResponse.send(res, null, errorResponse, errorResponse.statusCode);
+  // 4. Send the final client-facing error response.
+  return res.status(errorResponse.statusCode).json({
+    success: false,
+    error: errorResponse.message,
+    code: errorResponse.code,
+    ...(errorResponse.field != null ? { field: errorResponse.field } : {}),
+    ...(errorResponse.details != null ? { details: errorResponse.details } : {}),
+  });
 };
 
 export default errorHandler;
