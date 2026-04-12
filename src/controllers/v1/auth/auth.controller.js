@@ -58,8 +58,25 @@ export async function logoutController(req, res, next) {
     res.clearCookie("token", cookieOptions);
 
     // 2. Return a success response
-    return ApiResponse.send(res, null, "Logout successful");
+    return ApiResponse.send(res, { message: "Logout successful" });
   } catch (error) {
     next(error);
   }
 }
+
+/**
+ * Controller: Get the current authenticated user's profile.
+ * GET /v1/auth/me
+ */
+export async function getMeController(req, res, next) {
+  try {
+    // 1. Ask the service for the user profile using the ID from the authenticate middleware
+    const user = await authService.getMeService(req.user.id);
+
+    // 2. Return a success response
+    return ApiResponse.send(res, user, "User profile fetched successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+

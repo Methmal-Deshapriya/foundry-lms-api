@@ -1,5 +1,6 @@
 import express from "express";
 import * as authController from "../../../controllers/v1/auth/auth.controller.js";
+import { authenticate } from "../../../middlewares/authenticate.js";
 
 /**
  * Auth Routes - The "Sign on the Door"
@@ -28,5 +29,12 @@ router.post("/login", authController.loginController);
  * @access  Public
  */
 router.post("/logout", authController.logoutController);
+
+/**
+ * @route   GET /v1/auth/me
+ * @desc    Get current authenticated user profile
+ * @access  Private (Authenticated)
+ */
+router.get("/me", authenticate, authController.getMeController);
 
 export default router;

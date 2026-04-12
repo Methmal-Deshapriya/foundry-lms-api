@@ -101,3 +101,23 @@ export async function loginService(credentials) {
 
   return { user: safeUser, token };
 }
+
+/**
+ * Service: Get the current authenticated user's profile.
+ * 1. Find the user by their ID.
+ * 2. Return a safe, sanitized user object.
+ * 
+ * @param {string} userId - The UUID of the authenticated user.
+ * @returns {Promise<object>} The safe user object.
+ */
+export async function getMeService(userId) {
+  // 1. Find User: Ask the Librarian for the user's data by ID
+  const user = await authRepo.findUserById(userId);
+
+  if (!user) {
+    throw new NotFoundError("User session not found. Please log in again.");
+  }
+
+  // 2. Transform to Safe Shape: Sanitize using our Model
+  return authModel.toUserResponse(user);
+}
