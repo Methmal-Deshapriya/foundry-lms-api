@@ -9,6 +9,7 @@ import errorHandler from "./middlewares/errorHandler.js";
 
 // 2. Import Module Routes
 import authRoutes from "./routes/v1/auth/auth.routes.js";
+import userRoutes from "./routes/v1/users/user.routes.js";
 
 const app = express();
 
@@ -24,22 +25,19 @@ app.use(
 );
 
 // 4. Register Module Routes
-// Every route inside authRoutes will now start with /api/v1/auth
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/users", userRoutes);
 
 // 5. Test Routes (To verify our Foundation works)
 app.get("/api/health", (req, res) => {
-  return ApiResponse.send(
-    res,
-    { status: "UP" },
-    "Foundry LMS Server is running",
-  );
+  return ApiResponse.send(res, { 
+    status: "UP", 
+    message: "Foundry LMS Server is running 🚀" 
+  });
 });
 
 app.get("/api/error-test", (req, res) => {
-  throw new NotFoundError(
-    "Foundry LMS Foundation is working! This error was caught by our Global Error Handler.",
-  );
+  throw new NotFoundError("Foundry LMS Foundation is working! This error was caught by our Global Error Handler.");
 });
 
 // 6. Global Error Handler (CRITICAL: Must be at the very bottom)

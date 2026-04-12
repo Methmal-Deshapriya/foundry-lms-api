@@ -5,6 +5,7 @@ import {
   registerSchema,
   loginSchema,
 } from "../../../constants/v1/auth/auth.schema.js";
+import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import { generateToken } from "../../../utils/jwt.js";
 import {
   ConflictError,
@@ -48,7 +49,7 @@ export async function registerService(userData) {
     name,
     email,
     password: hashedPassword,
-    role: "STUDENT",
+    role: ROLES.STUDENT,
   });
 
   // 5. Transform to Safe Shape & Generate Token
