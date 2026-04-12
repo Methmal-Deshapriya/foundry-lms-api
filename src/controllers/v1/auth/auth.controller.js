@@ -6,33 +6,44 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
  * Handles HTTP requests and responses for authentication.
  */
 
+// Common cookie options for both register and login
+const cookieOptions = {
+  httpOnly: true, // Prevents JavaScript from reading the cookie
+  secure: process.env.NODE_ENV === "production", // Only sent over HTTPS in production
+  maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  sameSite: "strict", // Protects against CSRF attacks
+};
+
 /**
- * Register a new user.
+ * Controller: Register a new user.
  * POST /v1/auth/register
  */
 export async function registerController(req, res, next) {
   try {
-    // 1. Call the Service to handle the business logic (Validation, Hashing, Saving)
-    const { user, token } = await authService.registerUser(req.body);
+    const { user, token } = await authService.registerService(req.body);
 
-    // 2. Set the HTTP-only cookie for the authentication token
-    // This is more secure than sending it in the response body.
-    res.cookie("token", token, {
-      httpOnly: true, // Prevents JavaScript from reading the cookie
-      secure: process.env.NODE_ENV === "production", // Only sent over HTTPS in production
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      sameSite: "strict", // Protects against CSRF attacks
-    });
+    // Set the secure cookie
+    res.cookie("token", token, cookieOptions);
 
-    // 3. Return a success response with the sanitized user data
-    return ApiResponse.send(
-      res,
-      user,
-      null,
-      201, // 201 Created is the standard for successful registration
-    );
+    return ApiResponse.send(res, user, null, 201);
   } catch (error) {
-    // Pass any errors (Validation, Conflict, etc.) to the Global Error Handler
+    next(error);
+  }
+}
+
+/**
+ * Controller: Log in a user.
+ * POST /v1/auth/login
+ */
+export async function loginController(req, res, next) {
+  try {
+    const { user, token } = await authService.loginService(req.body);
+
+    // Set the secure cookie
+    res.cookie("token", token, cookieOptions);
+
+    return ApiResponse.send(res, user, "Login successful");
+  } catch (error) {
     next(error);
   }
 }

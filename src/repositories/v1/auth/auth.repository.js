@@ -29,6 +29,19 @@ export async function findUserById(id) {
 }
 
 /**
+ * Find a unique user by their email address and EXPLICITLY include the password.
+ * Only use this for authentication/login verification.
+ * @param {string} email - The email to search for.
+ * @returns {Promise<object|null>} The user object including the password hash.
+ */
+export async function findUserWithPassword(email) {
+  return await prisma.user.findUnique({
+    where: { email },
+    omit: { password: false }, // Bypasses the Global Omit from utils/prisma.js
+  });
+}
+
+/**
  * Create a new user record in the database.
  * @param {object} data - The user data (name, email, hashed password, role).
  * @returns {Promise<object>} The newly created user object.

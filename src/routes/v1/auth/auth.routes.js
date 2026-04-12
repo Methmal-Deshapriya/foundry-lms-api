@@ -15,4 +15,11 @@ const router = express.Router();
  */
 router.post("/register", authController.registerController);
 
+/**
+ * @route   POST /v1/auth/login
+ * @desc    Log in a user
+ * @access  Public
+ */
+router.post("/login", authController.loginController);
+
 export default router;
