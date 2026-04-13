@@ -8,17 +8,12 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
 
 /**
  * Controller: Get all users.
- * GET /v1/users
  */
 export async function getAllUsersController(req, res, next) {
   try {
-    // 1. Call the service to fetch and sanitize the user list
     const users = await userService.getAllUsersService();
-
-    // 2. Return success response
     return ApiResponse.send(res, users, "User list fetched successfully");
   } catch (error) {
-    // Pass errors to the Global Error Handler
     next(error);
   }
 }
@@ -29,13 +24,14 @@ export async function getAllUsersController(req, res, next) {
  */
 export async function promoteUserController(req, res, next) {
   try {
-    // 1. Extract the target user ID from the URL parameters
     const { id } = req.params;
+    
+    // We extract the actor's ID from the authenticated request
+    const actorId = req.user.id;
 
-    // 2. Call the service to perform the promotion logic
-    const user = await userService.promoteUserService(id);
+    // We pass both the target ID and the actor ID to the service
+    const user = await userService.promoteUserService(id, actorId);
 
-    // 3. Return success response
     return ApiResponse.send(res, user, "User promoted to ADMIN successfully");
   } catch (error) {
     next(error);
@@ -48,13 +44,14 @@ export async function promoteUserController(req, res, next) {
  */
 export async function demoteUserController(req, res, next) {
   try {
-    // 1. Extract the target user ID from the URL parameters
     const { id } = req.params;
+    
+    // We extract the actor's ID from the authenticated request
+    const actorId = req.user.id;
 
-    // 2. Call the service to perform the demotion logic
-    const user = await userService.demoteUserService(id);
+    // We pass both the target ID and the actor ID to the service
+    const user = await userService.demoteUserService(id, actorId);
 
-    // 3. Return success response
     return ApiResponse.send(res, user, "User demoted to STUDENT successfully");
   } catch (error) {
     next(error);

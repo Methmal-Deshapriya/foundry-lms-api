@@ -10,7 +10,6 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
 
 /**
  * Controller: Get all published bootcamps.
- * GET /v1/bootcamps
  */
 export async function getAllPublicBootcampsController(req, res, next) {
   try {
@@ -23,7 +22,6 @@ export async function getAllPublicBootcampsController(req, res, next) {
 
 /**
  * Controller: Get a single bootcamp by its slug.
- * GET /v1/bootcamps/:slug
  */
 export async function getBootcampBySlugController(req, res, next) {
   try {
@@ -39,7 +37,6 @@ export async function getBootcampBySlugController(req, res, next) {
 
 /**
  * Controller: Get all bootcamps (Admin view).
- * GET /v1/bootcamps/admin
  */
 export async function getAllAdminBootcampsController(req, res, next) {
   try {
@@ -52,11 +49,11 @@ export async function getAllAdminBootcampsController(req, res, next) {
 
 /**
  * Controller: Create a new bootcamp.
- * POST /v1/bootcamps
  */
 export async function createBootcampController(req, res, next) {
   try {
-    const bootcamp = await bootcampService.createBootcampService(req.body);
+    const actorId = req.user.id;
+    const bootcamp = await bootcampService.createBootcampService(req.body, actorId);
     return ApiResponse.send(res, bootcamp, "Bootcamp created successfully", 201);
   } catch (error) {
     next(error);
@@ -65,7 +62,7 @@ export async function createBootcampController(req, res, next) {
 
 /**
  * Controller: Update a bootcamp.
- * PATCH /v1/bootcamps/:id
+ * (Audit logging for updates can be added later if needed)
  */
 export async function updateBootcampController(req, res, next) {
   try {
@@ -79,12 +76,12 @@ export async function updateBootcampController(req, res, next) {
 
 /**
  * Controller: Delete a bootcamp.
- * DELETE /v1/bootcamps/:id
  */
 export async function deleteBootcampController(req, res, next) {
   try {
     const { id } = req.params;
-    await bootcampService.deleteBootcampService(id);
+    const actorId = req.user.id;
+    await bootcampService.deleteBootcampService(id, actorId);
     return ApiResponse.send(res, null, "Bootcamp deleted successfully");
   } catch (error) {
     next(error);
@@ -93,12 +90,12 @@ export async function deleteBootcampController(req, res, next) {
 
 /**
  * Controller: Publish a bootcamp.
- * PATCH /v1/bootcamps/:id/publish
  */
 export async function publishBootcampController(req, res, next) {
   try {
     const { id } = req.params;
-    const bootcamp = await bootcampService.togglePublishService(id, true);
+    const actorId = req.user.id;
+    const bootcamp = await bootcampService.togglePublishService(id, true, actorId);
     return ApiResponse.send(res, bootcamp, "Bootcamp published successfully");
   } catch (error) {
     next(error);
@@ -107,12 +104,12 @@ export async function publishBootcampController(req, res, next) {
 
 /**
  * Controller: Unpublish a bootcamp.
- * PATCH /v1/bootcamps/:id/unpublish
  */
 export async function unpublishBootcampController(req, res, next) {
   try {
     const { id } = req.params;
-    const bootcamp = await bootcampService.togglePublishService(id, false);
+    const actorId = req.user.id;
+    const bootcamp = await bootcampService.togglePublishService(id, false, actorId);
     return ApiResponse.send(res, bootcamp, "Bootcamp unpublished successfully");
   } catch (error) {
     next(error);

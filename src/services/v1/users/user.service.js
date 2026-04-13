@@ -1,6 +1,8 @@
 import * as userRepo from "../../../repositories/v1/users/user.repository.js";
 import * as userModel from "../../../models/v1/users/user.model.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
+import { recordActionService } from "../audit/audit.service.js";
 import { ConflictError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
 
 /**
@@ -10,10 +12,6 @@ import { ConflictError, NotFoundError, ForbiddenError } from "../../../utils/Err
 
 /**
  * Service: Get a list of all users.
- * 1. Fetch users from the repository.
- * 2. Sanitize the list using the model.
- * 
- * @returns {Promise<Array>} List of sanitized users.
  */
 export async function getAllUsersService() {
   const users = await userRepo.findAllUsers();
@@ -22,62 +20,71 @@ export async function getAllUsersService() {
 
 /**
  * Service: Promote a user to the ADMIN role.
- * 1. Find the target user.
- * 2. Ensure they aren't already an admin.
- * 3. Update their role to ADMIN.
- * 
- * @param {string} targetId - The UUID of the user to promote.
- * @returns {Promise<object>} The updated, sanitized user.
+ * @param {string} targetId - The user being promoted.
+ * @param {string} actorId - The Super Admin performing the action.
  */
-export async function promoteUserService(targetId) {
-  // 1. Find the user first
+export async function promoteUserService(targetId, actorId) {
+  // 1. Find the target user
   const user = await userRepo.findUserById(targetId);
   if (!user) {
     throw new NotFoundError("Target user not found.");
   }
 
-  // 2. Safety Check: If already an Admin or Super Admin, promotion is invalid.
+  // 2. Safety Check
   if (user.role === ROLES.ADMIN || user.role === ROLES.SUPER_ADMIN) {
     throw new ConflictError(`User is already an ${user.role}.`);
   }
 
-  // 3. Update the role
+  // 3. Update the role in DB
   const updatedUser = await userRepo.updateUserRole(targetId, ROLES.ADMIN);
 
-  // 4. Return sanitized response
+  // 4. --- Audit Log (Fire and Forget) ---
+  // Note: We do NOT 'await' this.
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.USER_PROMOTED,
+    entityType: ENTITY_TYPES.USER,
+    entityId: targetId,
+    description: `User ${user.email} promoted to ADMIN by Admin ${actorId}`,
+    metadata: { oldRole: user.role, newRole: ROLES.ADMIN }
+  });
+
   return userModel.toAdminUserResponse(updatedUser);
 }
 
 /**
  * Service: Demote an ADMIN back to STUDENT.
- * 1. Find the target user.
- * 2. Ensure they aren't a SUPER_ADMIN (Forbidden).
- * 3. Ensure they aren't already a STUDENT.
- * 4. Update their role to STUDENT.
- * 
- * @param {string} targetId - The UUID of the user to demote.
- * @returns {Promise<object>} The updated, sanitized user.
+ * @param {string} targetId - The user being demoted.
+ * @param {string} actorId - The Super Admin performing the action.
  */
-export async function demoteUserService(targetId) {
-  // 1. Find the user first
+export async function demoteUserService(targetId, actorId) {
+  // 1. Find the target user
   const user = await userRepo.findUserById(targetId);
   if (!user) {
     throw new NotFoundError("Target user not found.");
   }
 
-  // 2. Safety Check: Never allow demoting a Super Admin.
+  // 2. Safety Checks
   if (user.role === ROLES.SUPER_ADMIN) {
     throw new ForbiddenError("Super Admins cannot be demoted via this endpoint.");
   }
 
-  // 3. Safety Check: If already a student, demotion is redundant.
   if (user.role === ROLES.STUDENT) {
     throw new ConflictError("User is already a Student.");
   }
 
-  // 4. Update the role
+  // 3. Update the role in DB
   const updatedUser = await userRepo.updateUserRole(targetId, ROLES.STUDENT);
 
-  // 5. Return sanitized response
+  // 4. --- Audit Log (Fire and Forget) ---
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.USER_DEMOTED,
+    entityType: ENTITY_TYPES.USER,
+    entityId: targetId,
+    description: `User ${user.email} demoted to STUDENT by Admin ${actorId}`,
+    metadata: { oldRole: user.role, newRole: ROLES.STUDENT }
+  });
+
   return userModel.toAdminUserResponse(updatedUser);
 }

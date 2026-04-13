@@ -1,6 +1,8 @@
 import * as bootcampRepo from "../../../repositories/v1/bootcamps/bootcamp.repository.js";
 import * as bootcampModel from "../../../models/v1/bootcamps/bootcamp.model.js";
 import { createBootcampSchema, updateBootcampSchema } from "../../../constants/v1/bootcamps/bootcamp.schema.js";
+import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
+import { recordActionService } from "../audit/audit.service.js";
 import { ValidationError, NotFoundError } from "../../../utils/Errors.js";
 
 /**
@@ -12,7 +14,6 @@ import { ValidationError, NotFoundError } from "../../../utils/Errors.js";
 
 /**
  * Service: Get all published bootcamps for the marketplace.
- * @returns {Promise<Array>} List of sanitized public bootcamps.
  */
 export async function getAllPublicBootcampsService() {
   const bootcamps = await bootcampRepo.findAllPublic();
@@ -21,13 +22,10 @@ export async function getAllPublicBootcampsService() {
 
 /**
  * Service: Get a single bootcamp by its slug.
- * @param {string} slug - The URL-friendly identifier.
- * @returns {Promise<object>} The sanitized public bootcamp.
  */
 export async function getBootcampBySlugService(slug) {
   const bootcamp = await bootcampRepo.findBySlug(slug);
 
-  // Security Check: If it doesn't exist OR isn't published, don't show it to the public.
   if (!bootcamp || !bootcamp.isPublished) {
     throw new NotFoundError("Bootcamp not found or currently unavailable.");
   }
@@ -39,7 +37,6 @@ export async function getBootcampBySlugService(slug) {
 
 /**
  * Service: Get all bootcamps for administrative management.
- * @returns {Promise<Array>} List of full bootcamp records.
  */
 export async function getAllAdminBootcampsService() {
   const bootcamps = await bootcampRepo.findAllAdmin();
@@ -48,66 +45,92 @@ export async function getAllAdminBootcampsService() {
 
 /**
  * Service: Create a new bootcamp.
- * @param {object} data - The course details.
- * @returns {Promise<object>} The created and sanitized bootcamp.
+ * @param {object} data - Course details.
+ * @param {string} actorId - Admin creating the course.
  */
-export async function createBootcampService(data) {
-  // 1. Validate the input blueprint
+export async function createBootcampService(data, actorId) {
   const validation = createBootcampSchema.safeParse(data);
   if (!validation.success) {
     const firstError = validation.error.errors[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  // 2. Save to database
   const newBootcamp = await bootcampRepo.create(validation.data);
 
-  // 3. Return sanitized response
+  // --- Audit Log ---
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.BOOTCAMP_CREATED,
+    entityType: ENTITY_TYPES.BOOTCAMP,
+    entityId: newBootcamp.id,
+    description: `Bootcamp "${newBootcamp.title}" created by Admin ${actorId}`,
+    metadata: { title: newBootcamp.title, slug: newBootcamp.slug, price: newBootcamp.price }
+  });
+
   return bootcampModel.toAdminBootcampResponse(newBootcamp);
 }
 
 /**
  * Service: Update an existing bootcamp.
- * @param {string} id - UUID of the course.
- * @param {object} data - Fields to update.
- * @returns {Promise<object>} The updated and sanitized bootcamp.
+ * (Note: We'll keep updates simple for now, but can add more granular auditing later)
  */
 export async function updateBootcampService(id, data) {
-  // 1. Validate the input blueprint (everything is optional in update)
   const validation = updateBootcampSchema.safeParse(data);
   if (!validation.success) {
     const firstError = validation.error.errors[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  // 2. Perform the update
   const updatedBootcamp = await bootcampRepo.update(id, validation.data);
-
   return bootcampModel.toAdminBootcampResponse(updatedBootcamp);
 }
 
 /**
  * Service: Delete a bootcamp.
- * @param {string} id - UUID of the course to remove.
+ * @param {string} id - Course ID.
+ * @param {string} actorId - Admin deleting the course.
  */
-export async function deleteBootcampService(id) {
-  // 1. Check existence before deleting
+export async function deleteBootcampService(id, actorId) {
   const bootcamp = await bootcampRepo.findById(id);
   if (!bootcamp) {
     throw new NotFoundError("Bootcamp not found.");
   }
 
-  // 2. Perform removal
-  return await bootcampRepo.remove(id);
+  const result = await bootcampRepo.remove(id);
+
+  // --- Audit Log ---
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.BOOTCAMP_DELETED,
+    entityType: ENTITY_TYPES.BOOTCAMP,
+    entityId: id,
+    description: `Bootcamp "${bootcamp.title}" deleted by Admin ${actorId}`,
+    metadata: { title: bootcamp.title, slug: bootcamp.slug }
+  });
+
+  return result;
 }
 
 /**
  * Service: Publish or Unpublish a bootcamp.
- * @param {string} id - UUID of the course.
- * @param {boolean} isPublished - The new visibility state.
- * @returns {Promise<object>} The updated bootcamp.
+ * @param {string} id - Course ID.
+ * @param {boolean} isPublished - The new state.
+ * @param {string} actorId - Admin toggling visibility.
  */
-export async function togglePublishService(id, isPublished) {
+export async function togglePublishService(id, isPublished, actorId) {
   const updatedBootcamp = await bootcampRepo.update(id, { isPublished });
+
+  // --- Audit Log ---
+  const action = isPublished ? AUDIT_ACTIONS.BOOTCAMP_PUBLISHED : AUDIT_ACTIONS.BOOTCAMP_UNPUBLISHED;
+  
+  recordActionService({
+    actorUserId: actorId,
+    action: action,
+    entityType: ENTITY_TYPES.BOOTCAMP,
+    entityId: id,
+    description: `Bootcamp "${updatedBootcamp.title}" ${isPublished ? 'published' : 'unpublished'} by Admin ${actorId}`,
+    metadata: { isPublished }
+  });
+
   return bootcampModel.toAdminBootcampResponse(updatedBootcamp);
 }

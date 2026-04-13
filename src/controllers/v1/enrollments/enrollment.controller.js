@@ -8,11 +8,11 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
 
 /**
  * Controller: Manually enroll a student.
- * POST /v1/enrollments
  */
 export async function enrollStudentController(req, res, next) {
   try {
-    const enrollment = await enrollmentService.enrollStudentService(req.body);
+    const actorId = req.user.id;
+    const enrollment = await enrollmentService.enrollStudentService(req.body, actorId);
     return ApiResponse.send(res, enrollment, "Student enrolled successfully", 201);
   } catch (error) {
     next(error);
@@ -21,11 +21,9 @@ export async function enrollStudentController(req, res, next) {
 
 /**
  * Controller: Get the current student's enrolled bootcamps.
- * GET /v1/enrollments/my
  */
 export async function getMyEnrollmentsController(req, res, next) {
   try {
-    // We use the ID from the authenticate middleware for security
     const userId = req.user.id;
     const enrollments = await enrollmentService.getMyEnrollmentsService(userId);
     return ApiResponse.send(res, enrollments, "Your enrollments fetched successfully");
@@ -36,7 +34,6 @@ export async function getMyEnrollmentsController(req, res, next) {
 
 /**
  * Controller: Get all students in a specific bootcamp (Admin).
- * GET /v1/enrollments/bootcamp/:bootcampId
  */
 export async function getBootcampStudentsController(req, res, next) {
   try {
