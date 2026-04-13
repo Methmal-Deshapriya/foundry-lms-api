@@ -10,6 +10,7 @@ import errorHandler from "./middlewares/errorHandler.js";
 // 2. Import Module Routes
 import authRoutes from "./routes/v1/auth/auth.routes.js";
 import userRoutes from "./routes/v1/users/user.routes.js";
+import bootcampRoutes from "./routes/v1/bootcamps/bootcamp.routes.js";
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(
 // 4. Register Module Routes
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
+app.use("/api/v1/bootcamps", bootcampRoutes);
 
 // 5. Test Routes (To verify our Foundation works)
 app.get("/api/health", (req, res) => {
