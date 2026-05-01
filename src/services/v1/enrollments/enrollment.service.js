@@ -3,6 +3,7 @@ import * as userRepo from "../../../repositories/v1/users/user.repository.js";
 import * as bootcampRepo from "../../../repositories/v1/bootcamps/bootcamp.repository.js";
 import * as enrollmentModel from "../../../models/v1/enrollments/enrollment.model.js";
 import { enrollUserSchema } from "../../../constants/v1/enrollments/enrollment.schema.js";
+import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 import { ValidationError, ConflictError, NotFoundError } from "../../../utils/Errors.js";
@@ -31,6 +32,10 @@ export async function enrollStudentService(data, actorId) {
   const user = await userRepo.findUserById(userId);
   if (!user) {
     throw new NotFoundError("Student not found.");
+  }
+
+  if (user.role !== ROLES.STUDENT) {
+    throw new ValidationError("Only students can be enrolled in a bootcamp.", "userId");
   }
 
   const bootcamp = await bootcampRepo.findById(bootcampId);
@@ -79,4 +84,31 @@ export async function getBootcampStudentsService(bootcampId) {
 
   const enrollments = await enrollmentRepo.findBootcampEnrollments(bootcampId);
   return enrollmentModel.toBootcampStudentListResponse(enrollments);
+}
+
+/**
+ * Service: Search students eligible for manual enrollment in a bootcamp.
+ */
+export async function getEligibleStudentsForBootcampService(
+  bootcampId,
+  query = "",
+  limit = 5
+) {
+  const bootcamp = await bootcampRepo.findById(bootcampId);
+  if (!bootcamp) {
+    throw new NotFoundError("Bootcamp not found.");
+  }
+
+  const sanitizedLimit = Math.min(Math.max(Number(limit) || 5, 1), 5);
+  const students = await userRepo.searchEligibleStudentsForBootcamp(
+    bootcampId,
+    query,
+    sanitizedLimit
+  );
+
+  return students.map((student) => ({
+    id: student.id,
+    name: student.name,
+    email: student.email,
+  }));
 }

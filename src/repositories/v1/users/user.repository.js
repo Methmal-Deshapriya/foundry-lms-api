@@ -7,14 +7,67 @@ import { handlePrismaError } from "../../../utils/Errors.js";
  */
 
 /**
- * Fetch all users from the database.
- * @returns {Promise<Array>} Array of all user objects.
+ * Fetch users from the database with optional role filtering and pagination.
+ * @param {object} filters - Supported filters for the user list.
+ * @param {number} limit - Number of records to return.
+ * @param {number} offset - Number of records to skip.
+ * @returns {Promise<object>} { total, users }
  */
-export async function findAllUsers() {
+export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
+  const where = {};
+
+  if (filters.role) {
+    where.role = filters.role;
+  }
+
+  const [total, users] = await prisma.$transaction([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      orderBy: {
+        createdAt: "desc", // Newest users first
+      },
+      take: Number(limit),
+      skip: Number(offset),
+    }),
+  ]);
+
+  return { total, users };
+}
+
+/**
+ * Search students who are not already enrolled in a given bootcamp.
+ * @param {string} bootcampId - UUID of the bootcamp.
+ * @param {string} query - Partial email search text.
+ * @param {number} limit - Max number of students to return.
+ * @returns {Promise<Array>} List of eligible student users.
+ */
+export async function searchEligibleStudentsForBootcamp(
+  bootcampId,
+  query = "",
+  limit = 5
+) {
+  const normalizedQuery = typeof query === "string" ? query.trim() : "";
+
   return await prisma.user.findMany({
-    orderBy: {
-      createdAt: "desc", // Newest users first
+    where: {
+      role: "STUDENT",
+      email: normalizedQuery
+        ? {
+            contains: normalizedQuery,
+            mode: "insensitive",
+          }
+        : undefined,
+      enrollments: {
+        none: {
+          bootcampId,
+        },
+      },
     },
+    orderBy: {
+      email: "asc",
+    },
+    take: Number(limit),
   });
 }
 

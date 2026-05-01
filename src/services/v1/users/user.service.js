@@ -11,11 +11,31 @@ import { ConflictError, NotFoundError, ForbiddenError } from "../../../utils/Err
  */
 
 /**
- * Service: Get a list of all users.
+ * Service: Get a paginated list of users with optional role filtering.
  */
-export async function getAllUsersService() {
-  const users = await userRepo.findAllUsers();
-  return userModel.toAdminUserListResponse(users);
+export async function getAllUsersService(filters = {}, limit = 10, offset = 0) {
+  const sanitizedFilters = {};
+
+  if (filters.role && Object.values(ROLES).includes(filters.role)) {
+    sanitizedFilters.role = filters.role;
+  }
+
+  const { total, users } = await userRepo.findAndCountUsers(
+    sanitizedFilters,
+    limit,
+    offset
+  );
+  const sanitizedUsers = userModel.toAdminUserListResponse(users);
+
+  return {
+    users: sanitizedUsers,
+    pagination: {
+      total,
+      limit: Number(limit),
+      offset: Number(offset),
+      hasMore: Number(offset) + sanitizedUsers.length < total,
+    },
+  };
 }
 
 /**

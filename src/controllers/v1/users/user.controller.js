@@ -11,8 +11,14 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
  */
 export async function getAllUsersController(req, res, next) {
   try {
-    const users = await userService.getAllUsersService();
-    return ApiResponse.send(res, users, "User list fetched successfully");
+    const { role, limit = 10, offset = 0 } = req.query;
+    const result = await userService.getAllUsersService(
+      { role },
+      Number(limit),
+      Number(offset)
+    );
+
+    return ApiResponse.send(res, result, "User list fetched successfully");
   } catch (error) {
     next(error);
   }

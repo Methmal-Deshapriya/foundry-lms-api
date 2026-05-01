@@ -20,7 +20,7 @@ router.get(
   "/",
   authenticate,
   requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
-  userController.getAllUsersController
+  userController.getAllUsersController,
 );
 
 /**
@@ -32,7 +32,7 @@ router.patch(
   "/:id/promote",
   authenticate,
   requireRole([ROLES.SUPER_ADMIN]),
-  userController.promoteUserController
+  userController.promoteUserController,
 );
 
 /**
@@ -44,7 +44,7 @@ router.patch(
   "/:id/demote",
   authenticate,
   requireRole([ROLES.SUPER_ADMIN]),
-  userController.demoteUserController
+  userController.demoteUserController,
 );
 
 export default router;

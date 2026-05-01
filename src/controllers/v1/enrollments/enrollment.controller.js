@@ -44,3 +44,26 @@ export async function getBootcampStudentsController(req, res, next) {
     next(error);
   }
 }
+
+/**
+ * Controller: Search students eligible for manual enrollment in a bootcamp.
+ */
+export async function getEligibleStudentsForBootcampController(req, res, next) {
+  try {
+    const { bootcampId } = req.params;
+    const { q = "", limit = 5 } = req.query;
+    const students = await enrollmentService.getEligibleStudentsForBootcampService(
+      bootcampId,
+      q,
+      Number(limit)
+    );
+
+    return ApiResponse.send(
+      res,
+      students,
+      "Eligible students fetched successfully"
+    );
+  } catch (error) {
+    next(error);
+  }
+}

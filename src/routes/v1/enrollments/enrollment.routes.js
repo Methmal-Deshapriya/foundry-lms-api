@@ -33,6 +33,17 @@ router.post(
 );
 
 /**
+ * @route   GET /v1/enrollments/bootcamp/:bootcampId/eligible-students
+ * @desc    Get students eligible for manual enrollment in a specific bootcamp
+ * @access  Private (ADMIN, SUPER_ADMIN only)
+ */
+router.get(
+  "/bootcamp/:bootcampId/eligible-students",
+  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  enrollmentController.getEligibleStudentsForBootcampController
+);
+
+/**
  * @route   GET /v1/enrollments/bootcamp/:bootcampId
  * @desc    Get all students enrolled in a specific bootcamp
  * @access  Private (ADMIN, SUPER_ADMIN only)
