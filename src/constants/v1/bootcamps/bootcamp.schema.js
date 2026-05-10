@@ -13,6 +13,8 @@ export const createBootcampSchema = z.object({
   slug: z.string().regex(SLUG_REGEX, "Slug must be URL-friendly (lowercase, numbers, and dashes only)"),
   description: z.string().optional(),
   price: z.number().min(0, "Price cannot be negative"),
+  certificateEnabled: z.boolean().optional(),
+  skills: z.array(z.string()).optional(),
 });
 
 export const updateBootcampSchema = z.object({
@@ -21,4 +23,6 @@ export const updateBootcampSchema = z.object({
   description: z.string().optional(),
   price: z.number().min(0, "Price cannot be negative").optional(),
   isPublished: z.boolean().optional(),
+  certificateEnabled: z.boolean().optional(),
+  skills: z.array(z.string()).optional(),
 });

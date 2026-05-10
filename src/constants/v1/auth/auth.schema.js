@@ -17,3 +17,16 @@ export const loginSchema = z.object({
   email: z.string().email("Invalid email format"),
   password: z.string().min(1, "Password is required"),
 });
+
+// Schema for updating user profile
+export const updateProfileSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters long").optional(),
+  phone: z
+    .string()
+    .regex(/^0\d{9}$/, "Invalid Sri Lankan phone number format (e.g., 0757451258)")
+    .optional(),
+  address: z.string().optional(),
+  district: z.string().optional(),
+  dateOfBirth: z.string().datetime("Invalid date format. Expected ISO string.").optional(),
+  alStream: z.string().optional(),
+});

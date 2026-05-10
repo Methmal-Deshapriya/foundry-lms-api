@@ -1,0 +1,24 @@
+/**
+ * Enrollment Module Constants
+ */
+
+export const ENROLLMENT_STATUS = {
+  ACTIVE: "ACTIVE",
+  COMPLETED: "COMPLETED",
+  CANCELLED: "CANCELLED",
+};
+
+export const PAYMENT_STATUS = {
+  PENDING: "PENDING",
+  PARTIAL: "PARTIAL",
+  COMPLETED: "COMPLETED",
+};
+
+export const CERTIFICATE_STATUS = {
+  ISSUED: "ISSUED",
+  REVOKED: "REVOKED",
+};
+
+export const ALL_ENROLLMENT_STATUSES = Object.values(ENROLLMENT_STATUS);
+export const ALL_PAYMENT_STATUSES = Object.values(PAYMENT_STATUS);
+export const ALL_CERTIFICATE_STATUSES = Object.values(CERTIFICATE_STATUS);
