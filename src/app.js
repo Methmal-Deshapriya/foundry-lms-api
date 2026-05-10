@@ -22,7 +22,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "http://localhost:3000", // Next.js frontend
+    origin: "http://localhost:3001", // Next.js frontend
     credentials: true,
   }),
 );
@@ -36,14 +36,16 @@ app.use("/api/v1/audit", auditRoutes);
 
 // 5. Test Routes (To verify our Foundation works)
 app.get("/api/health", (req, res) => {
-  return ApiResponse.send(res, { 
-    status: "UP", 
-    message: "Foundry LMS Server is running 🚀" 
+  return ApiResponse.send(res, {
+    status: "UP",
+    message: "Foundry LMS Server is running 🚀",
   });
 });
 
 app.get("/api/error-test", (req, res) => {
-  throw new NotFoundError("Foundry LMS Foundation is working! This error was caught by our Global Error Handler.");
+  throw new NotFoundError(
+    "Foundry LMS Foundation is working! This error was caught by our Global Error Handler.",
+  );
 });
 
 // 6. Global Error Handler (CRITICAL: Must be at the very bottom)
