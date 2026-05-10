@@ -12,6 +12,17 @@ import { ROLES } from "../../../constants/v1/users/users.constants.js";
 const router = express.Router();
 
 /**
+ * @route   PATCH /v1/users/profile
+ * @desc    Update current user profile
+ * @access  Private
+ */
+router.patch(
+  "/profile",
+  authenticate,
+  userController.updateProfileController,
+);
+
+/**
  * @route   GET /v1/users
  * @desc    Get all registered users
  * @access  Private (ADMIN or SUPER_ADMIN)

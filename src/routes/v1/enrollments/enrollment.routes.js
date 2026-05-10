@@ -33,6 +33,17 @@ router.post(
 );
 
 /**
+ * @route   PATCH /v1/enrollments/:id
+ * @desc    Update enrollment status or payment (Admin)
+ * @access  Private (ADMIN, SUPER_ADMIN only)
+ */
+router.patch(
+  "/:id",
+  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  enrollmentController.updateEnrollmentController
+);
+
+/**
  * @route   GET /v1/enrollments/bootcamp/:bootcampId/eligible-students
  * @desc    Get students eligible for manual enrollment in a specific bootcamp
  * @access  Private (ADMIN, SUPER_ADMIN only)

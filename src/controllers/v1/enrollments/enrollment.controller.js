@@ -20,6 +20,21 @@ export async function enrollStudentController(req, res, next) {
 }
 
 /**
+ * Controller: Update enrollment status or payment (Admin).
+ * PATCH /v1/enrollments/:id
+ */
+export async function updateEnrollmentController(req, res, next) {
+  try {
+    const { id } = req.params;
+    const actorId = req.user.id;
+    const enrollment = await enrollmentService.updateEnrollmentService(id, req.body, actorId);
+    return ApiResponse.send(res, enrollment, "Enrollment updated successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Controller: Get the current student's enrolled bootcamps.
  */
 export async function getMyEnrollmentsController(req, res, next) {
