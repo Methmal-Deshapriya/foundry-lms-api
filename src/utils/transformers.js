@@ -38,3 +38,19 @@ export function transformProject(project) {
   if (!project) return null;
   return project;
 }
+
+/**
+ * Transform session for response.
+ */
+export function transformSession(session) {
+  if (!session) return null;
+  return session;
+}
+
+/**
+ * Transform a list of sessions.
+ */
+export function transformSessionList(sessions) {
+  if (!sessions) return [];
+  return sessions.map(transformSession);
+}

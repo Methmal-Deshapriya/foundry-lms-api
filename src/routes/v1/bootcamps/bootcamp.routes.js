@@ -3,6 +3,7 @@ import * as bootcampController from "../../../controllers/v1/bootcamps/bootcamp.
 import { authenticate } from "../../../middlewares/authenticate.js";
 import { requireRole } from "../../../middlewares/requireRole.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import sessionRoutes from "./session.routes.js";
 
 /**
  * Bootcamp Routes - The "Security Map"
@@ -10,6 +11,11 @@ import { ROLES } from "../../../constants/v1/users/users.constants.js";
  */
 
 const router = express.Router();
+
+/* --- Nested Module Routes --- */
+
+// Mount session routes under /v1/bootcamps/:bootcampId/sessions
+router.use("/:bootcampId/sessions", sessionRoutes);
 
 /* --- Public Routes (Marketplace) --- */
 
