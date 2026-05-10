@@ -82,19 +82,13 @@ export async function remove(id) {
 }
 
 /**
- * Reorder multiple sessions in a transaction.
+ * Count published sessions for a bootcamp.
  */
-export async function reorder(sessions) {
-  try {
-    return await prisma.$transaction(
-      sessions.map((s) =>
-        prisma.session.update({
-          where: { id: s.id },
-          data: { orderIndex: s.orderIndex },
-        })
-      )
-    );
-  } catch (error) {
-    throw handlePrismaError(error);
-  }
+export async function countPublishedByBootcamp(bootcampId) {
+  return await prisma.session.count({
+    where: {
+      bootcampId,
+      isPublished: true,
+    },
+  });
 }
