@@ -36,7 +36,18 @@ export function transformCertificate(certificate) {
  */
 export function transformProject(project) {
   if (!project) return null;
-  return project;
+  return {
+    ...project,
+    user: project.user ? transformUser(project.user) : undefined,
+  };
+}
+
+/**
+ * Transform a list of projects.
+ */
+export function transformProjectList(projects) {
+  if (!projects) return [];
+  return projects.map(transformProject);
 }
 
 /**
