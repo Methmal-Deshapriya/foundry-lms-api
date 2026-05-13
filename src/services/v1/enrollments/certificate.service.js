@@ -40,6 +40,8 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
 
   // 4. Action: Prepare snapshot and create
   const certificateCode = generateCertificateCode();
+  const publicAppUrl = process.env.PUBLIC_APP_URL || "http://localhost:3000";
+  const snapshotUrl = `${publicAppUrl}/certificates/verify/${certificateCode}`;
   
   const certificate = await certificateRepo.create({
     enrollmentId,
@@ -54,6 +56,7 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
       studentEmail: enrollment.user.email,
       bootcampSlug: enrollment.bootcamp.slug,
     },
+    snapshotUrl,
   });
 
   // 5. Audit

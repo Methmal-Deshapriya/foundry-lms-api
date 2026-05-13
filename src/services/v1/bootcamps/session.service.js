@@ -1,5 +1,6 @@
 import * as sessionRepo from "../../../repositories/v1/bootcamps/session.repository.js";
 import * as bootcampRepo from "../../../repositories/v1/bootcamps/bootcamp.repository.js";
+import * as completionRepo from "../../../repositories/v1/bootcamps/sessionCompletion.repository.js";
 import { createSessionSchema, updateSessionSchema, reorderSessionsSchema } from "../../../constants/v1/bootcamps/session.schema.js";
 import { assertEnrollmentAccess } from "../../../utils/accessHelpers.js";
 import { ValidationError, NotFoundError } from "../../../utils/Errors.js";
@@ -149,11 +150,21 @@ export async function getSessionsAdminService(bootcampId) {
  */
 export async function getSessionsStudentService(bootcampId, userId) {
   // 1. Assert Access
-  await assertEnrollmentAccess(userId, bootcampId);
+  const enrollment = await assertEnrollmentAccess(userId, bootcampId);
 
   // 2. Fetch
-  const sessions = await sessionRepo.findByBootcampIdPublic(bootcampId);
-  return transformSessionList(sessions);
+  const [sessions, enrollmentCompletions] = await Promise.all([
+    sessionRepo.findByBootcampIdPublic(bootcampId),
+    completionRepo.findByEnrollmentId(enrollment.id),
+  ]);
+  const completedSessionIds = new Set(enrollmentCompletions.map((completion) => completion.sessionId));
+
+  return transformSessionList(
+    sessions.map((session) => ({
+      ...session,
+      isCompleted: completedSessionIds.has(session.id),
+    }))
+  );
 }
 
 /**

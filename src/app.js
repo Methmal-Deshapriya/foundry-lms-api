@@ -25,7 +25,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "http://localhost:3000", // Next.js frontend
+    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
     credentials: true,
   }),
 );

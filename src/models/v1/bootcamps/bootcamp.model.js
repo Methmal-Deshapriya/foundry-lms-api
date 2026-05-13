@@ -17,6 +17,8 @@ export function toPublicBootcampResponse(bootcamp) {
     slug: bootcamp.slug,
     description: bootcamp.description,
     price: bootcamp.price,
+    certificateEnabled: bootcamp.certificateEnabled,
+    skills: bootcamp.skills,
     createdAt: bootcamp.createdAt,
   };
 }
@@ -36,6 +38,8 @@ export function toAdminBootcampResponse(bootcamp) {
     description: bootcamp.description,
     price: bootcamp.price,
     isPublished: bootcamp.isPublished,
+    certificateEnabled: bootcamp.certificateEnabled,
+    skills: bootcamp.skills,
     createdAt: bootcamp.createdAt,
     updatedAt: bootcamp.updatedAt,
   };

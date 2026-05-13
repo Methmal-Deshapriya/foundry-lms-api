@@ -4,8 +4,8 @@ import { wrapper } from "axios-cookiejar-support";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "methmal123@gmail.com";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "password123";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 const jar = new CookieJar();
 
@@ -167,6 +167,9 @@ async function seedOneSet(index) {
 
 // the actual seeder
 async function seed() {
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+    throw new Error("ADMIN_EMAIL and ADMIN_PASSWORD must be set for seed-api.");
+  }
   console.log("🌱 Starting multiple API seed...");
 
   await safeRequest("Health check", () => api.get("/api/health"));

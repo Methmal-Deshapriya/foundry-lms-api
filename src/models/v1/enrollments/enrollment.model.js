@@ -18,8 +18,16 @@ export function toMyEnrollmentResponse(enrollment) {
 
   return {
     id: enrollment.id,
+    userId: enrollment.userId,
+    bootcampId: enrollment.bootcampId,
+    status: enrollment.status,
+    studentCode: enrollment.studentCode,
+    paymentStatus: enrollment.paymentStatus,
+    paymentCompletedAt: enrollment.paymentCompletedAt,
+    completedAt: enrollment.completedAt,
+    createdAt: enrollment.createdAt,
+    updatedAt: enrollment.updatedAt,
     enrolledAt: enrollment.createdAt,
-    // Flatten or include the bootcamp details using our existing bootcamp model
     bootcamp: enrollment.bootcamp ? toPublicBootcampResponse(enrollment.bootcamp) : null,
   };
 }
@@ -36,9 +44,17 @@ export function toBootcampStudentResponse(enrollment) {
 
   return {
     id: enrollment.id,
+    userId: enrollment.userId,
+    bootcampId: enrollment.bootcampId,
+    status: enrollment.status,
+    studentCode: enrollment.studentCode,
+    paymentStatus: enrollment.paymentStatus,
+    paymentCompletedAt: enrollment.paymentCompletedAt,
+    completedAt: enrollment.completedAt,
+    createdAt: enrollment.createdAt,
+    updatedAt: enrollment.updatedAt,
     enrolledAt: enrollment.createdAt,
-    // Include user details using our existing user model
-    student: enrollment.user ? toAdminUserResponse(enrollment.user) : null,
+    user: enrollment.user ? toAdminUserResponse(enrollment.user) : null,
   };
 }
 

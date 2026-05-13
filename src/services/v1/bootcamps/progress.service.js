@@ -18,6 +18,9 @@ export async function markSessionCompleteService(sessionId, userId) {
   if (!session) {
     throw new NotFoundError("Session not found.");
   }
+  if (!session.isPublished) {
+    throw new ForbiddenError("You can only complete published sessions.");
+  }
 
   // 2. Find enrollment (Student must be enrolled in the bootcamp the session belongs to)
   const enrollment = await enrollmentRepo.findExisting(userId, session.bootcampId);
@@ -42,6 +45,9 @@ export async function unmarkSessionCompleteService(sessionId, userId) {
   const session = await sessionRepo.findById(sessionId);
   if (!session) {
     throw new NotFoundError("Session not found.");
+  }
+  if (!session.isPublished) {
+    throw new ForbiddenError("You can only unmark published sessions.");
   }
 
   const enrollment = await enrollmentRepo.findExisting(userId, session.bootcampId);
