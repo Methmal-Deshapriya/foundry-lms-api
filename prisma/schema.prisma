@@ -16,58 +16,194 @@ enum Role {
   SUPER_ADMIN
 }
 
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  COMPLETED
+}
+
+enum CertificateStatus {
+  ISSUED
+  REVOKED
+}
+
+enum ProjectStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // User Model: Identity and System Authority
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  phone     Int? // Optional phone number
-  password  String // Note: We will handle hiding this via the Global Omit API
-  role      Role     @default(STUDENT)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String    @id @default(uuid())
+  name        String
+  email       String    @unique
+  phone       String?   @map("phone") // String to preserve leading zeros
+  address     String?
+  district    String?
+  dateOfBirth DateTime? @map("date_of_birth")
+  alStream    String?   @map("al_stream")
+  password    String
+  role        Role      @default(STUDENT)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
 
   // Relationships
-  enrollments    Enrollment[]
-  actorAuditLogs AuditLog[]   @relation("ActorRelation")
+  enrollments     Enrollment[]
+  studentProjects StudentProject[]
+  actorAuditLogs  AuditLog[]       @relation("ActorRelation")
 
   @@map("users")
 }
 
 // Bootcamp Model: The learning products
 model Bootcamp {
-  id          String   @id @default(uuid())
-  title       String
-  slug        String   @unique
-  description String?
-  price       Float
-  isPublished Boolean  @default(false) @map("is_published")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                 String           @id @default(uuid())
+  title              String
+  slug               String           @unique
+  description        String?
+  price              Float
+  isPublished        Boolean          @default(false) @map("is_published")
+  certificateEnabled Boolean          @default(false) @map("certificate_enabled")
+  skills             Json             @default("[]") // Array of strings
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
 
   // Relationships
-  enrollments Enrollment[]
+  enrollments     Enrollment[]
+  sessions        Session[]
+  studentProjects StudentProject[]
 
   @@map("bootcamps")
 }
 
 // Enrollment Model: The "Bridge" linking Students to Bootcamps
 model Enrollment {
-  id         String   @id @default(uuid())
-  userId     String   @map("user_id")
-  bootcampId String   @map("bootcamp_id")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id                 String           @id @default(uuid())
+  userId             String           @map("user_id")
+  bootcampId         String           @map("bootcamp_id")
+  status             EnrollmentStatus @default(ACTIVE)
+  studentCode        String?          @unique @map("student_code")
+  paymentStatus      PaymentStatus    @default(PENDING) @map("payment_status")
+  paymentCompletedAt DateTime?        @map("payment_completed_at")
+  completedAt        DateTime?        @map("completed_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
 
   // Relationships
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bootcamp Bootcamp @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bootcamp           Bootcamp            @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  sessionCompletions SessionCompletion[]
+  certificate        Certificate?
+  studentProjects    StudentProject[]
 
-  // Constraint: A student can only be enrolled in a specific bootcamp once
   @@unique([userId, bootcampId])
   @@map("enrollments")
 }
 
-// AuditLog Model: Security and accountability tracking
+model Session {
+  id              String   @id @default(uuid())
+  bootcampId      String   @map("bootcamp_id")
+  title           String
+  description     String?
+  orderIndex      Int      @map("order_index")
+  recordingUrl    String?  @map("recording_url")
+  materialUrl     String?  @map("material_url")
+  quizUrl         String?  @map("quiz_url")
+  feedbackUrl     String?  @map("feedback_url")
+  durationMinutes Int?     @map("duration_minutes")
+  isPublished     Boolean  @default(false) @map("is_published")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relationships
+  bootcamp    Bootcamp            @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  completions SessionCompletion[]
+
+  @@unique([bootcampId, orderIndex])
+  @@index([bootcampId, isPublished, orderIndex])
+  @@map("sessions")
+}
+
+model SessionCompletion {
+  id           String   @id @default(uuid())
+  sessionId    String   @map("session_id")
+  enrollmentId String   @map("enrollment_id")
+  completedAt  DateTime @default(now()) @map("completed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  session    Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, enrollmentId])
+  @@index([enrollmentId])
+  @@index([sessionId])
+  @@map("session_completions")
+}
+
+model Certificate {
+  id               String            @id @default(uuid())
+  enrollmentId     String            @unique @map("enrollment_id")
+  certificateCode  String            @unique @map("certificate_code")
+  studentName      String            @map("student_name")
+  bootcampName     String            @map("bootcamp_name")
+  description      String?
+  issuedDate       DateTime          @map("issued_date")
+  status           CertificateStatus @default(ISSUED)
+  revokedAt        DateTime?         @map("revoked_at")
+  revokedBy        String?           @map("revoked_by")
+  revocationReason String?           @map("revocation_reason")
+  certificateData  Json              @map("certificate_data")
+  snapshotUrl      String?           @map("snapshot_url")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  // Relationships
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@map("certificates")
+}
+
+model StudentProject {
+  id            String        @id @default(uuid())
+  userId        String        @map("user_id")
+  bootcampId    String        @map("bootcamp_id")
+  enrollmentId  String        @map("enrollment_id")
+  title         String
+  description   String?
+  thumbnailUrl  String?       @map("thumbnail_url")
+  projectUrl    String?       @map("project_url")
+  githubUrl     String?       @map("github_url")
+  demoUrl       String?       @map("demo_url")
+  technologies  Json          @default("[]")
+  status        ProjectStatus @default(PENDING)
+  reviewedBy    String?       @map("reviewed_by")
+  reviewedAt    DateTime?     @map("reviewed_at")
+  adminFeedback String?       @map("admin_feedback")
+  isPublic      Boolean       @default(false) @map("is_public")
+  displayOrder  Int           @default(0) @map("display_order")
+  likeCount     Int           @default(0) @map("like_count")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  // Relationships
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bootcamp   Bootcamp   @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([bootcampId, status, isPublic])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([likeCount(sort: Desc), createdAt(sort: Desc)])
+  @@map("student_projects")
+}
+
 model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?  @map("actor_user_id")

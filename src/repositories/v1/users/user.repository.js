@@ -93,13 +93,22 @@ export async function findUserById(id) {
  * @returns {Promise<object>} The updated user object.
  */
 export async function updateUserRole(id, role) {
+  return await updateUser(id, { role });
+}
+
+/**
+ * Update a user record.
+ * @param {string} id - The UUID of the user.
+ * @param {object} data - The fields to update.
+ * @returns {Promise<object>} The updated user.
+ */
+export async function updateUser(id, data) {
   try {
     return await prisma.user.update({
       where: { id },
-      data: { role },
+      data,
     });
   } catch (error) {
-    // Translates Prisma errors (like user not found) into CustomErrors
     throw handlePrismaError(error);
   }
 }

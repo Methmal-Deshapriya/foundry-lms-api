@@ -10,15 +10,49 @@ import { handlePrismaError } from "../../../utils/Errors.js";
  * Create a new enrollment record.
  * @param {string} userId - UUID of the student.
  * @param {string} bootcampId - UUID of the bootcamp.
+ * @param {object} extraData - Optional initial state (status, paymentStatus, etc).
  * @returns {Promise<object>} The new enrollment record.
  */
-export async function create(userId, bootcampId) {
+export async function create(userId, bootcampId, extraData = {}) {
   try {
     return await prisma.enrollment.create({
       data: {
         userId,
         bootcampId,
+        ...extraData,
       },
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+/**
+ * Find a specific enrollment by its unique ID.
+ * @param {string} id - The UUID of the enrollment.
+ * @returns {Promise<object|null>} The enrollment object or null.
+ */
+export async function findById(id) {
+  return await prisma.enrollment.findUnique({
+    where: { id },
+    include: {
+      user: true,
+      bootcamp: true,
+    },
+  });
+}
+
+/**
+ * Update an existing enrollment.
+ * @param {string} id - The UUID of the enrollment.
+ * @param {object} data - The fields to update.
+ * @returns {Promise<object>} The updated enrollment.
+ */
+export async function update(id, data) {
+  try {
+    return await prisma.enrollment.update({
+      where: { id },
+      data,
     });
   } catch (error) {
     throw handlePrismaError(error);

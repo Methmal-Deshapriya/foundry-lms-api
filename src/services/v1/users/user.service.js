@@ -1,14 +1,41 @@
 import * as userRepo from "../../../repositories/v1/users/user.repository.js";
 import * as userModel from "../../../models/v1/users/user.model.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { updateProfileSchema } from "../../../constants/v1/auth/auth.schema.js";
+import { transformUser } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
-import { ConflictError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
+import { ConflictError, NotFoundError, ForbiddenError, ValidationError } from "../../../utils/Errors.js";
 
 /**
  * User Service - The "Brain"
  * Orchestrates administrative logic for user management.
  */
+
+/**
+ * Service: Update user profile.
+ * @param {string} userId - ID of the user being updated.
+ * @param {object} data - Profile fields.
+ */
+export async function updateUserProfileService(userId, data) {
+  // 1. Validation
+  const validation = updateProfileSchema.safeParse(data);
+  if (!validation.success) {
+    const firstError = validation.error.errors[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  // 2. Existence Check
+  const user = await userRepo.findUserById(userId);
+  if (!user) {
+    throw new NotFoundError("User not found.");
+  }
+
+  // 3. Update
+  const updatedUser = await userRepo.updateUser(userId, validation.data);
+
+  return transformUser(updatedUser);
+}
 
 /**
  * Service: Get a paginated list of users with optional role filtering.

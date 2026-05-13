@@ -11,7 +11,10 @@ import errorHandler from "./middlewares/errorHandler.js";
 import authRoutes from "./routes/v1/auth/auth.routes.js";
 import userRoutes from "./routes/v1/users/user.routes.js";
 import bootcampRoutes from "./routes/v1/bootcamps/bootcamp.routes.js";
+import sessionStandaloneRoutes from "./routes/v1/bootcamps/session_standalone.routes.js";
+import certificateRoutes from "./routes/v1/enrollments/certificate.routes.js";
 import enrollmentRoutes from "./routes/v1/enrollments/enrollment.routes.js";
+import projectRoutes from "./routes/v1/projects/project.routes.js";
 import auditRoutes from "./routes/v1/audit/audit.routes.js";
 
 const app = express();
@@ -22,7 +25,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "http://localhost:3000", // Next.js frontend
+    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
     credentials: true,
   }),
 );
@@ -31,19 +34,24 @@ app.use(
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/bootcamps", bootcampRoutes);
+app.use("/api/v1/sessions", sessionStandaloneRoutes);
+app.use("/api/v1/certificates", certificateRoutes);
 app.use("/api/v1/enrollments", enrollmentRoutes);
+app.use("/api/v1/projects", projectRoutes);
 app.use("/api/v1/audit", auditRoutes);
 
 // 5. Test Routes (To verify our Foundation works)
 app.get("/api/health", (req, res) => {
-  return ApiResponse.send(res, { 
-    status: "UP", 
-    message: "Foundry LMS Server is running 🚀" 
+  return ApiResponse.send(res, {
+    status: "UP",
+    message: "Foundry LMS Server is running 🚀",
   });
 });
 
 app.get("/api/error-test", (req, res) => {
-  throw new NotFoundError("Foundry LMS Foundation is working! This error was caught by our Global Error Handler.");
+  throw new NotFoundError(
+    "Foundry LMS Foundation is working! This error was caught by our Global Error Handler.",
+  );
 });
 
 // 6. Global Error Handler (CRITICAL: Must be at the very bottom)
