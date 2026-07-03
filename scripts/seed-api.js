@@ -110,7 +110,6 @@ async function seedOneSet(index) {
     api.post("/api/v1/enrollments", {
       userId: studentId,
       bootcampId,
-      studentCode: `FND-STU-2026-${String(index).padStart(3, "0")}`,
       paymentStatus: "COMPLETED",
     }),
   );
@@ -120,7 +119,6 @@ async function seedOneSet(index) {
   await safeRequest(`Complete enrollment ${index}`, () =>
     api.patch(`/api/v1/enrollments/${enrollmentId}`, {
       status: "COMPLETED",
-      studentCode: `FND-STU-2026-${String(index).padStart(3, "0")}`,
       paymentStatus: "COMPLETED",
       paymentCompletedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),

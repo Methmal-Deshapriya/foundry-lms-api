@@ -7,6 +7,7 @@ import { withAccelerate } from "@prisma/extension-accelerate";
  * Centralizes database connectivity for the whole app.
  */
 const accelerateUrl = process.env.DATABASE_URL;
+// const accelerateUrl = process.env.DIRECT_DATABASE_URL;
 
 if (!accelerateUrl) {
   throw new Error("DATABASE_URL is missing in environment variables.");

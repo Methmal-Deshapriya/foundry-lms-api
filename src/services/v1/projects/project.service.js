@@ -18,8 +18,11 @@ export async function submitProjectService(userId, data) {
   // 1. Validation
   const validation = createProjectSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   const { enrollmentId, bootcampId } = validation.data;
@@ -60,8 +63,11 @@ export async function updateProjectService(projectId, userId, data) {
   // 2. Validation
   const validation = updateProjectSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   // 3. Action
@@ -77,8 +83,11 @@ export async function reviewProjectService(projectId, data, actorId) {
   // 1. Validation
   const validation = reviewProjectSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   // 2. Existence Check
