@@ -16,15 +16,18 @@ import { transformEnrollment } from "../../../utils/transformers.js";
 
 /**
  * Service: Manually enroll a student into a bootcamp.
- * @param {object} data - { userId, bootcampId, studentCode, paymentStatus }.
+ * @param {object} data - { userId, bootcampId, paymentStatus }.
  * @param {string} actorId - Admin performing the enrollment.
  */
 export async function enrollStudentService(data, actorId) {
   // 1. Validation
   const validation = enrollUserSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   const { userId, bootcampId, ...extraData } = validation.data;
@@ -73,8 +76,11 @@ export async function updateEnrollmentService(enrollmentId, data, actorId) {
   // 1. Validation
   const validation = updateEnrollmentSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   // 2. Existence Check

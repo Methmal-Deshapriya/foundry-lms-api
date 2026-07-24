@@ -29,8 +29,11 @@ export async function registerService(userData) {
   const validation = registerSchema.safeParse(userData);
 
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   const { name, email, password } = validation.data;
@@ -75,8 +78,11 @@ export async function loginService(credentials) {
   const validation = loginSchema.safeParse(credentials);
 
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   const { email, password } = validation.data;

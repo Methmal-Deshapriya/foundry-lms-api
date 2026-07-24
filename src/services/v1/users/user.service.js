@@ -21,8 +21,11 @@ export async function updateUserProfileService(userId, data) {
   // 1. Validation
   const validation = updateProfileSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
-    throw new ValidationError(firstError.message, firstError.path[0]);
+    const firstError = validation.error.errors?.[0];
+    throw new ValidationError(
+      firstError?.message || "Validation failed",
+      firstError?.path?.[0] || "unknown"
+    );
   }
 
   // 2. Existence Check

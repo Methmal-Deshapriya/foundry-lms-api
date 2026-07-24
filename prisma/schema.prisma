@@ -89,7 +89,6 @@ model Enrollment {
   userId             String           @map("user_id")
   bootcampId         String           @map("bootcamp_id")
   status             EnrollmentStatus @default(ACTIVE)
-  studentCode        String?          @unique @map("student_code")
   paymentStatus      PaymentStatus    @default(PENDING) @map("payment_status")
   paymentCompletedAt DateTime?        @map("payment_completed_at")
   completedAt        DateTime?        @map("completed_at")
