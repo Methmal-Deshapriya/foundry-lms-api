@@ -4,9 +4,13 @@ import * as authModel from "../../../models/v1/auth/auth.model.js";
 import {
   registerSchema,
   loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 } from "../../../constants/v1/auth/auth.schema.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import { generateToken } from "../../../utils/jwt.js";
+import { generateResetToken, hashResetToken } from "../../../utils/resetToken.js";
+import { sendPasswordResetEmail } from "../../../utils/email.js";
 import {
   ConflictError,
   ValidationError,
@@ -29,7 +33,7 @@ export async function registerService(userData) {
   const validation = registerSchema.safeParse(userData);
 
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -75,7 +79,7 @@ export async function loginService(credentials) {
   const validation = loginSchema.safeParse(credentials);
 
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -102,6 +106,75 @@ export async function loginService(credentials) {
   const token = generateToken({ id: safeUser.id, role: safeUser.role });
 
   return { user: safeUser, token };
+}
+
+/**
+ * Service: Request a password reset email.
+ * Always resolves successfully, whether or not the email is registered,
+ * so callers can't use this endpoint to discover which emails exist.
+ *
+ * @param {object} payload - { email }
+ */
+export async function forgotPasswordService(payload) {
+  // 1. Validation: Use the centralized Zod schema
+  const validation = forgotPasswordSchema.safeParse(payload);
+
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  const { email } = validation.data;
+
+  // 2. Look up the user, but don't reveal whether they exist
+  const user = await authRepo.findUserByEmail(email);
+
+  if (user) {
+    // 3. Generate token, persist only its hash, email the raw token
+    const { rawToken, tokenHash, expiresAt } = generateResetToken();
+
+    await authRepo.createPasswordResetToken({
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+
+    const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
+    await sendPasswordResetEmail(user.email, resetUrl);
+  }
+
+  // 4. Always the same generic outcome, whether or not a user was found
+}
+
+/**
+ * Service: Reset a user's password using a valid reset token.
+ * @param {object} payload - { token, newPassword }
+ */
+export async function resetPasswordService(payload) {
+  // 1. Validation: Use the centralized Zod schema
+  const validation = resetPasswordSchema.safeParse(payload);
+
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  const { token, newPassword } = validation.data;
+
+  // 2. Look up the token by its hash — never by the raw value
+  const tokenHash = hashResetToken(token);
+  const resetToken = await authRepo.findValidResetToken(tokenHash);
+
+  if (!resetToken) {
+    throw new ValidationError("This reset link is invalid or has expired.", "token");
+  }
+
+  // 3. Hash the new password and update the user
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await authRepo.updateUserPassword(resetToken.userId, hashedPassword);
+
+  // 4. Burn the token so it can't be replayed
+  await authRepo.markResetTokenUsed(resetToken.id);
 }
 
 /**

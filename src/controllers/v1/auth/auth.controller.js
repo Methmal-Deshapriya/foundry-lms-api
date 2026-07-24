@@ -65,6 +65,36 @@ export async function logoutController(req, res, next) {
 }
 
 /**
+ * Controller: Request a password reset email.
+ * POST /v1/auth/forgot-password
+ */
+export async function forgotPasswordController(req, res, next) {
+  try {
+    await authService.forgotPasswordService(req.body);
+
+    const message = "If that email is registered, a reset link has been sent.";
+    return ApiResponse.send(res, { message }, message);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Controller: Reset a password using a valid reset token.
+ * POST /v1/auth/reset-password
+ */
+export async function resetPasswordController(req, res, next) {
+  try {
+    await authService.resetPasswordService(req.body);
+
+    const message = "Password reset successful.";
+    return ApiResponse.send(res, { message }, message);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Controller: Get the current authenticated user's profile.
  * GET /v1/auth/me
  */
