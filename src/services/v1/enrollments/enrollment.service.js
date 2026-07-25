@@ -23,7 +23,7 @@ export async function enrollStudentService(data, actorId) {
   // 1. Validation
   const validation = enrollUserSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -73,7 +73,7 @@ export async function updateEnrollmentService(enrollmentId, data, actorId) {
   // 1. Validation
   const validation = updateEnrollmentSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 

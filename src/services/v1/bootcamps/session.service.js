@@ -20,7 +20,7 @@ export async function createSessionService(bootcampId, data, actorId) {
   // 1. Validation
   const validation = createSessionSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors?.[0];
+    const firstError = validation.error.issues?.[0];
     throw new ValidationError(
       firstError?.message || "Validation failed",
       firstError?.path?.[0] || "unknown"
@@ -56,7 +56,7 @@ export async function updateSessionService(id, data, actorId) {
   // 1. Validation
   const validation = updateSessionSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -120,7 +120,7 @@ export async function reorderSessionsService(bootcampId, data, actorId) {
   // 1. Validation
   const validation = reorderSessionsSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
