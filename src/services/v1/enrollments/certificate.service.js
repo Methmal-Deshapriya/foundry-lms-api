@@ -46,7 +46,7 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   const certificate = await certificateRepo.create({
     enrollmentId,
     certificateCode,
-    studentName: enrollment.user.name,
+    studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
     bootcampName: enrollment.bootcamp.title,
     description: validation.data.description,
     issuedDate: validation.data.issuedDate ? new Date(validation.data.issuedDate) : new Date(),

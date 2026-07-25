@@ -160,7 +160,8 @@ export async function getEligibleStudentsForBootcampService(
 
   return students.map((student) => ({
     id: student.id,
-    name: student.name,
+    firstName: student.firstName,
+    lastName: student.lastName,
     email: student.email,
   }));
 }

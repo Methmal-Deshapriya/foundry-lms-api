@@ -41,14 +41,15 @@ enum ProjectStatus {
 
 // User Model: Identity and System Authority
 model User {
-  id          String    @id @default(uuid())
-  name        String
-  email       String    @unique
-  phone       String?   @map("phone") // String to preserve leading zeros
-  address     String?
-  district    String?
-  dateOfBirth DateTime? @map("date_of_birth")
-  alStream    String?   @map("al_stream")
+  id            String    @id @default(uuid())
+  firstName     String    @default("") @map("first_name")
+  lastName      String    @default("") @map("last_name")
+  email         String    @unique
+  phone         String?   @map("phone") // String to preserve leading zeros
+  address       String?
+  district      String?
+  dateOfBirth   DateTime? @map("date_of_birth")
+  alStream      String?   @map("al_stream")
   password      String
   role          Role      @default(STUDENT)
   emailVerified Boolean   @default(false) @map("email_verified")

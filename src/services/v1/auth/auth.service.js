@@ -33,7 +33,7 @@ const MAX_OTP_ATTEMPTS = 5;
  * Service: Register a new user into the platform.
  * Does NOT log the user in — the account is created with emailVerified:false
  * and an OTP is emailed; login is blocked until verifyOtpService succeeds.
- * @param {object} userData - The user's registration details (name, email, password).
+ * @param {object} userData - The user's registration details (see registerSchema).
  * @returns {Promise<object>} The safe (unverified) user object.
  */
 export async function registerService(userData) {
@@ -45,7 +45,17 @@ export async function registerService(userData) {
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  const { name, email, password } = validation.data;
+  const {
+    firstName,
+    lastName,
+    email,
+    password,
+    phone,
+    address,
+    district,
+    dateOfBirth,
+    alStream,
+  } = validation.data;
 
   // 2. Duplicate Check
   const existingUser = await authRepo.findUserByEmail(email);
@@ -58,9 +68,15 @@ export async function registerService(userData) {
 
   // 4. Save to Database (unverified)
   const newUser = await authRepo.createUser({
-    name,
+    firstName,
+    lastName,
     email,
     password: hashedPassword,
+    phone,
+    address,
+    district,
+    dateOfBirth: new Date(dateOfBirth),
+    alStream,
     role: ROLES.STUDENT,
     emailVerified: false,
   });
