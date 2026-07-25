@@ -72,7 +72,7 @@ export async function forgotPasswordController(req, res, next) {
   try {
     await authService.forgotPasswordService(req.body);
 
-    const message = "If that email is registered, a reset link has been sent.";
+    const message = "A password reset link has been sent to your email.";
     return ApiResponse.send(res, { message }, message);
   } catch (error) {
     next(error);

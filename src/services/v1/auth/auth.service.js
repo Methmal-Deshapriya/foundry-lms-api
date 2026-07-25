@@ -110,8 +110,8 @@ export async function loginService(credentials) {
 
 /**
  * Service: Request a password reset email.
- * Always resolves successfully, whether or not the email is registered,
- * so callers can't use this endpoint to discover which emails exist.
+ * Reveals whether the email is registered (throws NotFoundError if not) —
+ * a deliberate product choice favoring UX over enumeration-hardening.
  *
  * @param {object} payload - { email }
  */
@@ -126,24 +126,24 @@ export async function forgotPasswordService(payload) {
 
   const { email } = validation.data;
 
-  // 2. Look up the user, but don't reveal whether they exist
+  // 2. Look up the user
   const user = await authRepo.findUserByEmail(email);
 
-  if (user) {
-    // 3. Generate token, persist only its hash, email the raw token
-    const { rawToken, tokenHash, expiresAt } = generateResetToken();
-
-    await authRepo.createPasswordResetToken({
-      userId: user.id,
-      tokenHash,
-      expiresAt,
-    });
-
-    const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
-    await sendPasswordResetEmail(user.email, resetUrl);
+  if (!user) {
+    throw new NotFoundError("This email isn't registered. Please try another one, or sign up.");
   }
 
-  // 4. Always the same generic outcome, whether or not a user was found
+  // 3. Generate token, persist only its hash, email the raw token
+  const { rawToken, tokenHash, expiresAt } = generateResetToken();
+
+  await authRepo.createPasswordResetToken({
+    userId: user.id,
+    tokenHash,
+    expiresAt,
+  });
+
+  const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
+  await sendPasswordResetEmail(user.email, resetUrl);
 }
 
 /**
