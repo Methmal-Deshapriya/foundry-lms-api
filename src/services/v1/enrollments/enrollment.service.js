@@ -16,7 +16,7 @@ import { transformEnrollment } from "../../../utils/transformers.js";
 
 /**
  * Service: Manually enroll a student into a bootcamp.
- * @param {object} data - { userId, bootcampId, studentCode, paymentStatus }.
+ * @param {object} data - { userId, bootcampId, paymentStatus }.
  * @param {string} actorId - Admin performing the enrollment.
  */
 export async function enrollStudentService(data, actorId) {
