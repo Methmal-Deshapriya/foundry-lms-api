@@ -24,7 +24,7 @@ export function toAuditLogResponse(log) {
     metadata: log.metadata,
     createdAt: log.createdAt,
     // Include actor details using our existing user model
-    actor: log.actor ? toAdminUserResponse(log.actor) : { name: "System" },
+    actor: log.actor ? toAdminUserResponse(log.actor) : { firstName: "System", lastName: "" },
   };
 }
 

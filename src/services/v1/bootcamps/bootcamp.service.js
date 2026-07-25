@@ -51,11 +51,8 @@ export async function getAllAdminBootcampsService() {
 export async function createBootcampService(data, actorId) {
   const validation = createBootcampSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors?.[0];
-    throw new ValidationError(
-      firstError?.message || "Validation failed",
-      firstError?.path?.[0] || "unknown"
-    );
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
   const newBootcamp = await bootcampRepo.create(validation.data);
@@ -80,11 +77,8 @@ export async function createBootcampService(data, actorId) {
 export async function updateBootcampService(id, data) {
   const validation = updateBootcampSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors?.[0];
-    throw new ValidationError(
-      firstError?.message || "Validation failed",
-      firstError?.path?.[0] || "unknown"
-    );
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
   const updatedBootcamp = await bootcampRepo.update(id, validation.data);

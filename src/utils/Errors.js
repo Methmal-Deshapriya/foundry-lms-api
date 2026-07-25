@@ -42,8 +42,8 @@ export class UnauthorizedError extends CustomError {
  * 403 Forbidden — Use when the user is logged in but lacks permissions.
  */
 export class ForbiddenError extends CustomError {
-  constructor(message = "Forbidden") {
-    super(message, 403, "FORBIDDEN");
+  constructor(message = "Forbidden", code = "FORBIDDEN") {
+    super(message, 403, code);
   }
 }
 

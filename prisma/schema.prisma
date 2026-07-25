@@ -41,25 +41,64 @@ enum ProjectStatus {
 
 // User Model: Identity and System Authority
 model User {
-  id          String    @id @default(uuid())
-  name        String
-  email       String    @unique
-  phone       String?   @map("phone") // String to preserve leading zeros
-  address     String?
-  district    String?
-  dateOfBirth DateTime? @map("date_of_birth")
-  alStream    String?   @map("al_stream")
-  password    String
-  role        Role      @default(STUDENT)
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  id            String    @id @default(uuid())
+  firstName     String    @default("") @map("first_name")
+  lastName      String    @default("") @map("last_name")
+  email         String    @unique
+  phone         String?   @map("phone") // String to preserve leading zeros
+  address       String?
+  district      String?
+  dateOfBirth   DateTime? @map("date_of_birth")
+  alStream      String?   @map("al_stream")
+  password      String
+  role          Role      @default(STUDENT)
+  emailVerified Boolean   @default(false) @map("email_verified")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
   // Relationships
-  enrollments     Enrollment[]
-  studentProjects StudentProject[]
-  actorAuditLogs  AuditLog[]       @relation("ActorRelation")
+  enrollments         Enrollment[]
+  studentProjects     StudentProject[]
+  actorAuditLogs      AuditLog[]           @relation("ActorRelation")
+  passwordResetTokens PasswordResetToken[]
+  emailOtps           EmailOtp[]
 
   @@map("users")
+}
+
+// PasswordResetToken Model: Short-lived tokens for the "forgot password" flow.
+// Stores a hash of the token, never the raw value sent to the user's inbox.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// EmailOtp Model: One-time codes for verifying a newly registered email.
+// Stores a hash of the code, never the raw value sent to the user's inbox.
+model EmailOtp {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_otps")
 }
 
 // Bootcamp Model: The learning products

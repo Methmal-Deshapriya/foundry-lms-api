@@ -18,11 +18,8 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   // 1. Validation
   const validation = issueCertificateSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors?.[0];
-    throw new ValidationError(
-      firstError?.message || "Validation failed",
-      firstError?.path?.[0] || "unknown"
-    );
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
   // 2. Enrollment Checks
@@ -49,7 +46,7 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   const certificate = await certificateRepo.create({
     enrollmentId,
     certificateCode,
-    studentName: enrollment.user.name,
+    studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
     bootcampName: enrollment.bootcamp.title,
     description: validation.data.description,
     issuedDate: validation.data.issuedDate ? new Date(validation.data.issuedDate) : new Date(),
@@ -82,11 +79,8 @@ export async function revokeCertificateService(id, data, actorId) {
   // 1. Validation
   const validation = revokeCertificateSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors?.[0];
-    throw new ValidationError(
-      firstError?.message || "Validation failed",
-      firstError?.path?.[0] || "unknown"
-    );
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
   // 2. Existence Check
