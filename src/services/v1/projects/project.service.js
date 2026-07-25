@@ -18,7 +18,7 @@ export async function submitProjectService(userId, data) {
   // 1. Validation
   const validation = createProjectSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -60,7 +60,7 @@ export async function updateProjectService(projectId, userId, data) {
   // 2. Validation
   const validation = updateProjectSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -77,7 +77,7 @@ export async function reviewProjectService(projectId, data, actorId) {
   // 1. Validation
   const validation = reviewProjectSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 

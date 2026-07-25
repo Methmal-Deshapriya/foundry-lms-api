@@ -51,7 +51,7 @@ export async function getAllAdminBootcampsService() {
 export async function createBootcampService(data, actorId) {
   const validation = createBootcampSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
@@ -77,7 +77,7 @@ export async function createBootcampService(data, actorId) {
 export async function updateBootcampService(id, data) {
   const validation = updateBootcampSchema.safeParse(data);
   if (!validation.success) {
-    const firstError = validation.error.errors[0];
+    const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 

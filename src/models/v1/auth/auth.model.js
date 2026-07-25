@@ -15,9 +15,11 @@ export function toUserResponse(user) {
 
   return {
     id: user.id,
-    name: user.name,
+    firstName: user.firstName,
+    lastName: user.lastName,
     email: user.email,
     role: user.role,
+    emailVerified: user.emailVerified,
     createdAt: user.createdAt,
     // We can add or rename fields here if the frontend needs a different shape
   };
