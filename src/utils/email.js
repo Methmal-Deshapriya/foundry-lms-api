@@ -1,25 +1,31 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 /**
  * Email Utility - The "Mailroom"
- * Wraps the Resend client so the rest of the app never touches
- * the provider SDK directly.
+ * Wraps a Nodemailer SMTP transporter so the rest of the app never
+ * touches the transport details directly.
  */
 
-let resendClient;
+let transporter;
 
-const getResendClient = () => {
-  if (!resendClient) {
-    const apiKey = process.env.RESEND_API_KEY;
+const getTransporter = () => {
+  if (!transporter) {
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASSWORD;
 
-    if (!apiKey) {
-      throw new Error("RESEND_API_KEY is missing in environment variables!");
+    if (!user || !pass) {
+      throw new Error("SMTP_USER or SMTP_PASSWORD is missing in environment variables!");
     }
 
-    resendClient = new Resend(apiKey);
+    transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.gmail.com",
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: false, // STARTTLS on port 587, not implicit TLS
+      auth: { user, pass },
+    });
   }
 
-  return resendClient;
+  return transporter;
 };
 
 /**
@@ -28,16 +34,12 @@ const getResendClient = () => {
  * @param {string} resetUrl - Fully-built link to the client's reset-password page
  */
 export const sendPasswordResetEmail = async (to, resetUrl) => {
-  const from = process.env.RESEND_FROM_EMAIL;
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
 
-  if (!from) {
-    throw new Error("RESEND_FROM_EMAIL is missing in environment variables!");
-  }
-
-  // The Resend SDK does not throw on API errors — it resolves with
-  // { data, error }, so failures must be checked explicitly or they
-  // silently disappear (the caller would think the email was sent).
-  const { error } = await getResendClient().emails.send({
+  // Nodemailer throws on send failure (auth errors, connection errors,
+  // rejected recipients), so unlike some provider SDKs, no separate
+  // error-shape check is needed here.
+  await getTransporter().sendMail({
     from,
     to,
     subject: "Reset your Foundry LMS password",
@@ -47,8 +49,4 @@ export const sendPasswordResetEmail = async (to, resetUrl) => {
       <p>This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
     `,
   });
-
-  if (error) {
-    throw new Error(`Failed to send password reset email: ${error.message}`);
-  }
 };
