@@ -18,6 +18,7 @@ export function toUserResponse(user) {
     name: user.name,
     email: user.email,
     role: user.role,
+    emailVerified: user.emailVerified,
     createdAt: user.createdAt,
     // We can add or rename fields here if the frontend needs a different shape
   };

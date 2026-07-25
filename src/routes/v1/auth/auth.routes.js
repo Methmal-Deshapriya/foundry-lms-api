@@ -24,6 +24,19 @@ const forgotPasswordLimiter = rateLimit({
   },
 });
 
+// Scoped to /resend-otp only — same reasoning as forgotPasswordLimiter.
+const resendOtpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: "Too many code requests. Please try again later.",
+    code: "TOO_MANY_REQUESTS",
+  },
+});
+
 /**
  * @route   POST /v1/auth/register
  * @desc    Register a new user account
@@ -69,5 +82,19 @@ router.post(
  * @access  Public
  */
 router.post("/reset-password", authController.resetPasswordController);
+
+/**
+ * @route   POST /v1/auth/verify-otp
+ * @desc    Verify a newly registered email with an OTP code (logs the user in)
+ * @access  Public
+ */
+router.post("/verify-otp", authController.verifyOtpController);
+
+/**
+ * @route   POST /v1/auth/resend-otp
+ * @desc    Resend a fresh OTP code to a not-yet-verified user
+ * @access  Public
+ */
+router.post("/resend-otp", resendOtpLimiter, authController.resendOtpController);
 
 export default router;

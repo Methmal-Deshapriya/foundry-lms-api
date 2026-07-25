@@ -49,16 +49,18 @@ model User {
   district    String?
   dateOfBirth DateTime? @map("date_of_birth")
   alStream    String?   @map("al_stream")
-  password    String
-  role        Role      @default(STUDENT)
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  password      String
+  role          Role      @default(STUDENT)
+  emailVerified Boolean   @default(false) @map("email_verified")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
   // Relationships
   enrollments         Enrollment[]
   studentProjects     StudentProject[]
   actorAuditLogs      AuditLog[]           @relation("ActorRelation")
   passwordResetTokens PasswordResetToken[]
+  emailOtps           EmailOtp[]
 
   @@map("users")
 }
@@ -78,6 +80,24 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// EmailOtp Model: One-time codes for verifying a newly registered email.
+// Stores a hash of the code, never the raw value sent to the user's inbox.
+model EmailOtp {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_otps")
 }
 
 // Bootcamp Model: The learning products

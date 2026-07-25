@@ -50,3 +50,23 @@ export const sendPasswordResetEmail = async (to, resetUrl) => {
     `,
   });
 };
+
+/**
+ * Send an email-verification code for a newly registered account.
+ * @param {string} to - Recipient email address
+ * @param {string} code - The raw 6-digit OTP
+ */
+export const sendOtpEmail = async (to, code) => {
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+
+  await getTransporter().sendMail({
+    from,
+    to,
+    subject: "Verify your Foundry LMS email",
+    html: `
+      <p>Welcome to Foundry LMS! Use the code below to verify your email address:</p>
+      <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px;">${code}</p>
+      <p>This code expires in 10 minutes. If you didn't create this account, you can safely ignore this email.</p>
+    `,
+  });
+};

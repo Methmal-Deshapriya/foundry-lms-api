@@ -1,14 +1,23 @@
 import { z } from "zod";
+import { hasValidMxRecord } from "../../../utils/otp.js";
 
 /**
  * Auth Schemas - The "Blueprints"
  * Defines the validation rules for authentication-related inputs.
  */
 
-// Schema for registering a new user
+// Schema for registering a new user.
+// The email field's MX-record check is async, so this schema must be
+// parsed with `safeParseAsync`, not `safeParse`.
 export const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters long"),
-  email: z.string().email("Invalid email format"),
+  email: z
+    .string()
+    .email("Invalid email format")
+    .refine(
+      async (email) => hasValidMxRecord(email.split("@")[1]),
+      "This email domain doesn't appear to accept mail. Please check for typos."
+    ),
   password: z.string().min(8, "Password must be at least 8 characters long"),
 });
 
@@ -27,6 +36,17 @@ export const forgotPasswordSchema = z.object({
 export const resetPasswordSchema = z.object({
   token: z.string().min(1, "Reset token is required"),
   newPassword: z.string().min(8, "Password must be at least 8 characters long"),
+});
+
+// Schema for verifying a newly registered email with an OTP code
+export const verifyOtpSchema = z.object({
+  email: z.string().email("Invalid email format"),
+  code: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
+});
+
+// Schema for requesting a new OTP code
+export const resendOtpSchema = z.object({
+  email: z.string().email("Invalid email format"),
 });
 
 // Schema for updating user profile

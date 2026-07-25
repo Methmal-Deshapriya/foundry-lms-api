@@ -6,17 +6,23 @@ import {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  verifyOtpSchema,
+  resendOtpSchema,
 } from "../../../constants/v1/auth/auth.schema.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import { generateToken } from "../../../utils/jwt.js";
 import { generateResetToken, hashResetToken } from "../../../utils/resetToken.js";
-import { sendPasswordResetEmail } from "../../../utils/email.js";
+import { generateOtp, hashOtp } from "../../../utils/otp.js";
+import { sendPasswordResetEmail, sendOtpEmail } from "../../../utils/email.js";
 import {
   ConflictError,
   ValidationError,
   UnauthorizedError,
+  ForbiddenError,
   NotFoundError,
 } from "../../../utils/Errors.js";
+
+const MAX_OTP_ATTEMPTS = 5;
 
 /**
  * Auth Service - The "Brain"
@@ -25,12 +31,14 @@ import {
 
 /**
  * Service: Register a new user into the platform.
+ * Does NOT log the user in — the account is created with emailVerified:false
+ * and an OTP is emailed; login is blocked until verifyOtpService succeeds.
  * @param {object} userData - The user's registration details (name, email, password).
- * @returns {Promise<object>} The safe user object and the auth token.
+ * @returns {Promise<object>} The safe (unverified) user object.
  */
 export async function registerService(userData) {
-  // 1. Validation: Use the centralized Zod schema
-  const validation = registerSchema.safeParse(userData);
+  // 1. Validation: Use the centralized Zod schema (async — email has an MX-record check)
+  const validation = await registerSchema.safeParseAsync(userData);
 
   if (!validation.success) {
     const firstError = validation.error.issues[0];
@@ -48,19 +56,22 @@ export async function registerService(userData) {
   // 3. Hashing
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  // 4. Save to Database
+  // 4. Save to Database (unverified)
   const newUser = await authRepo.createUser({
     name,
     email,
     password: hashedPassword,
     role: ROLES.STUDENT,
+    emailVerified: false,
   });
 
-  // 5. Transform to Safe Shape & Generate Token
-  const safeUser = authModel.toUserResponse(newUser);
-  const token = generateToken({ id: safeUser.id, role: safeUser.role });
+  // 5. Generate an OTP, persist only its hash, email the raw code
+  const { code, codeHash, expiresAt } = generateOtp();
+  await authRepo.createEmailOtp({ userId: newUser.id, codeHash, expiresAt });
+  await sendOtpEmail(newUser.email, code);
 
-  return { user: safeUser, token };
+  // 6. Return the safe (unverified) user — no token, no cookie
+  return authModel.toUserResponse(newUser);
 }
 
 /**
@@ -101,7 +112,15 @@ export async function loginService(credentials) {
     throw new UnauthorizedError("Invalid email or password.");
   }
 
-  // 4. Success: Transform to Safe Shape & Generate Token
+  // 4. Block login until the email has been verified via OTP
+  if (!user.emailVerified) {
+    throw new ForbiddenError(
+      "Please verify your email before logging in.",
+      "EMAIL_NOT_VERIFIED"
+    );
+  }
+
+  // 5. Success: Transform to Safe Shape & Generate Token
   const safeUser = authModel.toUserResponse(user);
   const token = generateToken({ id: safeUser.id, role: safeUser.role });
 
@@ -175,6 +194,95 @@ export async function resetPasswordService(payload) {
 
   // 4. Burn the token so it can't be replayed
   await authRepo.markResetTokenUsed(resetToken.id);
+}
+
+/**
+ * Service: Verify a newly registered email using its OTP code.
+ * This is the moment the user actually gets logged in.
+ * @param {object} payload - { email, code }
+ */
+export async function verifyOtpService(payload) {
+  // 1. Validation: Use the centralized Zod schema
+  const validation = verifyOtpSchema.safeParse(payload);
+
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  const { email, code } = validation.data;
+
+  // 2. Look up the user and their currently-active OTP
+  const user = await authRepo.findUserByEmail(email);
+
+  if (!user) {
+    throw new NotFoundError("This email isn't registered. Please sign up first.");
+  }
+
+  if (user.emailVerified) {
+    throw new ConflictError("This email is already verified.");
+  }
+
+  const otp = await authRepo.findActiveOtpForUser(user.id);
+
+  if (!otp) {
+    throw new ValidationError(
+      "This code has expired. Please request a new one.",
+      "code"
+    );
+  }
+
+  if (otp.attempts >= MAX_OTP_ATTEMPTS) {
+    throw new ValidationError(
+      "Too many incorrect attempts. Please request a new code.",
+      "code"
+    );
+  }
+
+  // 3. Compare hashes — wrong guesses still count against this OTP's attempts
+  if (otp.codeHash !== hashOtp(code)) {
+    await authRepo.incrementOtpAttempts(otp.id);
+    throw new ValidationError("Incorrect code. Please try again.", "code");
+  }
+
+  // 4. Success: burn the OTP, verify the user, log them in
+  await authRepo.markOtpVerified(otp.id);
+  const verifiedUser = await authRepo.markUserEmailVerified(user.id);
+
+  const safeUser = authModel.toUserResponse(verifiedUser);
+  const token = generateToken({ id: safeUser.id, role: safeUser.role });
+
+  return { user: safeUser, token };
+}
+
+/**
+ * Service: Send a fresh OTP code to a not-yet-verified user.
+ * @param {object} payload - { email }
+ */
+export async function resendOtpService(payload) {
+  // 1. Validation: Use the centralized Zod schema
+  const validation = resendOtpSchema.safeParse(payload);
+
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  const { email } = validation.data;
+
+  const user = await authRepo.findUserByEmail(email);
+
+  if (!user) {
+    throw new NotFoundError("This email isn't registered. Please sign up first.");
+  }
+
+  if (user.emailVerified) {
+    throw new ConflictError("This email is already verified.");
+  }
+
+  const { code, codeHash, expiresAt } = generateOtp();
+  await authRepo.createEmailOtp({ userId: user.id, codeHash, expiresAt });
+  await sendOtpEmail(user.email, code);
 }
 
 /**
