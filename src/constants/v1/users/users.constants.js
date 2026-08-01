@@ -43,8 +43,8 @@ export const DISTRICTS = [
 
 // Standard G.C.E. Advanced Level subject streams
 export const AL_STREAMS = [
-  "Physical Science",
-  "Biological Science",
+  "Science",
+  "Mathematics",
   "Commerce",
   "Arts",
   "Technology",
