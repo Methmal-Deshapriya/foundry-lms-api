@@ -1,17 +1,15 @@
 {
-  "name": "foundry_lms_server_expressjs",
+  "name": "foundry-lms-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Express and Prisma API for the Foundry Academy LMS",
+  "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run --passWithNoTests",
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "studio": "prisma studio",
-    "seed:api": "node scripts/seed-api.js"
+    "studio": "prisma studio"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["lms", "express", "prisma"],
   "license": "ISC",
   "type": "module",
   "dependencies": {
