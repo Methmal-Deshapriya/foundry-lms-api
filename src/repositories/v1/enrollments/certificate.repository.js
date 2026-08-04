@@ -12,7 +12,7 @@ export async function findById(id) {
       enrollment: {
         include: {
           user: true,
-          bootcamp: true,
+          course: { include: { category: true } },
         },
       },
     },
@@ -37,7 +37,7 @@ export async function findAllAdmin() {
       enrollment: {
         include: {
           user: true,
-          bootcamp: true,
+          course: { include: { category: true } },
         },
       },
     },
@@ -55,7 +55,7 @@ export async function findUserCertificates(userId) {
     include: {
       enrollment: {
         include: {
-          bootcamp: true,
+          course: { include: { category: true } },
         },
       },
     },

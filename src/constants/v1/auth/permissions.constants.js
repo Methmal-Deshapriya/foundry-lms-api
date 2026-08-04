@@ -1,0 +1,46 @@
+import { ROLES } from "../users/users.constants.js";
+
+/**
+ * Central authorization policy.
+ *
+ * Routes ask for a capability, never a hardcoded list of roles. Changing who
+ * can perform an operation therefore happens in this file only.
+ */
+export const PERMISSIONS = Object.freeze({
+  USERS_VIEW: "USERS_VIEW",
+  USERS_MANAGE_ROLES: "USERS_MANAGE_ROLES",
+  CATALOG_VIEW_ADMIN: "CATALOG_VIEW_ADMIN",
+  CATALOG_EDIT_DRAFTS: "CATALOG_EDIT_DRAFTS",
+  CATALOG_PUBLISH: "CATALOG_PUBLISH",
+  COURSES_SELF_ENROLL: "COURSES_SELF_ENROLL",
+  SESSIONS_MANAGE: "SESSIONS_MANAGE",
+  ENROLLMENTS_MANAGE: "ENROLLMENTS_MANAGE",
+  CERTIFICATES_MANAGE: "CERTIFICATES_MANAGE",
+  PROJECTS_REVIEW: "PROJECTS_REVIEW",
+  AUDIT_VIEW: "AUDIT_VIEW",
+});
+
+const ADMIN_PERMISSIONS = [
+  PERMISSIONS.USERS_VIEW,
+  PERMISSIONS.CATALOG_VIEW_ADMIN,
+  PERMISSIONS.CATALOG_EDIT_DRAFTS,
+  PERMISSIONS.SESSIONS_MANAGE,
+  PERMISSIONS.ENROLLMENTS_MANAGE,
+  PERMISSIONS.CERTIFICATES_MANAGE,
+  PERMISSIONS.PROJECTS_REVIEW,
+];
+
+export const ROLE_PERMISSIONS = Object.freeze({
+  [ROLES.STUDENT]: Object.freeze([PERMISSIONS.COURSES_SELF_ENROLL]),
+  [ROLES.ADMIN]: Object.freeze(ADMIN_PERMISSIONS),
+  [ROLES.SUPER_ADMIN]: Object.freeze([
+    ...ADMIN_PERMISSIONS,
+    PERMISSIONS.USERS_MANAGE_ROLES,
+    PERMISSIONS.CATALOG_PUBLISH,
+    PERMISSIONS.AUDIT_VIEW,
+  ]),
+});
+
+export function hasPermission(role, permission) {
+  return Boolean(role && ROLE_PERMISSIONS[role]?.includes(permission));
+}

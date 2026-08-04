@@ -36,14 +36,14 @@ export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
 }
 
 /**
- * Search students who are not already enrolled in a given bootcamp.
- * @param {string} bootcampId - UUID of the bootcamp.
+ * Search students who are not already enrolled in a given course.
+ * @param {string} courseId - UUID of the course.
  * @param {string} query - Partial email search text.
  * @param {number} limit - Max number of students to return.
  * @returns {Promise<Array>} List of eligible student users.
  */
-export async function searchEligibleStudentsForBootcamp(
-  bootcampId,
+export async function searchEligibleStudentsForCourse(
+  courseId,
   query = "",
   limit = 5
 ) {
@@ -60,7 +60,7 @@ export async function searchEligibleStudentsForBootcamp(
         : undefined,
       enrollments: {
         none: {
-          bootcampId,
+          courseId,
         },
       },
     },

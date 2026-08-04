@@ -1,5 +1,4 @@
-// This is your Prisma schema file (Modern Prisma 7 Edition)
-// It defines the data shapes for Foundry LMS.
+// Foundry LMS database schema (Prisma 7 / PostgreSQL)
 
 generator client {
   provider = "prisma-client-js"
@@ -9,11 +8,42 @@ datasource db {
   provider = "postgresql"
 }
 
-// User Roles
 enum Role {
   STUDENT
   ADMIN
   SUPER_ADMIN
+}
+
+enum LearningServiceType {
+  BOOTCAMPS
+  PRETECH
+  FREE_LEARNING
+}
+
+enum CatalogStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CourseLevel {
+  OPEN
+  FOUNDATION
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum DurationUnit {
+  SESSION
+  DAY
+  WEEK
+  MONTH
+}
+
+enum CourseAccessType {
+  FREE
+  PAID
 }
 
 enum EnrollmentStatus {
@@ -23,6 +53,7 @@ enum EnrollmentStatus {
 }
 
 enum PaymentStatus {
+  NOT_REQUIRED
   PENDING
   PARTIAL
   COMPLETED
@@ -39,13 +70,12 @@ enum ProjectStatus {
   REJECTED
 }
 
-// User Model: Identity and System Authority
 model User {
   id            String    @id @default(uuid())
   firstName     String    @default("") @map("first_name")
   lastName      String    @default("") @map("last_name")
   email         String    @unique
-  phone         String?   @map("phone") // String to preserve leading zeros
+  phone         String?
   address       String?
   district      String?
   dateOfBirth   DateTime? @map("date_of_birth")
@@ -56,7 +86,6 @@ model User {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
   enrollments         Enrollment[]
   studentProjects     StudentProject[]
   actorAuditLogs      AuditLog[]           @relation("ActorRelation")
@@ -66,8 +95,6 @@ model User {
   @@map("users")
 }
 
-// PasswordResetToken Model: Short-lived tokens for the "forgot password" flow.
-// Stores a hash of the token, never the raw value sent to the user's inbox.
 model PasswordResetToken {
   id        String    @id @default(uuid())
   userId    String    @map("user_id")
@@ -76,15 +103,12 @@ model PasswordResetToken {
   usedAt    DateTime? @map("used_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
-  // Relationships
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("password_reset_tokens")
 }
 
-// EmailOtp Model: One-time codes for verifying a newly registered email.
-// Stores a hash of the code, never the raw value sent to the user's inbox.
 model EmailOtp {
   id         String    @id @default(uuid())
   userId     String    @map("user_id")
@@ -94,39 +118,71 @@ model EmailOtp {
   verifiedAt DateTime? @map("verified_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
-  // Relationships
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([expiresAt])
   @@map("email_otps")
 }
 
-// Bootcamp Model: The learning products
-model Bootcamp {
+model Category {
+  id            String              @id @default(uuid())
+  serviceType   LearningServiceType @map("service_type")
+  slug          String
+  title         String
+  description   String
+  audienceLabel String?             @map("audience_label")
+  visualKey     String              @map("visual_key")
+  badgeLabel    String?             @map("badge_label")
+  status        CatalogStatus       @default(DRAFT)
+  sortOrder     Int                 @default(0) @map("sort_order")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @default(now()) @updatedAt @map("updated_at")
+
+  courses Course[]
+
+  @@unique([serviceType, slug])
+  @@index([serviceType, status, sortOrder])
+  @@map("categories")
+}
+
+model Course {
   id                 String           @id @default(uuid())
+  categoryId         String           @map("category_id")
+  slug               String
   title              String
-  slug               String           @unique
-  description        String?
-  price              Float
-  isPublished        Boolean          @default(false) @map("is_published")
+  summary            String
+  description        String
+  level              CourseLevel
+  durationValue      Int?             @map("duration_value")
+  durationUnit       DurationUnit?    @map("duration_unit")
+  accessType         CourseAccessType @map("access_type")
+  price              Decimal          @default(0) @db.Decimal(12, 2)
+  currency           String           @default("LKR")
   certificateEnabled Boolean          @default(false) @map("certificate_enabled")
-  skills             Json             @default("[]") // Array of strings
+  highlights         String[]         @default([])
+  skills             String[]         @default([])
+  prerequisites      String[]         @default([])
+  thumbnailUrl       String?          @map("thumbnail_url")
+  status             CatalogStatus    @default(DRAFT)
+  sortOrder          Int              @default(0) @map("sort_order")
   createdAt          DateTime         @default(now()) @map("created_at")
   updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
+  category        Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   enrollments     Enrollment[]
   sessions        Session[]
   studentProjects StudentProject[]
 
-  @@map("bootcamps")
+  @@unique([categoryId, slug])
+  @@index([categoryId, status, sortOrder])
+  @@map("courses")
 }
 
-// Enrollment Model: The "Bridge" linking Students to Bootcamps
 model Enrollment {
   id                 String           @id @default(uuid())
   userId             String           @map("user_id")
-  bootcampId         String           @map("bootcamp_id")
+  courseId           String           @map("course_id")
   status             EnrollmentStatus @default(ACTIVE)
   paymentStatus      PaymentStatus    @default(PENDING) @map("payment_status")
   paymentCompletedAt DateTime?        @map("payment_completed_at")
@@ -134,20 +190,20 @@ model Enrollment {
   createdAt          DateTime         @default(now()) @map("created_at")
   updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bootcamp           Bootcamp            @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
   sessionCompletions SessionCompletion[]
   certificate        Certificate?
   studentProjects    StudentProject[]
 
-  @@unique([userId, bootcampId])
+  @@unique([userId, courseId])
+  @@index([courseId, status])
   @@map("enrollments")
 }
 
 model Session {
   id              String   @id @default(uuid())
-  bootcampId      String   @map("bootcamp_id")
+  courseId        String   @map("course_id")
   title           String
   description     String?
   orderIndex      Int      @map("order_index")
@@ -160,12 +216,11 @@ model Session {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
-  bootcamp    Bootcamp            @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  course      Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
   completions SessionCompletion[]
 
-  @@unique([bootcampId, orderIndex])
-  @@index([bootcampId, isPublished, orderIndex])
+  @@unique([courseId, orderIndex])
+  @@index([courseId, isPublished, orderIndex])
   @@map("sessions")
 }
 
@@ -176,7 +231,6 @@ model SessionCompletion {
   completedAt  DateTime @default(now()) @map("completed_at")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  // Relationships
   session    Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
@@ -191,7 +245,7 @@ model Certificate {
   enrollmentId     String            @unique @map("enrollment_id")
   certificateCode  String            @unique @map("certificate_code")
   studentName      String            @map("student_name")
-  bootcampName     String            @map("bootcamp_name")
+  courseName       String            @map("course_name")
   description      String?
   issuedDate       DateTime          @map("issued_date")
   status           CertificateStatus @default(ISSUED)
@@ -203,16 +257,16 @@ model Certificate {
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
+  @@index([status, issuedDate])
   @@map("certificates")
 }
 
 model StudentProject {
   id            String        @id @default(uuid())
   userId        String        @map("user_id")
-  bootcampId    String        @map("bootcamp_id")
+  courseId      String        @map("course_id")
   enrollmentId  String        @map("enrollment_id")
   title         String
   description   String?
@@ -231,12 +285,11 @@ model StudentProject {
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bootcamp   Bootcamp   @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  course     Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
-  @@index([bootcampId, status, isPublic])
+  @@index([courseId, status, isPublic])
   @@index([userId, createdAt(sort: Desc)])
   @@index([likeCount(sort: Desc), createdAt(sort: Desc)])
   @@map("student_projects")
@@ -252,8 +305,9 @@ model AuditLog {
   metadata    Json?
   createdAt   DateTime @default(now()) @map("created_at")
 
-  // Relationships
   actor User? @relation("ActorRelation", fields: [actorUserId], references: [id], onDelete: SetNull)
 
+  @@index([createdAt(sort: Desc)])
+  @@index([entityType, entityId])
   @@map("audit_logs")
 }

@@ -7,7 +7,7 @@ import { ALL_ENROLLMENT_STATUSES, ALL_PAYMENT_STATUSES } from "./enrollment.cons
  */
 export const enrollUserSchema = z.object({
   userId: z.string().uuid("Invalid User ID format"),
-  bootcampId: z.string().uuid("Invalid Bootcamp ID format"),
+  courseId: z.string().uuid("Invalid Course ID format"),
   paymentStatus: z.enum(ALL_PAYMENT_STATUSES).optional(),
 });
 

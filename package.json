@@ -7,7 +7,9 @@
     "test": "vitest run --passWithNoTests",
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "seed": "prisma db seed",
+    "bootstrap:super-admin": "node prisma/bootstrap-super-admin.js"
   },
   "keywords": ["lms", "express", "prisma"],
   "license": "ISC",

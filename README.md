@@ -12,7 +12,8 @@ Express and Prisma API for Foundry Academy's learning management system.
 
 ## Local development
 
-Copy `.env.example` to `.env`, configure the database, JWT, email, frontend URL, and CORS origin, then run:
+Copy `.env.example` to `.env`, configure the database, JWT, email, frontend URL,
+CORS origin, and the catalog revalidation secret shared with the frontend, then run:
 
 ```bash
 npm install
