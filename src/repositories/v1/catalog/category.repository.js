@@ -1,5 +1,5 @@
 import prisma from "../../../utils/prisma.js";
-import { handlePrismaError } from "../../../utils/Errors.js";
+import { ConflictError, handlePrismaError } from "../../../utils/Errors.js";
 
 export async function findPublicByService(serviceType) {
   return prisma.category.findMany({
@@ -99,4 +99,72 @@ export async function archive(id) {
       include: { _count: { select: { courses: true } } },
     }),
   ]);
+}
+
+export async function removePermanently(id) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      // The no-op conditional update locks the archived category row and
+      // prevents an unarchive request from racing this destructive operation.
+      const locked = await transaction.category.updateMany({
+        where: { id, status: "ARCHIVED" },
+        data: { status: "ARCHIVED" },
+      });
+      if (locked.count !== 1) {
+        throw new ConflictError(
+          "Only archived categories can be permanently deleted.",
+        );
+      }
+
+      const courses = await transaction.course.findMany({
+        where: { categoryId: id },
+        select: { id: true },
+        orderBy: { id: "asc" },
+      });
+      const courseIds = courses.map((course) => course.id);
+
+      let deletedProjects = 0;
+      let deletedEnrollments = 0;
+      let deletedSessions = 0;
+      let deletedCourses = 0;
+
+      if (courseIds.length > 0) {
+        // Keep this order consistent with course deletion and satisfy the
+        // restrictive historical foreign keys without broad schema cascades.
+        deletedProjects = (
+          await transaction.studentProject.deleteMany({
+            where: { courseId: { in: courseIds } },
+          })
+        ).count;
+        deletedEnrollments = (
+          await transaction.enrollment.deleteMany({
+            where: { courseId: { in: courseIds } },
+          })
+        ).count;
+        deletedSessions = (
+          await transaction.session.deleteMany({
+            where: { courseId: { in: courseIds } },
+          })
+        ).count;
+        deletedCourses = (
+          await transaction.course.deleteMany({
+            where: { id: { in: courseIds } },
+          })
+        ).count;
+      }
+
+      await transaction.category.delete({ where: { id } });
+
+      return {
+        id,
+        deletedCourses,
+        deletedSessions,
+        deletedEnrollments,
+        deletedProjects,
+      };
+    });
+  } catch (error) {
+    if (error instanceof ConflictError) throw error;
+    throw handlePrismaError(error);
+  }
 }

@@ -13,6 +13,15 @@ describe("central authorization policy", () => {
     expect(hasPermission(ROLES.SUPER_ADMIN, PERMISSIONS.USERS_MANAGE_ROLES)).toBe(true);
   });
 
+  it("reserves permanent catalog deletion for super admins", () => {
+    expect(
+      hasPermission(ROLES.SUPER_ADMIN, PERMISSIONS.CATALOG_DELETE_PERMANENTLY),
+    ).toBe(true);
+    expect(
+      hasPermission(ROLES.ADMIN, PERMISSIONS.CATALOG_DELETE_PERMANENTLY),
+    ).toBe(false);
+  });
+
   it("only grants students the free-course self-enrollment capability", () => {
     expect(hasPermission(ROLES.STUDENT, PERMISSIONS.COURSES_SELF_ENROLL)).toBe(true);
     expect(hasPermission(ROLES.STUDENT, PERMISSIONS.CATALOG_VIEW_ADMIN)).toBe(false);

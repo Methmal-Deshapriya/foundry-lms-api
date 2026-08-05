@@ -121,3 +121,50 @@ export async function archiveCategoryService(id, actorId) {
   }
   return toAdminCategory(category);
 }
+
+export async function unarchiveCategoryService(id, actorId) {
+  const current = await categoryRepo.findById(id);
+  if (!current) throw new NotFoundError("Category not found.");
+  if (current.status !== CATALOG_STATUSES.ARCHIVED) {
+    throw new ConflictError("Only archived categories can be restored.");
+  }
+
+  const category = await categoryRepo.update(id, {
+    status: CATALOG_STATUSES.DRAFT,
+  });
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.CATEGORY_UNARCHIVED,
+    entityType: ENTITY_TYPES.CATEGORY,
+    entityId: id,
+    description: `Category "${category.title}" restored as a draft. Child courses remain archived.`,
+  });
+  return toAdminCategory(category);
+}
+
+export async function deleteCategoryPermanentlyService(id, actorId) {
+  const current = await categoryRepo.findById(id);
+  if (!current) throw new NotFoundError("Category not found.");
+  if (current.status !== CATALOG_STATUSES.ARCHIVED) {
+    throw new ConflictError(
+      "Archive the category before permanently deleting it.",
+    );
+  }
+
+  const result = await categoryRepo.removePermanently(id);
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.CATEGORY_DELETED_PERMANENTLY,
+    entityType: ENTITY_TYPES.CATEGORY,
+    entityId: id,
+    description: `Category "${current.title}" and all dependent learning records permanently deleted.`,
+    metadata: {
+      title: current.title,
+      slug: current.slug,
+      serviceType: current.serviceType,
+      ...result,
+    },
+  });
+  await revalidatePublicCatalogCache();
+  return result;
+}

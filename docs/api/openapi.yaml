@@ -1,0 +1,1559 @@
+openapi: 3.0.3
+info:
+  title: Foundry Academy LMS API
+  version: 1.0.0
+  description: |
+    Canonical API contract for the Foundry Academy LMS.
+
+    Authentication uses the HTTP-only `token` cookie. In Postman, run Login or
+    Verify email OTP first and allow Postman's cookie jar to retain the cookie.
+    Admin and super-admin requests require an account with the matching backend
+    permission.
+servers:
+  - url: "{baseUrl}"
+    description: Selected Foundry LMS API server
+    variables:
+      baseUrl:
+        default: http://localhost:5000
+tags:
+  - name: 00 System
+  - name: 01 Authentication
+  - name: 02 Users
+  - name: 03 Public Catalog
+  - name: 04 Categories
+  - name: 05 Courses
+  - name: 06 Sessions & Progress
+  - name: 07 Enrollments
+  - name: 08 Certificates
+  - name: 09 Projects
+  - name: 10 Audit Logs
+security:
+  - cookieAuth: []
+paths:
+  /api/health:
+    get:
+      tags: [00 System]
+      operationId: getHealth
+      summary: Check API health
+      x-access: PUBLIC
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/postman/collection:
+    get:
+      tags: [00 System]
+      operationId: downloadPostmanCollection
+      summary: Download latest Postman collection
+      x-access: PUBLIC
+      description: Returns the raw generated collection for direct URL import into Postman.
+      security: []
+      responses:
+        "200":
+          description: Postman Collection v2.1 JSON
+          content:
+            application/json:
+              schema: { type: object }
+
+  /api/postman/environment:
+    get:
+      tags: [00 System]
+      operationId: downloadPostmanEnvironment
+      summary: Download safe Postman environment
+      x-access: PUBLIC
+      description: Returns the raw local environment with blank credentials and destructive requests disabled.
+      security: []
+      responses:
+        "200":
+          description: Postman environment JSON
+          content:
+            application/json:
+              schema: { type: object }
+
+  /api/v1/auth/register:
+    post:
+      tags: [01 Authentication]
+      operationId: registerStudent
+      summary: Register student
+      x-access: PUBLIC
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/Register"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/auth/login:
+    post:
+      tags: [01 Authentication]
+      operationId: login
+      summary: Login
+      x-access: PUBLIC
+      description: Sets the HTTP-only authentication cookie used by protected requests.
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/Login"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [01 Authentication]
+      operationId: logout
+      summary: Logout
+      x-access: PUBLIC
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/me:
+    get:
+      tags: [01 Authentication]
+      operationId: getCurrentUser
+      summary: Get current user
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/forgot-password:
+    post:
+      tags: [01 Authentication]
+      operationId: forgotPassword
+      summary: Request password reset
+      x-access: PUBLIC
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/Email"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/reset-password:
+    post:
+      tags: [01 Authentication]
+      operationId: resetPassword
+      summary: Reset password
+      x-access: PUBLIC
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/ResetPassword"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/verify-otp:
+    post:
+      tags: [01 Authentication]
+      operationId: verifyEmailOtp
+      summary: Verify email OTP
+      x-access: PUBLIC
+      description: Verifies the account and sets the HTTP-only authentication cookie.
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyOtp"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/resend-otp:
+    post:
+      tags: [01 Authentication]
+      operationId: resendEmailOtp
+      summary: Resend email OTP
+      x-access: PUBLIC
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/Email"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users/profile:
+    patch:
+      tags: [02 Users]
+      operationId: updateOwnProfile
+      summary: Update own profile
+      x-access: AUTHENTICATED
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProfile"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users:
+    get:
+      tags: [02 Users]
+      operationId: listUsers
+      summary: List users
+      x-access: ADMIN
+      description: Requires user-view permission.
+      parameters:
+        - $ref: "#/components/parameters/RoleFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users/{targetUserId}/promote:
+    patch:
+      tags: [02 Users]
+      operationId: promoteUser
+      summary: Promote student to admin
+      x-access: SUPER_ADMIN
+      description: Super-admin only.
+      parameters:
+        - $ref: "#/components/parameters/TargetUserId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users/{targetUserId}/demote:
+    patch:
+      tags: [02 Users]
+      operationId: demoteUser
+      summary: Demote admin to student
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Super admins cannot be demoted through this route.
+      parameters:
+        - $ref: "#/components/parameters/TargetUserId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/catalog/{serviceSlug}/categories:
+    get:
+      tags: [03 Public Catalog]
+      operationId: listPublicCategories
+      summary: List published service categories
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceSlug"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/catalog/{serviceSlug}/categories/{categorySlug}:
+    get:
+      tags: [03 Public Catalog]
+      operationId: getPublicCategory
+      summary: Get published category and courses
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceSlug"
+        - $ref: "#/components/parameters/CategorySlug"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/catalog/{serviceSlug}/categories/{categorySlug}/courses/{courseSlug}:
+    get:
+      tags: [03 Public Catalog]
+      operationId: getPublicCourse
+      summary: Get published course detail
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ServiceSlug"
+        - $ref: "#/components/parameters/CategorySlug"
+        - $ref: "#/components/parameters/CourseSlug"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/categories:
+    get:
+      tags: [04 Categories]
+      operationId: listCategoriesAdmin
+      summary: List categories for administration
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/ServiceTypeFilter"
+        - $ref: "#/components/parameters/CatalogStatusFilter"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [04 Categories]
+      operationId: createCategory
+      summary: Create category draft
+      x-access: ADMIN
+      requestBody:
+        $ref: "#/components/requestBodies/CreateCategory"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/categories/{categoryId}:
+    get:
+      tags: [04 Categories]
+      operationId: getCategoryAdmin
+      summary: Get category for administration
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [04 Categories]
+      operationId: updateCategory
+      summary: Update category
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateCategory"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [04 Categories]
+      operationId: deleteCategoryPermanently
+      summary: "[DESTRUCTIVE] Permanently delete archived category"
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Deletes every child course and its learning records.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/categories/{categoryId}/publish:
+    patch:
+      tags: [04 Categories]
+      operationId: publishCategory
+      summary: Publish category
+      x-access: SUPER_ADMIN
+      description: Super-admin only.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/categories/{categoryId}/unpublish:
+    patch:
+      tags: [04 Categories]
+      operationId: unpublishCategory
+      summary: Unpublish category
+      x-access: SUPER_ADMIN
+      description: Super-admin only.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/categories/{categoryId}/archive:
+    patch:
+      tags: [04 Categories]
+      operationId: archiveCategory
+      summary: Archive category and child courses
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Preserves existing learner records and session content.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/categories/{categoryId}/unarchive:
+    patch:
+      tags: [04 Categories]
+      operationId: unarchiveCategory
+      summary: Restore category as draft
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Child courses remain archived.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses:
+    get:
+      tags: [05 Courses]
+      operationId: listCoursesAdmin
+      summary: List courses for administration
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/ServiceTypeFilter"
+        - $ref: "#/components/parameters/CategoryIdFilter"
+        - $ref: "#/components/parameters/CatalogStatusFilter"
+        - $ref: "#/components/parameters/CourseLevelFilter"
+        - $ref: "#/components/parameters/AccessTypeFilter"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [05 Courses]
+      operationId: createCourse
+      summary: Create course draft
+      x-access: ADMIN
+      requestBody:
+        $ref: "#/components/requestBodies/CreateCourse"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/courses/{courseId}:
+    get:
+      tags: [05 Courses]
+      operationId: getCourseAdmin
+      summary: Get course for administration
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [05 Courses]
+      operationId: updateCourse
+      summary: Update course
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateCourse"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [05 Courses]
+      operationId: deleteCoursePermanently
+      summary: "[DESTRUCTIVE] Permanently delete archived course"
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Deletes sessions, enrollments, progress, certificates, and projects.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/publish:
+    patch:
+      tags: [05 Courses]
+      operationId: publishCourse
+      summary: Publish course
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Parent category must already be published.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/unpublish:
+    patch:
+      tags: [05 Courses]
+      operationId: unpublishCourse
+      summary: Unpublish course
+      x-access: SUPER_ADMIN
+      description: Super-admin only.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/archive:
+    patch:
+      tags: [05 Courses]
+      operationId: archiveCourse
+      summary: Archive course
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Existing learner access is preserved.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/unarchive:
+    patch:
+      tags: [05 Courses]
+      operationId: unarchiveCourse
+      summary: Restore course as draft
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Parent category must not be archived.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/enroll:
+    post:
+      tags: [07 Enrollments]
+      operationId: selfEnrollFreeCourse
+      summary: Self-enroll in free course
+      x-access: STUDENT
+      description: Student-only. Course and parent category must be published and the course must be free.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/sessions:
+    get:
+      tags: [06 Sessions & Progress]
+      operationId: listCourseSessions
+      summary: List course sessions
+      x-access: AUTHENTICATED
+      description: Students receive published sessions after enrollment; admins receive every session.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [06 Sessions & Progress]
+      operationId: createSession
+      summary: Create session
+      x-access: ADMIN
+      description: Admin/session-management permission required. Archived courses reject mutations.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/CreateSession"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/courses/{courseId}/sessions/reorder:
+    patch:
+      tags: [06 Sessions & Progress]
+      operationId: reorderSessions
+      summary: Reorder every course session
+      x-access: ADMIN
+      description: Supply every session exactly once with continuous indexes starting at zero.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/ReorderSessions"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/sessions/{sessionId}:
+    get:
+      tags: [06 Sessions & Progress]
+      operationId: getSession
+      summary: Get session detail
+      x-access: AUTHENTICATED
+      description: Students need a non-cancelled enrollment and can open only published sessions.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [06 Sessions & Progress]
+      operationId: updateSession
+      summary: Update or publish session
+      x-access: ADMIN
+      description: Admin/session-management permission required. Archived courses reject mutations.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateSession"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [06 Sessions & Progress]
+      operationId: deleteSession
+      summary: "[DESTRUCTIVE] Delete session"
+      x-access: ADMIN
+      description: Also deletes completion records for this session. Archived courses reject mutations.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/sessions/{sessionId}/complete:
+    post:
+      tags: [06 Sessions & Progress]
+      operationId: markSessionComplete
+      summary: Mark session complete
+      x-access: STUDENT
+      description: Requires the current user's non-cancelled course enrollment and a published session.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [06 Sessions & Progress]
+      operationId: unmarkSessionComplete
+      summary: Unmark session complete
+      x-access: STUDENT
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/my:
+    get:
+      tags: [07 Enrollments]
+      operationId: listOwnEnrollments
+      summary: List own enrollments
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/{enrollmentId}/progress:
+    get:
+      tags: [06 Sessions & Progress]
+      operationId: getEnrollmentProgress
+      summary: Get enrollment progress
+      x-access: AUTHENTICATED
+      description: Available to the enrollment owner or an admin.
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments:
+    post:
+      tags: [07 Enrollments]
+      operationId: manuallyEnrollStudent
+      summary: Manually enroll student
+      x-access: ADMIN
+      description: Admin/enrollment-management permission required. Archived courses reject new enrollment.
+      requestBody:
+        $ref: "#/components/requestBodies/CreateEnrollment"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/enrollments/{enrollmentId}:
+    patch:
+      tags: [07 Enrollments]
+      operationId: updateEnrollment
+      summary: Update enrollment or payment status
+      x-access: ADMIN
+      description: Admin/enrollment-management permission required.
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateEnrollment"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/course/{courseId}/eligible-students:
+    get:
+      tags: [07 Enrollments]
+      operationId: listEligibleStudents
+      summary: Search students eligible for course enrollment
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/EligibleLimit"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/course/{courseId}:
+    get:
+      tags: [07 Enrollments]
+      operationId: listCourseRoster
+      summary: List course roster
+      x-access: ADMIN
+      description: Admin/enrollment-management permission required.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/{enrollmentId}/certificate:
+    post:
+      tags: [08 Certificates]
+      operationId: issueCertificate
+      summary: Issue certificate
+      x-access: ADMIN
+      description: Admin-only. Enrollment must be completed and the course must have certificates enabled.
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+      requestBody:
+        $ref: "#/components/requestBodies/IssueCertificate"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/certificates/verify/{certificateCode}:
+    get:
+      tags: [08 Certificates]
+      operationId: verifyCertificate
+      summary: Verify certificate publicly
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CertificateCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/certificates/my:
+    get:
+      tags: [08 Certificates]
+      operationId: listOwnCertificates
+      summary: List own certificates
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/certificates/admin:
+    get:
+      tags: [08 Certificates]
+      operationId: listCertificatesAdmin
+      summary: List all certificates for administration
+      x-access: ADMIN
+      description: Admin/certificate-management permission required.
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/certificates/{certificateId}:
+    get:
+      tags: [08 Certificates]
+      operationId: getCertificate
+      summary: Get certificate detail
+      x-access: AUTHENTICATED
+      description: Available to the certificate owner or an admin.
+      parameters:
+        - $ref: "#/components/parameters/CertificateId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/certificates/{certificateId}/revoke:
+    patch:
+      tags: [08 Certificates]
+      operationId: revokeCertificate
+      summary: Revoke certificate
+      x-access: ADMIN
+      description: Admin/certificate-management permission required.
+      parameters:
+        - $ref: "#/components/parameters/CertificateId"
+      requestBody:
+        $ref: "#/components/requestBodies/RevokeCertificate"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/projects/showcase:
+    get:
+      tags: [09 Projects]
+      operationId: listPublicProjects
+      summary: List public approved projects
+      x-access: PUBLIC
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/projects/showcase/{projectId}:
+    get:
+      tags: [09 Projects]
+      operationId: getPublicProject
+      summary: Get public approved project
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/projects:
+    post:
+      tags: [09 Projects]
+      operationId: submitProject
+      summary: Submit project
+      x-access: STUDENT
+      description: Enrollment must belong to the current user and must not be cancelled.
+      requestBody:
+        $ref: "#/components/requestBodies/CreateProject"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/projects/my:
+    get:
+      tags: [09 Projects]
+      operationId: listOwnProjects
+      summary: List own projects
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/projects/{projectId}:
+    get:
+      tags: [09 Projects]
+      operationId: getProject
+      summary: Get project detail
+      x-access: AUTHENTICATED
+      description: Available to the owner, an admin, or anyone when the project is approved and public.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [09 Projects]
+      operationId: updateProject
+      summary: Update pending project
+      x-access: STUDENT
+      description: The current user must own the project and it must still be pending.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateProject"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/projects/admin/all:
+    get:
+      tags: [09 Projects]
+      operationId: listProjectsAdmin
+      summary: List all projects for review
+      x-access: ADMIN
+      description: Admin/project-review permission required.
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/projects/{projectId}/review:
+    patch:
+      tags: [09 Projects]
+      operationId: reviewProject
+      summary: Review project
+      x-access: ADMIN
+      description: Admin/project-review permission required.
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        $ref: "#/components/requestBodies/ReviewProject"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/audit/logs:
+    get:
+      tags: [10 Audit Logs]
+      operationId: listAuditLogs
+      summary: Search audit logs
+      x-access: SUPER_ADMIN
+      description: Super-admin only.
+      parameters:
+        - name: action
+          in: query
+          schema: { type: string }
+          example: COURSE_PUBLISHED
+        - name: resourceType
+          in: query
+          schema: { type: string }
+          example: COURSE
+        - name: actorUserId
+          in: query
+          schema: { type: string, format: uuid }
+          example: "{{currentUserId}}"
+        - name: entityId
+          in: query
+          schema: { type: string }
+          example: "{{courseId}}"
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+          example: "2026-08-01T00:00:00.000Z"
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+          example: "2026-08-31T23:59:59.999Z"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: Set automatically by Login or Verify email OTP.
+
+  responses:
+    Success:
+      description: Successful API response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SuccessEnvelope"
+    Created:
+      description: Resource created successfully
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SuccessEnvelope"
+    Error:
+      description: Standard API error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  parameters:
+    TargetUserId:
+      name: targetUserId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{targetUserId}}"
+    ServiceSlug:
+      name: serviceSlug
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [bootcamps, pretech-courses, free-learning]
+      example: "{{serviceSlug}}"
+    CategorySlug:
+      name: categorySlug
+      in: path
+      required: true
+      schema: { type: string }
+      example: "{{categorySlug}}"
+    CourseSlug:
+      name: courseSlug
+      in: path
+      required: true
+      schema: { type: string }
+      example: "{{courseSlug}}"
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{categoryId}}"
+    CourseId:
+      name: courseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{courseId}}"
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{sessionId}}"
+    EnrollmentId:
+      name: enrollmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{enrollmentId}}"
+    CertificateId:
+      name: certificateId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{certificateId}}"
+    CertificateCode:
+      name: certificateCode
+      in: path
+      required: true
+      schema: { type: string }
+      example: "{{certificateCode}}"
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{projectId}}"
+    RoleFilter:
+      name: role
+      in: query
+      schema:
+        $ref: "#/components/schemas/Role"
+      example: STUDENT
+    ServiceTypeFilter:
+      name: serviceType
+      in: query
+      schema:
+        $ref: "#/components/schemas/LearningServiceType"
+      example: BOOTCAMPS
+    CategoryIdFilter:
+      name: categoryId
+      in: query
+      schema: { type: string, format: uuid }
+      example: "{{categoryId}}"
+    CatalogStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/CatalogStatus"
+      example: DRAFT
+    CourseLevelFilter:
+      name: level
+      in: query
+      schema:
+        $ref: "#/components/schemas/CourseLevel"
+      example: BEGINNER
+    AccessTypeFilter:
+      name: accessType
+      in: query
+      schema:
+        $ref: "#/components/schemas/CourseAccessType"
+      example: FREE
+    SearchQuery:
+      name: q
+      in: query
+      schema: { type: string }
+      example: ai
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    EligibleLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  requestBodies:
+    Register:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RegisterInput"
+          example:
+            firstName: Test
+            lastName: Student
+            email: "{{registrationEmail}}"
+            password: "{{registrationPassword}}"
+            phone: "0751234567"
+            address: "123 Academy Road"
+            district: Colombo
+            dateOfBirth: "2000-01-01"
+            alStream: Technology
+    Login:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LoginInput"
+          example:
+            email: "{{loginEmail}}"
+            password: "{{loginPassword}}"
+    Email:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [email]
+            properties:
+              email: { type: string, format: email }
+          example:
+            email: "{{registrationEmail}}"
+    ResetPassword:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [token, newPassword]
+            properties:
+              token: { type: string }
+              newPassword: { type: string, minLength: 8, format: password }
+          example:
+            token: "{{resetToken}}"
+            newPassword: "{{registrationPassword}}"
+    VerifyOtp:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [email, code]
+            properties:
+              email: { type: string, format: email }
+              code: { type: string, pattern: "^[0-9]{6}$" }
+          example:
+            email: "{{registrationEmail}}"
+            code: "{{otpCode}}"
+    UpdateProfile:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateProfileInput"
+          example:
+            firstName: Updated
+            lastName: Student
+            phone: "0751234567"
+            address: "456 Foundry Road"
+            district: Colombo
+            dateOfBirth: "2000-01-01T00:00:00.000Z"
+            alStream: Technology
+    CreateCategory:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateCategoryInput"
+          example:
+            serviceType: BOOTCAMPS
+            slug: api-testing
+            title: API Testing
+            description: Practical API testing courses for software engineers.
+            audienceLabel: Beginner friendly
+            visualKey: code2
+            badgeLabel: New
+            sortOrder: 0
+    UpdateCategory:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateCategoryInput"
+          example:
+            title: API Testing and Quality
+            description: Practical API testing and quality courses for software engineers.
+            sortOrder: 1
+    CreateCourse:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateCourseInput"
+          example:
+            categoryId: "{{categoryId}}"
+            slug: postman-foundations
+            title: Postman Foundations
+            summary: Learn practical API exploration and automated request testing.
+            description: Build reliable Postman workflows for modern HTTP APIs from first request to regression collection.
+            level: BEGINNER
+            durationValue: 4
+            durationUnit: WEEK
+            accessType: FREE
+            price: 0
+            currency: LKR
+            certificateEnabled: true
+            highlights: [Requests, Environments, Tests]
+            skills: [Postman, HTTP, API Testing]
+            prerequisites: [Basic web knowledge]
+            thumbnailUrl: null
+            sortOrder: 0
+    UpdateCourse:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateCourseInput"
+          example:
+            title: Postman and API Testing Foundations
+            summary: Learn practical API exploration, environments, and automated tests.
+            certificateEnabled: true
+    CreateSession:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateSessionInput"
+          example:
+            title: Understanding HTTP Requests
+            description: Learn methods, headers, bodies, and response codes.
+            orderIndex: 0
+            recordingUrl: "https://example.com/recordings/http"
+            materialUrl: "https://example.com/materials/http"
+            quizUrl: null
+            feedbackUrl: null
+            durationMinutes: 60
+            isPublished: false
+    UpdateSession:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateSessionInput"
+          example:
+            title: Understanding HTTP Requests and Responses
+            durationMinutes: 75
+            isPublished: true
+    ReorderSessions:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [sessions]
+            properties:
+              sessions:
+                type: array
+                items:
+                  type: object
+                  required: [id, orderIndex]
+                  properties:
+                    id: { type: string, format: uuid }
+                    orderIndex: { type: integer, minimum: 0 }
+          example:
+            sessions:
+              - id: "{{sessionId}}"
+                orderIndex: 0
+    CreateEnrollment:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [userId, courseId]
+            properties:
+              userId: { type: string, format: uuid }
+              courseId: { type: string, format: uuid }
+              paymentStatus:
+                $ref: "#/components/schemas/PaymentStatus"
+          example:
+            userId: "{{targetUserId}}"
+            courseId: "{{courseId}}"
+            paymentStatus: PENDING
+    UpdateEnrollment:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                $ref: "#/components/schemas/EnrollmentStatus"
+              paymentStatus:
+                $ref: "#/components/schemas/PaymentStatus"
+              paymentCompletedAt: { type: string, format: date-time, nullable: true }
+              completedAt: { type: string, format: date-time, nullable: true }
+          example:
+            status: ACTIVE
+            paymentStatus: COMPLETED
+    IssueCertificate:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              description: { type: string, nullable: true }
+              issuedDate: { type: string, format: date-time }
+          example:
+            description: Successfully completed all course requirements.
+    RevokeCertificate:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [revocationReason]
+            properties:
+              revocationReason: { type: string, minLength: 5 }
+          example:
+            revocationReason: Issued using incorrect enrollment information.
+    CreateProject:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateProjectInput"
+          example:
+            courseId: "{{courseId}}"
+            enrollmentId: "{{enrollmentId}}"
+            title: Foundry API Test Suite
+            description: A reusable automated API regression collection.
+            thumbnailUrl: "https://example.com/project-thumbnail.png"
+            projectUrl: "https://example.com/projects/foundry-api"
+            githubUrl: "https://github.com/example/foundry-api-tests"
+            demoUrl: null
+            technologies: [Postman, JavaScript]
+            isPublic: true
+    UpdateProject:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateProjectInput"
+          example:
+            title: Foundry LMS API Regression Suite
+            description: An updated reusable API regression collection.
+            isPublic: true
+    ReviewProject:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status]
+            properties:
+              status:
+                type: string
+                enum: [PENDING, APPROVED, REJECTED]
+              adminFeedback: { type: string, nullable: true }
+          example:
+            status: APPROVED
+            adminFeedback: Strong API coverage and clear organization.
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, example: true }
+        data: {}
+        message: { type: string, example: Success }
+    ErrorEnvelope:
+      type: object
+      required: [success, error, code]
+      properties:
+        success: { type: boolean, example: false }
+        error: { type: string }
+        code: { type: string }
+        field: { type: string, nullable: true }
+        details: { nullable: true }
+    Role:
+      type: string
+      enum: [STUDENT, ADMIN, SUPER_ADMIN]
+    LearningServiceType:
+      type: string
+      enum: [BOOTCAMPS, PRETECH, FREE_LEARNING]
+    CatalogStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED, ARCHIVED]
+    CourseLevel:
+      type: string
+      enum: [OPEN, FOUNDATION, BEGINNER, INTERMEDIATE, ADVANCED]
+    CourseAccessType:
+      type: string
+      enum: [FREE, PAID]
+    DurationUnit:
+      type: string
+      enum: [SESSION, DAY, WEEK, MONTH]
+    EnrollmentStatus:
+      type: string
+      enum: [ACTIVE, COMPLETED, CANCELLED]
+    PaymentStatus:
+      type: string
+      enum: [NOT_REQUIRED, PENDING, PARTIAL, COMPLETED]
+    RegisterInput:
+      type: object
+      required: [firstName, lastName, email, password, phone, address, district, dateOfBirth, alStream]
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8 }
+        phone: { type: string, pattern: "^0[0-9]{9}$" }
+        address: { type: string }
+        district: { type: string }
+        dateOfBirth: { type: string, format: date }
+        alStream: { type: string, enum: [Science, Mathematics, Commerce, Arts, Technology] }
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    UpdateProfileInput:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        phone: { type: string, pattern: "^0[0-9]{9}$" }
+        address: { type: string }
+        district: { type: string }
+        dateOfBirth: { type: string, format: date-time }
+        alStream: { type: string, enum: [Science, Mathematics, Commerce, Arts, Technology] }
+    CreateCategoryInput:
+      type: object
+      required: [serviceType, slug, title, description, visualKey]
+      properties:
+        serviceType:
+          $ref: "#/components/schemas/LearningServiceType"
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        title: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, minLength: 10, maxLength: 600 }
+        audienceLabel: { type: string, nullable: true }
+        visualKey:
+          type: string
+          enum: [sparkles, cpu, code2, workflow, calculator, atom, bar-chart3, terminal, git-branch, globe, languages]
+        badgeLabel: { type: string, nullable: true }
+        sortOrder: { type: integer, minimum: 0 }
+    UpdateCategoryInput:
+      type: object
+      minProperties: 1
+      properties:
+        serviceType:
+          $ref: "#/components/schemas/LearningServiceType"
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        title: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, minLength: 10, maxLength: 600 }
+        audienceLabel: { type: string, nullable: true }
+        visualKey:
+          type: string
+          enum: [sparkles, cpu, code2, workflow, calculator, atom, bar-chart3, terminal, git-branch, globe, languages]
+        badgeLabel: { type: string, nullable: true }
+        sortOrder: { type: integer, minimum: 0 }
+    CreateCourseInput:
+      type: object
+      required: [categoryId, slug, title, summary, description, level, accessType, price]
+      properties:
+        categoryId: { type: string, format: uuid }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        title: { type: string, minLength: 3, maxLength: 160 }
+        summary: { type: string, minLength: 10, maxLength: 300 }
+        description: { type: string, minLength: 20, maxLength: 5000 }
+        level:
+          $ref: "#/components/schemas/CourseLevel"
+        durationValue: { type: integer, minimum: 1, maximum: 999, nullable: true }
+        durationUnit:
+          allOf:
+            - $ref: "#/components/schemas/DurationUnit"
+          nullable: true
+        accessType:
+          $ref: "#/components/schemas/CourseAccessType"
+        price: { type: number, minimum: 0, maximum: 99999999 }
+        currency: { type: string, minLength: 3, maxLength: 3, default: LKR }
+        certificateEnabled: { type: boolean, default: false }
+        highlights:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        skills:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        prerequisites:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        thumbnailUrl: { type: string, format: uri, nullable: true }
+        sortOrder: { type: integer, minimum: 0 }
+    UpdateCourseInput:
+      type: object
+      minProperties: 1
+      properties:
+        categoryId: { type: string, format: uuid }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        title: { type: string, minLength: 3, maxLength: 160 }
+        summary: { type: string, minLength: 10, maxLength: 300 }
+        description: { type: string, minLength: 20, maxLength: 5000 }
+        level:
+          $ref: "#/components/schemas/CourseLevel"
+        durationValue: { type: integer, minimum: 1, maximum: 999, nullable: true }
+        durationUnit:
+          allOf:
+            - $ref: "#/components/schemas/DurationUnit"
+          nullable: true
+        accessType:
+          $ref: "#/components/schemas/CourseAccessType"
+        price: { type: number, minimum: 0, maximum: 99999999 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        certificateEnabled: { type: boolean }
+        highlights:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        skills:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        prerequisites:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        thumbnailUrl: { type: string, format: uri, nullable: true }
+        sortOrder: { type: integer, minimum: 0 }
+    CreateSessionInput:
+      type: object
+      required: [title, orderIndex]
+      properties:
+        title: { type: string, minLength: 3 }
+        description: { type: string, nullable: true }
+        orderIndex: { type: integer, minimum: 0 }
+        recordingUrl: { type: string, format: uri, nullable: true }
+        materialUrl: { type: string, format: uri, nullable: true }
+        quizUrl: { type: string, format: uri, nullable: true }
+        feedbackUrl: { type: string, format: uri, nullable: true }
+        durationMinutes: { type: integer, minimum: 0, nullable: true }
+        isPublished: { type: boolean, default: false }
+    UpdateSessionInput:
+      type: object
+      properties:
+        title: { type: string, minLength: 3 }
+        description: { type: string, nullable: true }
+        orderIndex: { type: integer, minimum: 0 }
+        recordingUrl: { type: string, format: uri, nullable: true }
+        materialUrl: { type: string, format: uri, nullable: true }
+        quizUrl: { type: string, format: uri, nullable: true }
+        feedbackUrl: { type: string, format: uri, nullable: true }
+        durationMinutes: { type: integer, minimum: 0, nullable: true }
+        isPublished: { type: boolean }
+    CreateProjectInput:
+      type: object
+      required: [courseId, enrollmentId, title]
+      properties:
+        courseId: { type: string, format: uuid }
+        enrollmentId: { type: string, format: uuid }
+        title: { type: string, minLength: 3 }
+        description: { type: string, nullable: true }
+        thumbnailUrl: { type: string, format: uri, nullable: true }
+        projectUrl: { type: string, format: uri, nullable: true }
+        githubUrl: { type: string, format: uri, nullable: true }
+        demoUrl: { type: string, format: uri, nullable: true }
+        technologies:
+          type: array
+          items: { type: string }
+        isPublic: { type: boolean }
+    UpdateProjectInput:
+      type: object
+      properties:
+        title: { type: string, minLength: 3 }
+        description: { type: string, nullable: true }
+        thumbnailUrl: { type: string, format: uri, nullable: true }
+        projectUrl: { type: string, format: uri, nullable: true }
+        githubUrl: { type: string, format: uri, nullable: true }
+        demoUrl: { type: string, format: uri, nullable: true }
+        technologies:
+          type: array
+          items: { type: string }
+        isPublic: { type: boolean }

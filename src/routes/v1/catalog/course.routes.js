@@ -22,5 +22,11 @@ router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), courseC
 router.patch("/:id/publish", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.publishCourse);
 router.patch("/:id/unpublish", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.unpublishCourse);
 router.patch("/:id/archive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.archiveCourse);
+router.patch("/:id/unarchive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.unarchiveCourse);
+router.delete(
+  "/:id",
+  requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY),
+  courseController.deleteCoursePermanently,
+);
 
 export default router;

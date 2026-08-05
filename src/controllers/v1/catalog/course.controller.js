@@ -47,3 +47,23 @@ export async function archiveCourse(req, res, next) {
     return ApiResponse.send(res, await courseService.archiveCourseService(req.params.id, req.user.id));
   } catch (error) { next(error); }
 }
+
+export async function unarchiveCourse(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await courseService.unarchiveCourseService(req.params.id, req.user.id),
+      "Course restored as a draft",
+    );
+  } catch (error) { next(error); }
+}
+
+export async function deleteCoursePermanently(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await courseService.deleteCoursePermanentlyService(req.params.id, req.user.id),
+      "Course permanently deleted",
+    );
+  } catch (error) { next(error); }
+}

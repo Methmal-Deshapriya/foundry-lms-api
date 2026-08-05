@@ -159,3 +159,53 @@ export async function archiveCourseService(id, actorId) {
   }
   return toAdminCourse(course);
 }
+
+export async function unarchiveCourseService(id, actorId) {
+  const current = await courseRepo.findById(id);
+  if (!current) throw new NotFoundError("Course not found.");
+  if (current.status !== CATALOG_STATUSES.ARCHIVED) {
+    throw new ConflictError("Only archived courses can be restored.");
+  }
+  if (current.category.status === CATALOG_STATUSES.ARCHIVED) {
+    throw new ConflictError("Restore the parent category before this course.");
+  }
+
+  const course = await courseRepo.update(id, {
+    status: CATALOG_STATUSES.DRAFT,
+  });
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.COURSE_UNARCHIVED,
+    entityType: ENTITY_TYPES.COURSE,
+    entityId: id,
+    description: `Course "${course.title}" restored as a draft.`,
+  });
+  return toAdminCourse(course);
+}
+
+export async function deleteCoursePermanentlyService(id, actorId) {
+  const current = await courseRepo.findById(id);
+  if (!current) throw new NotFoundError("Course not found.");
+  if (current.status !== CATALOG_STATUSES.ARCHIVED) {
+    throw new ConflictError(
+      "Archive the course before permanently deleting it.",
+    );
+  }
+
+  const result = await courseRepo.removePermanently(id);
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.COURSE_DELETED_PERMANENTLY,
+    entityType: ENTITY_TYPES.COURSE,
+    entityId: id,
+    description: `Course "${current.title}" and all dependent learning records permanently deleted.`,
+    metadata: {
+      title: current.title,
+      slug: current.slug,
+      categoryId: current.categoryId,
+      ...result,
+    },
+  });
+  await revalidatePublicCatalogCache();
+  return result;
+}

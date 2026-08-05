@@ -55,3 +55,23 @@ export async function archiveCategory(req, res, next) {
     return ApiResponse.send(res, await categoryService.archiveCategoryService(req.params.id, req.user.id));
   } catch (error) { next(error); }
 }
+
+export async function unarchiveCategory(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await categoryService.unarchiveCategoryService(req.params.id, req.user.id),
+      "Category restored as a draft",
+    );
+  } catch (error) { next(error); }
+}
+
+export async function deleteCategoryPermanently(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await categoryService.deleteCategoryPermanentlyService(req.params.id, req.user.id),
+      "Category permanently deleted",
+    );
+  } catch (error) { next(error); }
+}

@@ -9,9 +9,16 @@
     "dev": "nodemon src/index.js",
     "studio": "prisma studio",
     "seed": "prisma db seed",
-    "bootstrap:super-admin": "node prisma/bootstrap-super-admin.js"
+    "bootstrap:super-admin": "node prisma/bootstrap-super-admin.js",
+    "api:postman": "node scripts/check-api-contract.js && node scripts/generate-postman.js",
+    "api:contract:check": "node scripts/check-api-contract.js",
+    "api:artifacts:check": "node scripts/check-api-contract.js && node scripts/generate-postman.js --check"
   },
-  "keywords": ["lms", "express", "prisma"],
+  "keywords": [
+    "lms",
+    "express",
+    "prisma"
+  ],
   "license": "ISC",
   "type": "module",
   "dependencies": {
@@ -31,6 +38,7 @@
     "nodemon": "^3.1.14",
     "prisma": "^7.7.0",
     "supertest": "^7.2.2",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "yaml": "2.8.1"
   }
 }

@@ -17,6 +17,7 @@ import certificateRoutes from "./routes/v1/enrollments/certificate.routes.js";
 import enrollmentRoutes from "./routes/v1/enrollments/enrollment.routes.js";
 import projectRoutes from "./routes/v1/projects/project.routes.js";
 import auditRoutes from "./routes/v1/audit/audit.routes.js";
+import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use("/api/v1/certificates", certificateRoutes);
 app.use("/api/v1/enrollments", enrollmentRoutes);
 app.use("/api/v1/projects", projectRoutes);
 app.use("/api/v1/audit", auditRoutes);
+app.use("/api/postman", apiArtifactRoutes);
 
 // 5. Health Check
 app.get("/api/health", (req, res) => {
