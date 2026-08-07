@@ -46,6 +46,31 @@ enum CourseAccessType {
   PAID
 }
 
+enum SessionReusePolicy {
+  SINGLE_COURSE
+  REUSABLE
+}
+
+enum SessionStatus {
+  DRAFT
+  READY
+  ARCHIVED
+}
+
+enum BatchStatus {
+  DRAFT
+  ENROLLING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum EnrollmentSource {
+  ADMIN
+  SELF
+}
+
 enum EnrollmentStatus {
   ACTIVE
   COMPLETED
@@ -86,7 +111,8 @@ model User {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  enrollments         Enrollment[]
+  enrollments         Enrollment[]         @relation("StudentEnrollments")
+  managedEnrollments  Enrollment[]         @relation("EnrollmentManager")
   studentProjects     StudentProject[]
   actorAuditLogs      AuditLog[]           @relation("ActorRelation")
   passwordResetTokens PasswordResetToken[]
@@ -171,7 +197,8 @@ model Course {
 
   category        Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   enrollments     Enrollment[]
-  sessions        Session[]
+  courseSessions  CourseSession[]
+  batches         Batch[]
   studentProjects StudentProject[]
 
   @@unique([categoryId, slug])
@@ -180,63 +207,140 @@ model Course {
 }
 
 model Enrollment {
-  id                 String           @id @default(uuid())
-  userId             String           @map("user_id")
-  courseId           String           @map("course_id")
-  status             EnrollmentStatus @default(ACTIVE)
-  paymentStatus      PaymentStatus    @default(PENDING) @map("payment_status")
-  paymentCompletedAt DateTime?        @map("payment_completed_at")
-  completedAt        DateTime?        @map("completed_at")
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
+  id                       String           @id @default(uuid())
+  userId                   String           @map("user_id")
+  courseId                 String           @map("course_id")
+  batchId                  String?          @map("batch_id")
+  source                   EnrollmentSource
+  enrolledByUserId         String?          @map("enrolled_by_user_id")
+  status                   EnrollmentStatus @default(ACTIVE)
+  paymentStatus            PaymentStatus    @default(PENDING) @map("payment_status")
+  paymentCompletedAt       DateTime?        @map("payment_completed_at")
+  externalPaymentReference String?          @map("external_payment_reference")
+  paymentNote              String?          @map("payment_note")
+  completedAt              DateTime?        @map("completed_at")
+  createdAt                DateTime         @default(now()) @map("created_at")
+  updatedAt                DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Cascade)
+  enrolledBy         User?               @relation("EnrollmentManager", fields: [enrolledByUserId], references: [id], onDelete: SetNull)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  batch              Batch?              @relation(fields: [batchId, courseId], references: [id, courseId], onDelete: Restrict)
   sessionCompletions SessionCompletion[]
   certificate        Certificate?
   studentProjects    StudentProject[]
 
-  @@unique([userId, courseId])
+  @@unique([id, courseId])
+  @@unique([userId, batchId])
+  @@index([userId, status])
   @@index([courseId, status])
+  @@index([batchId, status])
+  @@index([enrolledByUserId])
   @@map("enrollments")
 }
 
 model Session {
-  id              String   @id @default(uuid())
-  courseId        String   @map("course_id")
+  id              String             @id @default(uuid())
   title           String
   description     String?
-  orderIndex      Int      @map("order_index")
-  recordingUrl    String?  @map("recording_url")
-  materialUrl     String?  @map("material_url")
-  quizUrl         String?  @map("quiz_url")
-  feedbackUrl     String?  @map("feedback_url")
-  durationMinutes Int?     @map("duration_minutes")
-  isPublished     Boolean  @default(false) @map("is_published")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+  recordingUrl    String?            @map("recording_url")
+  materialUrl     String?            @map("material_url")
+  quizUrl         String?            @map("quiz_url")
+  feedbackUrl     String?            @map("feedback_url")
+  durationMinutes Int?               @map("duration_minutes")
+  reusePolicy     SessionReusePolicy @map("reuse_policy")
+  status          SessionStatus      @default(DRAFT)
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at")
 
-  course      Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  completions SessionCompletion[]
+  courseSessions CourseSession[]
 
-  @@unique([courseId, orderIndex])
-  @@index([courseId, isPublished, orderIndex])
+  @@index([status, updatedAt(sort: Desc)])
+  @@index([reusePolicy, status])
   @@map("sessions")
 }
 
-model SessionCompletion {
-  id           String   @id @default(uuid())
-  sessionId    String   @map("session_id")
-  enrollmentId String   @map("enrollment_id")
-  completedAt  DateTime @default(now()) @map("completed_at")
-  createdAt    DateTime @default(now()) @map("created_at")
+model CourseSession {
+  id         String    @id @default(uuid())
+  courseId   String    @map("course_id")
+  sessionId  String    @map("session_id")
+  orderIndex Int?      @map("order_index")
+  retiredAt  DateTime? @map("retired_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  session    Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  course      Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  session     Session             @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  batchLinks  BatchSession[]
+  completions SessionCompletion[]
 
-  @@unique([sessionId, enrollmentId])
-  @@index([enrollmentId])
+  @@unique([id, courseId])
+  @@unique([courseId, sessionId])
+  @@unique([courseId, orderIndex])
   @@index([sessionId])
+  @@index([courseId, retiredAt, orderIndex])
+  @@map("course_sessions")
+}
+
+model Batch {
+  id              String      @id @default(uuid())
+  courseId        String      @map("course_id")
+  name            String
+  code            String      @unique
+  startDate       DateTime    @map("start_date") @db.Date
+  expectedEndDate DateTime    @map("expected_end_date") @db.Date
+  timezone        String      @default("Asia/Colombo")
+  capacity        Int?
+  status          BatchStatus @default(DRAFT)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at")
+
+  course      Course         @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  sessions    BatchSession[]
+  enrollments Enrollment[]
+
+  @@unique([id, courseId])
+  @@index([courseId, status, startDate])
+  @@map("batches")
+}
+
+model BatchSession {
+  id              String    @id @default(uuid())
+  batchId         String    @map("batch_id")
+  courseSessionId String    @map("course_session_id")
+  courseId        String    @map("course_id")
+  orderIndex      Int       @map("order_index")
+  isReleased      Boolean   @default(false) @map("is_released")
+  availableAt     DateTime? @map("available_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  batch         Batch         @relation(fields: [batchId, courseId], references: [id, courseId], onDelete: Cascade)
+  courseSession CourseSession @relation(fields: [courseSessionId, courseId], references: [id, courseId], onDelete: Restrict)
+
+  @@unique([batchId, courseSessionId])
+  @@unique([batchId, orderIndex])
+  @@index([courseSessionId])
+  @@index([batchId, isReleased, availableAt])
+  @@index([courseId])
+  @@map("batch_sessions")
+}
+
+model SessionCompletion {
+  id              String   @id @default(uuid())
+  courseSessionId String   @map("course_session_id")
+  enrollmentId    String   @map("enrollment_id")
+  courseId        String   @map("course_id")
+  completedAt     DateTime @default(now()) @map("completed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  courseSession CourseSession @relation(fields: [courseSessionId, courseId], references: [id, courseId], onDelete: Cascade)
+  enrollment    Enrollment    @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Cascade)
+
+  @@unique([courseSessionId, enrollmentId])
+  @@index([enrollmentId])
+  @@index([courseSessionId])
+  @@index([courseId])
   @@map("session_completions")
 }
 
@@ -287,7 +391,7 @@ model StudentProject {
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   course     Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollment Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Cascade)
 
   @@index([courseId, status, isPublic])
   @@index([userId, createdAt(sort: Desc)])

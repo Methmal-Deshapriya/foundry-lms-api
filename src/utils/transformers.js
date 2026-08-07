@@ -13,17 +13,6 @@ export function transformUser(user) {
 }
 
 /**
- * Transform enrollment for response.
- */
-export function transformEnrollment(enrollment) {
-  if (!enrollment) return null;
-  return {
-    ...enrollment,
-    user: transformUser(enrollment.user),
-  };
-}
-
-/**
  * Transform certificate for response.
  */
 export function transformCertificate(certificate) {
@@ -48,20 +37,4 @@ export function transformProject(project) {
 export function transformProjectList(projects) {
   if (!projects) return [];
   return projects.map(transformProject);
-}
-
-/**
- * Transform session for response.
- */
-export function transformSession(session) {
-  if (!session) return null;
-  return session;
-}
-
-/**
- * Transform a list of sessions.
- */
-export function transformSessionList(sessions) {
-  if (!sessions) return [];
-  return sessions.map(transformSession);
 }

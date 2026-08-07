@@ -19,18 +19,26 @@ function createTransaction() {
     course: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findMany: vi.fn().mockResolvedValue([{ id: "course-1" }]),
-      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       delete: vi.fn().mockResolvedValue({}),
     },
+    courseSession: {
+      findMany: vi.fn().mockResolvedValue([
+        { id: "link-1", session: { id: "single-1", reusePolicy: "SINGLE_COURSE" } },
+        { id: "link-2", session: { id: "shared-1", reusePolicy: "REUSABLE" } },
+      ]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
+    },
+    batch: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    batchSession: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+    sessionCompletion: { count: vi.fn().mockResolvedValue(5) },
+    certificate: { count: vi.fn().mockResolvedValue(1) },
     studentProject: {
       deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
     },
     enrollment: {
       deleteMany: vi.fn().mockResolvedValue({ count: 3 }),
     },
-    session: {
-      deleteMany: vi.fn().mockResolvedValue({ count: 4 }),
-    },
+    session: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
   };
 }
 
@@ -47,17 +55,29 @@ describe("permanent catalog deletion transactions", () => {
     await expect(removeCategory("category-1")).resolves.toEqual({
       id: "category-1",
       deletedCourses: 1,
-      deletedSessions: 4,
+      deletedBatches: 1,
+      deletedBatchSessions: 2,
+      deletedCourseSessions: 2,
+      deletedExclusiveSessions: 1,
+      preservedReusableSessions: 1,
       deletedEnrollments: 3,
+      deletedCompletions: 5,
+      deletedCertificates: 1,
       deletedProjects: 2,
     });
 
     expect(transaction.studentProject.deleteMany).toHaveBeenCalledWith({
-      where: { courseId: { in: ["course-1"] } },
+      where: { courseId: "course-1" },
     });
     expect(transaction.enrollment.deleteMany).toHaveBeenCalled();
-    expect(transaction.session.deleteMany).toHaveBeenCalled();
-    expect(transaction.course.deleteMany).toHaveBeenCalled();
+    expect(transaction.session.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["single-1"] },
+        reusePolicy: "SINGLE_COURSE",
+        courseSessions: { none: {} },
+      },
+    });
+    expect(transaction.course.delete).toHaveBeenCalled();
     expect(transaction.category.delete).toHaveBeenCalledWith({
       where: { id: "category-1" },
     });
@@ -67,8 +87,14 @@ describe("permanent catalog deletion transactions", () => {
     await expect(removeCourse("course-1")).resolves.toEqual({
       id: "course-1",
       deletedCourses: 1,
-      deletedSessions: 4,
+      deletedBatches: 1,
+      deletedBatchSessions: 2,
+      deletedCourseSessions: 2,
+      deletedExclusiveSessions: 1,
+      preservedReusableSessions: 1,
       deletedEnrollments: 3,
+      deletedCompletions: 5,
+      deletedCertificates: 1,
       deletedProjects: 2,
     });
 

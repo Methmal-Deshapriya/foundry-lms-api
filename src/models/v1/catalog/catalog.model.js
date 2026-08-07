@@ -82,7 +82,8 @@ export function toAdminCourse(course) {
   return {
     ...course,
     price: Number(course.price),
-    sessionCount: course._count?.sessions ?? 0,
+    sessionCount: course._count?.courseSessions ?? 0,
+    batchCount: course._count?.batches ?? 0,
     enrollmentCount: course._count?.enrollments ?? 0,
     _count: undefined,
   };

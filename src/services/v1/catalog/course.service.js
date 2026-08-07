@@ -11,6 +11,7 @@ import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.c
 import { recordActionService } from "../audit/audit.service.js";
 import { ConflictError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
+import { assertCourseConfigurationForService } from "./learningServicePolicy.service.js";
 
 function parseOrThrow(schema, data) {
   const validation = schema.safeParse(data);
@@ -21,7 +22,7 @@ function parseOrThrow(schema, data) {
   return validation.data;
 }
 
-function validateMergedCourse(current, input) {
+function validateMergedCourse(current, input, serviceType, requirePublishablePrice = false) {
   const durationValue = input.durationValue !== undefined
     ? input.durationValue
     : current.durationValue;
@@ -34,11 +35,14 @@ function validateMergedCourse(current, input) {
       "durationValue",
     );
   }
-  const accessType = input.accessType ?? current.accessType;
-  const price = input.price ?? Number(current.price);
-  if (accessType === "FREE" && price !== 0) {
-    throw new ValidationError("Free courses must have a zero price.", "price");
-  }
+  assertCourseConfigurationForService(
+    serviceType,
+    {
+      accessType: input.accessType ?? current.accessType,
+      price: input.price ?? Number(current.price),
+    },
+    { requirePublishablePrice },
+  );
 }
 
 export async function getCoursesAdminService(query) {
@@ -64,6 +68,7 @@ export async function createCourseService(data, actorId) {
   if (category.status === CATALOG_STATUSES.ARCHIVED) {
     throw new ConflictError("Courses cannot be created under an archived category.");
   }
+  assertCourseConfigurationForService(category.serviceType, input);
   const course = await courseRepo.create({
     ...input,
     status: CATALOG_STATUSES.DRAFT,
@@ -94,14 +99,20 @@ export async function updateCourseService(id, data, actorId) {
       "Published course slugs and categories are immutable. Unpublish it first.",
     );
   }
+  let targetCategory = current.category;
   if (input.categoryId && input.categoryId !== current.categoryId) {
-    const category = await categoryRepo.findById(input.categoryId);
-    if (!category) throw new NotFoundError("Category not found.");
-    if (category.status === CATALOG_STATUSES.ARCHIVED) {
+    targetCategory = await categoryRepo.findById(input.categoryId);
+    if (!targetCategory) throw new NotFoundError("Category not found.");
+    if (targetCategory.status === CATALOG_STATUSES.ARCHIVED) {
       throw new ConflictError("Course cannot move to an archived category.");
     }
   }
-  validateMergedCourse(current, input);
+  validateMergedCourse(
+    current,
+    input,
+    targetCategory.serviceType,
+    current.status === CATALOG_STATUSES.PUBLISHED,
+  );
   const course = await courseRepo.update(id, input);
   recordActionService({
     actorUserId: actorId,
@@ -126,7 +137,12 @@ export async function setCoursePublicationService(id, publish, actorId) {
   if (publish && current.category.status !== CATALOG_STATUSES.PUBLISHED) {
     throw new ConflictError("Publish the parent category before publishing this course.");
   }
-  validateMergedCourse(current, {});
+  validateMergedCourse(
+    current,
+    {},
+    current.category.serviceType,
+    publish,
+  );
   const status = publish ? CATALOG_STATUSES.PUBLISHED : CATALOG_STATUSES.DRAFT;
   const course = await courseRepo.update(id, { status });
   recordActionService({

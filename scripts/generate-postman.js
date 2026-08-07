@@ -32,6 +32,9 @@ const captureScripts = new Map([
   ["createCategory", [["categoryId", "id"], ["categorySlug", "slug"]]],
   ["createCourse", [["courseId", "id"], ["courseSlug", "slug"]]],
   ["createSession", [["sessionId", "id"]]],
+  ["attachCourseSession", [["courseSessionId", "courseSession.id"]]],
+  ["createBatch", [["batchId", "batch.id"]]],
+  ["upsertBatchSession", [["batchSessionId", "id"]]],
   ["selfEnrollFreeCourse", [["enrollmentId", "id"]]],
   ["manuallyEnrollStudent", [["enrollmentId", "id"]]],
   ["issueCertificate", [["certificateId", "id"], ["certificateCode", "certificateCode"]]],
@@ -55,6 +58,9 @@ const environmentVariables = [
   ["courseId", ""],
   ["courseSlug", ""],
   ["sessionId", ""],
+  ["courseSessionId", ""],
+  ["batchId", ""],
+  ["batchSessionId", ""],
   ["enrollmentId", ""],
   ["certificateId", ""],
   ["certificateCode", ""],
@@ -177,8 +183,9 @@ function decorateRequests(items) {
       "  const data = pm.response.json()?.data;",
     ];
     for (const [variable, property] of captures) {
+      const optionalProperty = property.split(".").join("?.");
       lines.push(
-        `  if (data?.${property}) pm.environment.set("${variable}", data.${property});`,
+        `  if (data?.${optionalProperty}) pm.environment.set("${variable}", data.${property});`,
       );
     }
     lines.push("}");

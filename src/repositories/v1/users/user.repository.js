@@ -42,25 +42,29 @@ export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
  * @param {number} limit - Max number of students to return.
  * @returns {Promise<Array>} List of eligible student users.
  */
-export async function searchEligibleStudentsForCourse(
-  courseId,
+export async function searchEligibleStudentsForBatch(
+  batchId,
   query = "",
-  limit = 5
+  limit = 10
 ) {
   const normalizedQuery = typeof query === "string" ? query.trim() : "";
 
   return await prisma.user.findMany({
     where: {
       role: "STUDENT",
-      email: normalizedQuery
+      emailVerified: true,
+      ...(normalizedQuery
         ? {
-            contains: normalizedQuery,
-            mode: "insensitive",
+            OR: [
+              { email: { contains: normalizedQuery, mode: "insensitive" } },
+              { firstName: { contains: normalizedQuery, mode: "insensitive" } },
+              { lastName: { contains: normalizedQuery, mode: "insensitive" } },
+            ],
           }
-        : undefined,
+        : {}),
       enrollments: {
         none: {
-          courseId,
+          batchId,
         },
       },
     },
@@ -68,6 +72,13 @@ export async function searchEligibleStudentsForCourse(
       email: "asc",
     },
     take: Number(limit),
+  });
+}
+
+export async function findVerifiedStudentsByIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  return prisma.user.findMany({
+    where: { id: { in: ids }, role: "STUDENT", emailVerified: true },
   });
 }
 

@@ -20,10 +20,32 @@ describe("central authorization policy", () => {
     expect(
       hasPermission(ROLES.ADMIN, PERMISSIONS.CATALOG_DELETE_PERMANENTLY),
     ).toBe(false);
+    expect(
+      hasPermission(ROLES.SUPER_ADMIN, PERMISSIONS.SESSIONS_DELETE_PERMANENTLY),
+    ).toBe(true);
+    expect(
+      hasPermission(ROLES.ADMIN, PERMISSIONS.SESSIONS_DELETE_PERMANENTLY),
+    ).toBe(false);
   });
 
   it("only grants students the free-course self-enrollment capability", () => {
     expect(hasPermission(ROLES.STUDENT, PERMISSIONS.COURSES_SELF_ENROLL)).toBe(true);
     expect(hasPermission(ROLES.STUDENT, PERMISSIONS.CATALOG_VIEW_ADMIN)).toBe(false);
+  });
+
+  it("allows admins and super admins to manage learning delivery", () => {
+    const deliveryPermissions = [
+      PERMISSIONS.SESSIONS_VIEW_LIBRARY,
+      PERMISSIONS.SESSIONS_MANAGE_LIBRARY,
+      PERMISSIONS.COURSE_CURRICULUM_MANAGE,
+      PERMISSIONS.BATCHES_MANAGE,
+      PERMISSIONS.BATCH_SESSIONS_RELEASE,
+    ];
+
+    for (const permission of deliveryPermissions) {
+      expect(hasPermission(ROLES.ADMIN, permission)).toBe(true);
+      expect(hasPermission(ROLES.SUPER_ADMIN, permission)).toBe(true);
+      expect(hasPermission(ROLES.STUDENT, permission)).toBe(false);
+    }
   });
 });

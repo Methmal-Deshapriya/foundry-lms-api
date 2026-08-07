@@ -1,5 +1,10 @@
 import prisma from "../../../utils/prisma.js";
 import { ConflictError, handlePrismaError } from "../../../utils/Errors.js";
+import {
+  addDeletionSummary,
+  deleteCourseGraph,
+  emptyDeletionSummary,
+} from "./catalogDeletion.repository.js";
 
 export async function findPublicByService(serviceType) {
   return prisma.category.findMany({
@@ -123,44 +128,19 @@ export async function removePermanently(id) {
       });
       const courseIds = courses.map((course) => course.id);
 
-      let deletedProjects = 0;
-      let deletedEnrollments = 0;
-      let deletedSessions = 0;
-      let deletedCourses = 0;
-
-      if (courseIds.length > 0) {
-        // Keep this order consistent with course deletion and satisfy the
-        // restrictive historical foreign keys without broad schema cascades.
-        deletedProjects = (
-          await transaction.studentProject.deleteMany({
-            where: { courseId: { in: courseIds } },
-          })
-        ).count;
-        deletedEnrollments = (
-          await transaction.enrollment.deleteMany({
-            where: { courseId: { in: courseIds } },
-          })
-        ).count;
-        deletedSessions = (
-          await transaction.session.deleteMany({
-            where: { courseId: { in: courseIds } },
-          })
-        ).count;
-        deletedCourses = (
-          await transaction.course.deleteMany({
-            where: { id: { in: courseIds } },
-          })
-        ).count;
+      const summary = emptyDeletionSummary();
+      for (const courseId of courseIds) {
+        addDeletionSummary(
+          summary,
+          await deleteCourseGraph(transaction, courseId),
+        );
       }
 
       await transaction.category.delete({ where: { id } });
 
       return {
         id,
-        deletedCourses,
-        deletedSessions,
-        deletedEnrollments,
-        deletedProjects,
+        ...summary,
       };
     });
   } catch (error) {

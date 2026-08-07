@@ -1,7 +1,8 @@
 import express from "express";
 import * as courseController from "../../../controllers/v1/catalog/course.controller.js";
 import * as enrollmentController from "../../../controllers/v1/enrollments/enrollment.controller.js";
-import sessionRoutes from "../courses/session.routes.js";
+import curriculumRoutes from "../courses/courseCurriculum.routes.js";
+import courseBatchRoutes from "../batches/courseBatch.routes.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
 import { requirePermission } from "../../../middlewares/requirePermission.js";
 import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
@@ -9,7 +10,8 @@ import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js
 const router = express.Router();
 router.use(authenticate);
 
-router.use("/:courseId/sessions", sessionRoutes);
+router.use("/:courseId/curriculum", curriculumRoutes);
+router.use("/:courseId/batches", courseBatchRoutes);
 router.post(
   "/:courseId/enroll",
   requirePermission(PERMISSIONS.COURSES_SELF_ENROLL),
