@@ -1,8 +1,8 @@
 import express from "express";
 import * as projectController from "../../../controllers/v1/projects/project.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
-import { requireRole } from "../../../middlewares/requireRole.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { requirePermission } from "../../../middlewares/requirePermission.js";
+import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 
 const router = express.Router();
 
@@ -26,13 +26,13 @@ router.patch("/:id", projectController.updateProject);
 // Admin routes
 router.get(
   "/admin/all",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  requirePermission(PERMISSIONS.PROJECTS_REVIEW),
   projectController.getAllProjectsAdmin
 );
 
 router.patch(
   "/:id/review",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  requirePermission(PERMISSIONS.PROJECTS_REVIEW),
   projectController.reviewProject
 );
 

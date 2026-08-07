@@ -1,73 +1,65 @@
-import { toPublicBootcampResponse } from "../bootcamps/bootcamp.model.js";
+import { toPublicCourseCard } from "../catalog/catalog.model.js";
 import { toAdminUserResponse } from "../users/user.model.js";
 
-/**
- * Enrollment Model - The "Relationship Mask"
- * Defines the shape of student-bootcamp connections.
- */
+function toBatchSummary(batch) {
+  if (!batch) return null;
+  return {
+    id: batch.id,
+    name: batch.name,
+    code: batch.code,
+    startDate: batch.startDate,
+    expectedEndDate: batch.expectedEndDate,
+    timezone: batch.timezone,
+    status: batch.status,
+  };
+}
 
-/**
- * Transform an enrollment record for the Student's "My Courses" view.
- * Includes details about the bootcamp itself.
- * 
- * @param {object} enrollment - The raw enrollment record with bootcamp included.
- * @returns {object} The sanitized enrollment with bootcamp details.
- */
+function commonFields(enrollment) {
+  return {
+    id: enrollment.id,
+    userId: enrollment.userId,
+    courseId: enrollment.courseId,
+    batchId: enrollment.batchId,
+    source: enrollment.source,
+    status: enrollment.status,
+    paymentStatus: enrollment.paymentStatus,
+    paymentCompletedAt: enrollment.paymentCompletedAt,
+    completedAt: enrollment.completedAt,
+    enrolledAt: enrollment.createdAt,
+    createdAt: enrollment.createdAt,
+    updatedAt: enrollment.updatedAt,
+    batch: toBatchSummary(enrollment.batch),
+  };
+}
+
 export function toMyEnrollmentResponse(enrollment) {
   if (!enrollment) return null;
-
   return {
-    id: enrollment.id,
-    userId: enrollment.userId,
-    bootcampId: enrollment.bootcampId,
-    status: enrollment.status,
-    paymentStatus: enrollment.paymentStatus,
-    paymentCompletedAt: enrollment.paymentCompletedAt,
-    completedAt: enrollment.completedAt,
-    createdAt: enrollment.createdAt,
-    updatedAt: enrollment.updatedAt,
-    enrolledAt: enrollment.createdAt,
-    bootcamp: enrollment.bootcamp ? toPublicBootcampResponse(enrollment.bootcamp) : null,
+    ...commonFields(enrollment),
+    course: enrollment.course ? toPublicCourseCard(enrollment.course) : null,
   };
 }
 
-/**
- * Transform an enrollment record for the Admin's "Class List" view.
- * Includes details about the student.
- * 
- * @param {object} enrollment - The raw enrollment record with user included.
- * @returns {object} The sanitized enrollment with student details.
- */
-export function toBootcampStudentResponse(enrollment) {
+export function toAdminEnrollmentResponse(enrollment) {
   if (!enrollment) return null;
-
   return {
-    id: enrollment.id,
-    userId: enrollment.userId,
-    bootcampId: enrollment.bootcampId,
-    status: enrollment.status,
-    paymentStatus: enrollment.paymentStatus,
-    paymentCompletedAt: enrollment.paymentCompletedAt,
-    completedAt: enrollment.completedAt,
-    createdAt: enrollment.createdAt,
-    updatedAt: enrollment.updatedAt,
-    enrolledAt: enrollment.createdAt,
+    ...commonFields(enrollment),
+    externalPaymentReference: enrollment.externalPaymentReference,
+    paymentNote: enrollment.paymentNote,
+    enrolledByUserId: enrollment.enrolledByUserId,
     user: enrollment.user ? toAdminUserResponse(enrollment.user) : null,
+    enrolledBy: enrollment.enrolledBy
+      ? toAdminUserResponse(enrollment.enrolledBy)
+      : null,
+    course: enrollment.course ? toPublicCourseCard(enrollment.course) : null,
   };
 }
 
-/**
- * Transform an array of enrollments for the student view.
- */
-export function toMyEnrollmentListResponse(enrollments) {
-  if (!enrollments || !Array.isArray(enrollments)) return [];
-  return enrollments.map((e) => toMyEnrollmentResponse(e));
-}
+export const toMyEnrollmentListResponse = (enrollments) =>
+  Array.isArray(enrollments) ? enrollments.map(toMyEnrollmentResponse) : [];
 
-/**
- * Transform an array of enrollments for the admin view.
- */
-export function toBootcampStudentListResponse(enrollments) {
-  if (!enrollments || !Array.isArray(enrollments)) return [];
-  return enrollments.map((e) => toBootcampStudentResponse(e));
-}
+export const toAdminEnrollmentListResponse = (enrollments) =>
+  Array.isArray(enrollments) ? enrollments.map(toAdminEnrollmentResponse) : [];
+
+// Compatibility alias for course-wide admin roster consumers.
+export const toCourseStudentListResponse = toAdminEnrollmentListResponse;

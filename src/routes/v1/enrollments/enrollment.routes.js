@@ -1,10 +1,10 @@
 import express from "express";
 import * as enrollmentController from "../../../controllers/v1/enrollments/enrollment.controller.js";
-import * as progressController from "../../../controllers/v1/bootcamps/progress.controller.js";
 import * as certificateController from "../../../controllers/v1/enrollments/certificate.controller.js";
+import * as classroomController from "../../../controllers/v1/learning/classroom.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
-import { requireRole } from "../../../middlewares/requireRole.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { requirePermission } from "../../../middlewares/requirePermission.js";
+import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 
 /**
  * Enrollment Routes - The "Access Map"
@@ -18,17 +18,25 @@ router.use(authenticate);
 
 /**
  * @route   GET /v1/enrollments/my
- * @desc    Get current student's enrolled bootcamps
+ * @desc    Get current student's enrolled courses
  * @access  Private (STUDENT, ADMIN, SUPER_ADMIN)
  */
 router.get("/my", enrollmentController.getMyEnrollmentsController);
 
-/**
- * @route   GET /v1/enrollments/:enrollmentId/progress
- * @desc    Get derived progress for an enrollment
- * @access  Private (Owner or Admin)
- */
-router.get("/:enrollmentId/progress", progressController.getProgress);
+router.get("/:enrollmentId/classroom", classroomController.getClassroom);
+router.get("/:enrollmentId/progress", classroomController.getProgress);
+router.get(
+  "/:enrollmentId/sessions/:courseSessionId",
+  classroomController.getSession,
+);
+router.post(
+  "/:enrollmentId/sessions/:courseSessionId/complete",
+  classroomController.completeSession,
+);
+router.delete(
+  "/:enrollmentId/sessions/:courseSessionId/complete",
+  classroomController.uncompleteSession,
+);
 
 /**
  * @route   POST /v1/enrollments/:enrollmentId/certificate
@@ -37,19 +45,8 @@ router.get("/:enrollmentId/progress", progressController.getProgress);
  */
 router.post(
   "/:enrollmentId/certificate",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  requirePermission(PERMISSIONS.CERTIFICATES_MANAGE),
   certificateController.issueCertificate
-);
-
-/**
- * @route   POST /v1/enrollments
- * @desc    Manually enroll a student into a bootcamp
- * @access  Private (ADMIN, SUPER_ADMIN only)
- */
-router.post(
-  "/",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
-  enrollmentController.enrollStudentController
 );
 
 /**
@@ -59,30 +56,19 @@ router.post(
  */
 router.patch(
   "/:id",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
+  requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE),
   enrollmentController.updateEnrollmentController
 );
 
 /**
- * @route   GET /v1/enrollments/bootcamp/:bootcampId/eligible-students
- * @desc    Get students eligible for manual enrollment in a specific bootcamp
+ * @route   GET /v1/enrollments/course/:courseId
+ * @desc    Get all students enrolled in a specific course
  * @access  Private (ADMIN, SUPER_ADMIN only)
  */
 router.get(
-  "/bootcamp/:bootcampId/eligible-students",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
-  enrollmentController.getEligibleStudentsForBootcampController
-);
-
-/**
- * @route   GET /v1/enrollments/bootcamp/:bootcampId
- * @desc    Get all students enrolled in a specific bootcamp
- * @access  Private (ADMIN, SUPER_ADMIN only)
- */
-router.get(
-  "/bootcamp/:bootcampId",
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
-  enrollmentController.getBootcampStudentsController
+  "/course/:courseId",
+  requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE),
+  enrollmentController.getCourseStudentsController
 );
 
 export default router;

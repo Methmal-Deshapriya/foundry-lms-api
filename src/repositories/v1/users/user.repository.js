@@ -36,31 +36,35 @@ export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
 }
 
 /**
- * Search students who are not already enrolled in a given bootcamp.
- * @param {string} bootcampId - UUID of the bootcamp.
+ * Search students who are not already enrolled in a given course.
+ * @param {string} courseId - UUID of the course.
  * @param {string} query - Partial email search text.
  * @param {number} limit - Max number of students to return.
  * @returns {Promise<Array>} List of eligible student users.
  */
-export async function searchEligibleStudentsForBootcamp(
-  bootcampId,
+export async function searchEligibleStudentsForBatch(
+  batchId,
   query = "",
-  limit = 5
+  limit = 10
 ) {
   const normalizedQuery = typeof query === "string" ? query.trim() : "";
 
   return await prisma.user.findMany({
     where: {
       role: "STUDENT",
-      email: normalizedQuery
+      emailVerified: true,
+      ...(normalizedQuery
         ? {
-            contains: normalizedQuery,
-            mode: "insensitive",
+            OR: [
+              { email: { contains: normalizedQuery, mode: "insensitive" } },
+              { firstName: { contains: normalizedQuery, mode: "insensitive" } },
+              { lastName: { contains: normalizedQuery, mode: "insensitive" } },
+            ],
           }
-        : undefined,
+        : {}),
       enrollments: {
         none: {
-          bootcampId,
+          batchId,
         },
       },
     },
@@ -68,6 +72,13 @@ export async function searchEligibleStudentsForBootcamp(
       email: "asc",
     },
     take: Number(limit),
+  });
+}
+
+export async function findVerifiedStudentsByIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  return prisma.user.findMany({
+    where: { id: { in: ids }, role: "STUDENT", emailVerified: true },
   });
 }
 

@@ -31,6 +31,9 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   if (enrollment.status !== "COMPLETED") {
     throw new ValidationError("Enrollment must be marked as COMPLETED before issuing a certificate.");
   }
+  if (!enrollment.course.certificateEnabled) {
+    throw new ValidationError("Certificates are not enabled for this course.");
+  }
 
   // 3. Duplicate Check
   const existing = await certificateRepo.findByEnrollmentId(enrollmentId);
@@ -47,14 +50,14 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
     enrollmentId,
     certificateCode,
     studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
-    bootcampName: enrollment.bootcamp.title,
+    courseName: enrollment.course.title,
     description: validation.data.description,
     issuedDate: validation.data.issuedDate ? new Date(validation.data.issuedDate) : new Date(),
     status: "ISSUED",
     certificateData: {
-      skills: enrollment.bootcamp.skills,
+      skills: enrollment.course.skills,
       studentEmail: enrollment.user.email,
-      bootcampSlug: enrollment.bootcamp.slug,
+      courseSlug: enrollment.course.slug,
     },
     snapshotUrl,
   });
@@ -65,7 +68,7 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
     action: AUDIT_ACTIONS.CERTIFICATE_ISSUED,
     entityType: ENTITY_TYPES.CERTIFICATE,
     entityId: certificate.id,
-    description: `Certificate ${certificateCode} issued to student ${enrollment.user.email} for "${enrollment.bootcamp.title}"`,
+    description: `Certificate ${certificateCode} issued to student ${enrollment.user.email} for "${enrollment.course.title}"`,
     metadata: { enrollmentId, certificateCode }
   });
 
@@ -126,7 +129,7 @@ export async function verifyCertificateService(certificateCode) {
 
   return {
     studentName: certificate.studentName,
-    bootcampName: certificate.bootcampName,
+    courseName: certificate.courseName,
     issuedDate: certificate.issuedDate,
     certificateCode: certificate.certificateCode,
     status: certificate.status,

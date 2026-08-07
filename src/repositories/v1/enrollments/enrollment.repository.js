@@ -1,110 +1,126 @@
 import prisma from "../../../utils/prisma.js";
-import { handlePrismaError } from "../../../utils/Errors.js";
+import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
+import {
+  ConflictError,
+  NotFoundError,
+  handlePrismaError,
+} from "../../../utils/Errors.js";
 
-/**
- * Enrollment Repository - The "Bridge Librarian"
- * Handles all database operations linking users to bootcamps.
- */
+const courseInclude = { category: true };
+const enrollmentInclude = {
+  user: true,
+  enrolledBy: true,
+  course: { include: courseInclude },
+  batch: true,
+};
 
-/**
- * Create a new enrollment record.
- * @param {string} userId - UUID of the student.
- * @param {string} bootcampId - UUID of the bootcamp.
- * @param {object} extraData - Optional initial state (status, paymentStatus, etc).
- * @returns {Promise<object>} The new enrollment record.
- */
-export async function create(userId, bootcampId, extraData = {}) {
+export async function createPaid(batchId, userId, actorId, payment) {
+  try {
+    const enrollmentId = await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `batch-enrollment:${batchId}`);
+      const batch = await transaction.batch.findUnique({ where: { id: batchId } });
+      if (!batch) throw new NotFoundError("Batch not found.");
+
+      const existing = await transaction.enrollment.findFirst({
+        where: { userId, batchId },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new ConflictError("Student is already enrolled in this batch.");
+      }
+
+      if (batch.capacity != null) {
+        const occupied = await transaction.enrollment.count({
+          where: { batchId, status: { not: "CANCELLED" } },
+        });
+        if (occupied >= batch.capacity) {
+          throw new ConflictError("This batch has reached its enrollment capacity.");
+        }
+      }
+
+      const enrollment = await transaction.enrollment.create({
+        data: {
+          userId,
+          courseId: batch.courseId,
+          batchId,
+          source: "ADMIN",
+          enrolledByUserId: actorId,
+          status: "ACTIVE",
+          ...payment,
+        },
+        select: { id: true },
+      });
+      return enrollment.id;
+    });
+    return await findById(enrollmentId);
+  } catch (error) {
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
+    throw handlePrismaError(error);
+  }
+}
+
+export async function createFree(userId, courseId) {
   try {
     return await prisma.enrollment.create({
       data: {
         userId,
-        bootcampId,
-        ...extraData,
+        courseId,
+        batchId: null,
+        source: "SELF",
+        enrolledByUserId: null,
+        status: "ACTIVE",
+        paymentStatus: "NOT_REQUIRED",
       },
+      include: enrollmentInclude,
     });
   } catch (error) {
     throw handlePrismaError(error);
   }
 }
 
-/**
- * Find a specific enrollment by its unique ID.
- * @param {string} id - The UUID of the enrollment.
- * @returns {Promise<object|null>} The enrollment object or null.
- */
 export async function findById(id) {
-  return await prisma.enrollment.findUnique({
-    where: { id },
-    include: {
-      user: true,
-      bootcamp: true,
-    },
-  });
+  return prisma.enrollment.findUnique({ where: { id }, include: enrollmentInclude });
 }
 
-/**
- * Update an existing enrollment.
- * @param {string} id - The UUID of the enrollment.
- * @param {object} data - The fields to update.
- * @returns {Promise<object>} The updated enrollment.
- */
 export async function update(id, data) {
   try {
     return await prisma.enrollment.update({
       where: { id },
       data,
+      include: enrollmentInclude,
     });
   } catch (error) {
     throw handlePrismaError(error);
   }
 }
 
-/**
- * Find a specific enrollment by user and bootcamp.
- * Used to prevent duplicate enrollments.
- * @param {string} userId - UUID of the student.
- * @param {string} bootcampId - UUID of the bootcamp.
- * @returns {Promise<object|null>} The enrollment record or null.
- */
-export async function findExisting(userId, bootcampId) {
-  return await prisma.enrollment.findUnique({
-    where: {
-      userId_bootcampId: {
-        userId,
-        bootcampId,
-      },
-    },
+export async function findFree(userId, courseId) {
+  return prisma.enrollment.findFirst({
+    where: { userId, courseId, batchId: null },
+    include: enrollmentInclude,
   });
 }
 
-/**
- * Fetch all enrollments for a specific user.
- * Includes nested bootcamp details.
- * @param {string} userId - UUID of the user.
- * @returns {Promise<Array>} List of enrollments with bootcamp data.
- */
 export async function findUserEnrollments(userId) {
-  return await prisma.enrollment.findMany({
+  return prisma.enrollment.findMany({
     where: { userId },
-    include: {
-      bootcamp: true, // This is a "Join" - it fetches bootcamp details in one query
-    },
+    include: enrollmentInclude,
     orderBy: { createdAt: "desc" },
   });
 }
 
-/**
- * Fetch all students enrolled in a specific bootcamp.
- * Includes nested user details.
- * @param {string} bootcampId - UUID of the bootcamp.
- * @returns {Promise<Array>} List of enrollments with user data.
- */
-export async function findBootcampEnrollments(bootcampId) {
-  return await prisma.enrollment.findMany({
-    where: { bootcampId },
-    include: {
-      user: true, // This is a "Join" - it fetches user details in one query
-    },
+export async function findBatchEnrollments(batchId) {
+  return prisma.enrollment.findMany({
+    where: { batchId },
+    include: enrollmentInclude,
+    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+  });
+}
+
+export async function findCourseEnrollments(courseId) {
+  return prisma.enrollment.findMany({
+    where: { courseId },
+    include: enrollmentInclude,
     orderBy: { createdAt: "desc" },
   });
 }

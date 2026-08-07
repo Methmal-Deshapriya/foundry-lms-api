@@ -7,26 +7,6 @@ import { ForbiddenError, NotFoundError } from "./Errors.js";
  */
 
 /**
- * Assert that a user has an active enrollment in a specific bootcamp.
- * @param {string} userId
- * @param {string} bootcampId
- * @throws {ForbiddenError} if enrollment is not found or not active.
- */
-export async function assertEnrollmentAccess(userId, bootcampId) {
-  const enrollment = await prisma.enrollment.findUnique({
-    where: {
-      userId_bootcampId: { userId, bootcampId },
-    },
-  });
-
-  if (!enrollment || enrollment.status === "CANCELLED") {
-    throw new ForbiddenError("You must be enrolled in this bootcamp to access this resource.");
-  }
-
-  return enrollment;
-}
-
-/**
  * Assert that a user owns a specific enrollment.
  * @param {string} userId
  * @param {string} enrollmentId

@@ -10,7 +10,7 @@ export async function findById(id) {
     where: { id },
     include: {
       user: true,
-      bootcamp: true,
+      course: true,
       enrollment: true,
     },
   });
@@ -20,7 +20,7 @@ export async function findByUserId(userId) {
   return await prisma.studentProject.findMany({
     where: { userId },
     include: {
-      bootcamp: true,
+      course: true,
     },
     orderBy: { createdAt: "desc" },
   });
@@ -30,7 +30,7 @@ export async function findAllAdmin() {
   return await prisma.studentProject.findMany({
     include: {
       user: true,
-      bootcamp: true,
+      course: true,
     },
     orderBy: { createdAt: "desc" },
   });
@@ -45,10 +45,11 @@ export async function findPublicShowcase() {
     include: {
       user: {
         select: {
-          name: true,
+          firstName: true,
+          lastName: true,
         },
       },
-      bootcamp: {
+      course: {
         select: {
           title: true,
         },

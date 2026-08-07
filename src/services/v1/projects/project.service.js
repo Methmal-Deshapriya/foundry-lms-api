@@ -1,11 +1,11 @@
 import * as projectRepo from "../../../repositories/v1/projects/project.repository.js";
-import * as enrollmentRepo from "../../../repositories/v1/enrollments/enrollment.repository.js";
 import { createProjectSchema, updateProjectSchema, reviewProjectSchema } from "../../../constants/v1/projects/projects.schema.js";
-import { assertProjectOwnership, assertEnrollmentOwnership } from "../../../utils/accessHelpers.js";
+import { assertProjectOwnership } from "../../../utils/accessHelpers.js";
 import { ValidationError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
 import { transformProject, transformProjectList } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
+import { requireEnrollmentAccessService } from "../learning/classroom.service.js";
 
 /**
  * Student Project Service
@@ -22,17 +22,17 @@ export async function submitProjectService(userId, data) {
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  const { enrollmentId, bootcampId } = validation.data;
+  const { enrollmentId, courseId } = validation.data;
 
   // 2. Access/Ownership Check
-  // Verify enrollment belongs to the user and matches the bootcamp
-  const enrollment = await enrollmentRepo.findById(enrollmentId);
-  if (!enrollment || enrollment.userId !== userId || enrollment.bootcampId !== bootcampId) {
+  // Verify enrollment belongs to the user and matches the course.
+  const { enrollment } = await requireEnrollmentAccessService(
+    enrollmentId,
+    { id: userId, role: "STUDENT" },
+    { adminsAllowed: false },
+  );
+  if (enrollment.courseId !== courseId) {
     throw new ForbiddenError("Invalid enrollment for this project submission.");
-  }
-
-  if (enrollment.status === "CANCELLED") {
-    throw new ForbiddenError("Cannot submit projects for a cancelled enrollment.");
   }
 
   // 3. Action
