@@ -13,6 +13,27 @@ export const ENROLLMENT_MODES = Object.freeze({
   SELF: "SELF",
 });
 
+export const LEARNING_SERVICE_DEFINITIONS = Object.freeze([
+  Object.freeze({
+    type: LEARNING_SERVICE_TYPES.BOOTCAMPS,
+    slug: "bootcamps",
+    label: "Bootcamps",
+    description: "Paid, batch-based professional learning programs.",
+  }),
+  Object.freeze({
+    type: LEARNING_SERVICE_TYPES.PRETECH,
+    slug: "pretech-courses",
+    label: "PreTech Courses",
+    description: "Paid, batch-based preparation courses.",
+  }),
+  Object.freeze({
+    type: LEARNING_SERVICE_TYPES.FREE_LEARNING,
+    slug: "free-learning",
+    label: "Free Learning",
+    description: "Self-paced courses available through free enrollment.",
+  }),
+]);
+
 export const LEARNING_SERVICE_POLICIES = Object.freeze({
   [LEARNING_SERVICE_TYPES.BOOTCAMPS]: Object.freeze({
     deliveryMode: DELIVERY_MODES.COHORT,
@@ -66,4 +87,3 @@ if (
 ) {
   throw new Error("Learning-service policy contains an unsupported access type.");
 }
-

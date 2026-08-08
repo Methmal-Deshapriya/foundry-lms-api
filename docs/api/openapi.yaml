@@ -29,6 +29,7 @@ tags:
   - name: 10 Certificates
   - name: 11 Projects
   - name: 12 Audit Logs
+  - name: 13 Service Overview
 security:
   - cookieAuth: []
 paths:
@@ -39,6 +40,17 @@ paths:
       summary: Check API health
       x-access: PUBLIC
       security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services/summary:
+    get:
+      tags: [13 Service Overview]
+      operationId: getAdminLearningServiceSummaries
+      summary: Get learning-service administration summaries
+      x-access: ADMIN
+      description: Returns the three fixed learning services with catalog, learner, curriculum, batch, payment-attention, and lifecycle aggregates. Zero-count services are always included.
       responses:
         "200":
           $ref: "#/components/responses/Success"
