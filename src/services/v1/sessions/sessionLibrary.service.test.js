@@ -78,6 +78,23 @@ describe("Session Library service", () => {
     });
   });
 
+  it("passes the course attachability filter to the repository", async () => {
+    const attachableCourseId = "20000000-0000-4000-8000-000000000002";
+    sessionRepo.findAdmin.mockResolvedValue({ total: 0, sessions: [] });
+
+    await listSessionLibraryService({
+      status: "READY",
+      attachableCourseId,
+      limit: "100",
+    });
+
+    expect(sessionRepo.findAdmin).toHaveBeenCalledWith(
+      { status: "READY", attachableCourseId },
+      100,
+      0,
+    );
+  });
+
   it("creates an independent draft session and records an audit event", async () => {
     sessionRepo.create.mockImplementation(async (data) =>
       sessionFixture({ ...data, courseSessions: [] }),

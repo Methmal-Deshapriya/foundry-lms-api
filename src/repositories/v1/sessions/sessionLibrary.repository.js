@@ -19,6 +19,30 @@ const usageInclude = {
 };
 
 export async function findAdmin(filters, limit, offset) {
+  const attachabilityConditions = filters.attachableCourseId
+    ? [
+        {
+          courseSessions: {
+            none: {
+              courseId: filters.attachableCourseId,
+              retiredAt: null,
+            },
+          },
+        },
+        {
+          OR: [
+            { reusePolicy: "REUSABLE" },
+            {
+              reusePolicy: "SINGLE_COURSE",
+              courseSessions: {
+                none: { courseId: { not: filters.attachableCourseId } },
+              },
+            },
+          ],
+        },
+      ]
+    : [];
+
   const where = {
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.reusePolicy ? { reusePolicy: filters.reusePolicy } : {}),
@@ -29,6 +53,9 @@ export async function findAdmin(filters, limit, offset) {
             { description: { contains: filters.q, mode: "insensitive" } },
           ],
         }
+      : {}),
+    ...(attachabilityConditions.length > 0
+      ? { AND: attachabilityConditions }
       : {}),
   };
 
@@ -106,4 +133,3 @@ export async function removePermanently(id) {
     throw handlePrismaError(error);
   }
 }
-

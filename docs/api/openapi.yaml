@@ -531,11 +531,12 @@ paths:
       operationId: listSessionLibrary
       summary: List Session Library resources
       x-access: ADMIN
-      description: Admin/session-library permission required. Supports lifecycle, reuse, search, and pagination filters.
+      description: Admin/session-library permission required. Supports lifecycle, reuse, search, pagination, and course-attachability filters.
       parameters:
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/SessionStatusFilter"
         - $ref: "#/components/parameters/SessionReusePolicyFilter"
+        - $ref: "#/components/parameters/AttachableCourseIdFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -1328,6 +1329,12 @@ components:
       schema:
         $ref: "#/components/schemas/SessionReusePolicy"
       example: REUSABLE
+    AttachableCourseIdFilter:
+      name: attachableCourseId
+      in: query
+      description: Return only sessions that can currently be attached to this course. Reusable sessions may belong to other courses; one-course sessions must be unused or historically tied only to this course.
+      schema: { type: string, format: uuid }
+      example: "{{courseId}}"
     BatchStatusFilter:
       name: status
       in: query
