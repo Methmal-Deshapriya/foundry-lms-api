@@ -3,6 +3,7 @@ import { isSelfPacedService } from "../../../constants/v1/catalog/learningServic
 import {
   ConflictError,
   NotFoundError,
+  SequenceRiskError,
   ValidationError,
   handlePrismaError,
 } from "../../../utils/Errors.js";
@@ -99,11 +100,48 @@ async function attachWithinTransaction(
 }
 
 export async function findByCourseId(courseId, includeRetired = false) {
-  return prisma.courseSession.findMany({
-    where: { courseId, ...(includeRetired ? {} : { retiredAt: null }) },
-    orderBy: [{ retiredAt: "asc" }, { orderIndex: "asc" }, { createdAt: "asc" }],
-    include: curriculumInclude,
-  });
+  const [curriculum, retiredBatchLinks] = await Promise.all([
+    prisma.courseSession.findMany({
+      where: { courseId, ...(includeRetired ? {} : { retiredAt: null }) },
+      orderBy: [
+        { retiredAt: "asc" },
+        { orderIndex: "asc" },
+        { createdAt: "asc" },
+      ],
+      include: curriculumInclude,
+    }),
+    includeRetired
+      ? prisma.batchSession.findMany({
+          where: {
+            courseId,
+            courseSession: { retiredAt: { not: null } },
+          },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            batchId: true,
+            courseSessionId: true,
+            isReleased: true,
+            availableAt: true,
+            batch: {
+              select: { name: true, code: true, status: true },
+            },
+          },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const linksByCourseSession = retiredBatchLinks.reduce((links, batchLink) => {
+    const current = links.get(batchLink.courseSessionId) ?? [];
+    current.push(batchLink);
+    links.set(batchLink.courseSessionId, current);
+    return links;
+  }, new Map());
+
+  return curriculum.map((courseSession) => ({
+    ...courseSession,
+    batchLinks: linksByCourseSession.get(courseSession.id) ?? [],
+  }));
 }
 
 export async function findById(id) {
@@ -160,15 +198,39 @@ export async function createAndAttach(courseId, sessionData, orderIndex) {
   }
 }
 
-export async function reorder(courseId, orderedCourseSessions) {
+export async function reorder(
+  courseId,
+  orderedCourseSessions,
+  acknowledgeSequenceRisk = false,
+) {
   try {
-    await prisma.$transaction(async (transaction) => {
+    return await prisma.$transaction(async (transaction) => {
       await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-      const activeLinks = await transaction.courseSession.findMany({
-        where: { courseId, retiredAt: null },
-        orderBy: { orderIndex: "asc" },
-        select: { id: true },
-      });
+      const [activeLinks, liveBatches] = await Promise.all([
+        transaction.courseSession.findMany({
+          where: { courseId, retiredAt: null },
+          orderBy: { orderIndex: "asc" },
+          select: { id: true, session: { select: { title: true } } },
+        }),
+        transaction.batch.findMany({
+          where: {
+            courseId,
+            status: { in: ["DRAFT", "ENROLLING", "ACTIVE"] },
+          },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            sessions: {
+              select: {
+                courseSessionId: true,
+                isReleased: true,
+                availableAt: true,
+              },
+            },
+          },
+        }),
+      ]);
       const expectedIds = new Set(activeLinks.map(({ id }) => id));
       const suppliedIds = new Set(orderedCourseSessions.map(({ id }) => id));
       if (
@@ -181,16 +243,70 @@ export async function reorder(courseId, orderedCourseSessions) {
         );
       }
 
+      const titleById = new Map(
+        activeLinks.map(({ id, session }) => [id, session.title]),
+      );
+      const proposedIds = [...orderedCourseSessions]
+        .sort((left, right) => left.orderIndex - right.orderIndex)
+        .map(({ id }) => id);
+      const affectedBatches = liveBatches.flatMap((batch) => {
+        const deliveries = new Map(
+          batch.sessions.map((delivery) => [delivery.courseSessionId, delivery]),
+        );
+        let earlierUnreleased = null;
+        for (const courseSessionId of proposedIds) {
+          const delivery = deliveries.get(courseSessionId);
+          if (!delivery?.isReleased) {
+            earlierUnreleased ??= courseSessionId;
+            continue;
+          }
+          if (earlierUnreleased) {
+            return [{
+              batchId: batch.id,
+              batchName: batch.name,
+              batchCode: batch.code,
+              earlierUnreleased: {
+                courseSessionId: earlierUnreleased,
+                title: titleById.get(earlierUnreleased),
+              },
+              laterCommitted: {
+                courseSessionId,
+                title: titleById.get(courseSessionId),
+                state: delivery.availableAt ? "SCHEDULED" : "RELEASED",
+              },
+            }];
+          }
+        }
+        return [];
+      });
+
+      if (affectedBatches.length > 0 && !acknowledgeSequenceRisk) {
+        throw new SequenceRiskError(
+          "This reorder would place a released or scheduled session after an unreleased session in one or more live batches.",
+          {
+            warningCode: "COURSE_REORDER_BREAKS_DELIVERY_SEQUENCE",
+            affectedBatchCount: affectedBatches.length,
+            affectedBatches: affectedBatches.slice(0, 20),
+            confirmationText: "CONFIRM",
+          },
+        );
+      }
+
       await moveActiveLinksOutOfRange(transaction, courseId);
       await assignContinuousOrder(
         transaction,
-        [...orderedCourseSessions]
-          .sort((left, right) => left.orderIndex - right.orderIndex)
-          .map(({ id }) => id),
+        proposedIds,
       );
+      return {
+        affectedBatchCount: affectedBatches.length,
+        sequenceRiskAcknowledged:
+          affectedBatches.length > 0 && acknowledgeSequenceRisk,
+      };
     });
   } catch (error) {
-    if (error instanceof ValidationError) throw error;
+    if (error instanceof ValidationError || error instanceof SequenceRiskError) {
+      throw error;
+    }
     throw handlePrismaError(error);
   }
 }
@@ -240,6 +356,10 @@ export async function removeOrRetire(id, serviceType) {
       await moveActiveLinksOutOfRange(transaction, courseSession.courseId);
 
       if (hasHistory) {
+        await transaction.batchSession.updateMany({
+          where: { courseSessionId: id },
+          data: { historicalOrderIndex: courseSession.orderIndex },
+        });
         await transaction.courseSession.update({
           where: { id },
           data: { orderIndex: null, retiredAt: new Date() },

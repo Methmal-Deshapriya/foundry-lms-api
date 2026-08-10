@@ -5,12 +5,11 @@ vi.mock("../../../repositories/v1/batches/batch.repository.js", () => ({
   findById: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
-  initializeCurriculum: vi.fn(),
+  transitionStatus: vi.fn(),
   findSessions: vi.fn(),
   findSession: vi.fn(),
-  upsertSession: vi.fn(),
-  reorderSessions: vi.fn(),
-  removeOrWithdrawSession: vi.fn(),
+  updateDelivery: vi.fn(),
+  findCompletionReadiness: vi.fn(),
 }));
 
 vi.mock("../../../repositories/v1/catalog/course.repository.js", () => ({
@@ -26,8 +25,8 @@ import * as courseRepo from "../../../repositories/v1/catalog/course.repository.
 import {
   createBatchService,
   getBatchSessionsService,
+  updateBatchSessionDeliveryService,
   updateBatchStatusService,
-  upsertBatchSessionService,
 } from "./batch.service.js";
 
 function courseFixture(serviceType = "BOOTCAMPS", status = "PUBLISHED") {
@@ -36,6 +35,7 @@ function courseFixture(serviceType = "BOOTCAMPS", status = "PUBLISHED") {
     title: "Machine Learning 1",
     status,
     category: { serviceType, status },
+    _count: { courseSessions: 2 },
   };
 }
 
@@ -51,7 +51,7 @@ function batchFixture(overrides = {}) {
     capacity: 30,
     status: "ACTIVE",
     course: courseFixture(),
-    _count: { sessions: 2, enrollments: 10 },
+    _count: { enrollments: 10 },
     ...overrides,
   };
 }
@@ -91,17 +91,21 @@ describe("batch service", () => {
 
   it("blocks release before a batch is active", async () => {
     batchRepo.findById.mockResolvedValue(batchFixture({ status: "ENROLLING" }));
-    batchRepo.findSession.mockResolvedValue(null);
+    batchRepo.findSession.mockResolvedValue({
+      courseSessionId: "80000000-0000-4000-8000-000000000001",
+      inherited: true,
+      isReleased: false,
+    });
 
     await expect(
-      upsertBatchSessionService(
+      updateBatchSessionDeliveryService(
         batchFixture().id,
         "80000000-0000-4000-8000-000000000001",
-        { isReleased: true },
+        { mode: "RELEASED" },
         "actor-1",
       ),
     ).rejects.toThrow(/only while the batch is active/i);
-    expect(batchRepo.upsertSession).not.toHaveBeenCalled();
+    expect(batchRepo.updateDelivery).not.toHaveBeenCalled();
   });
 
   it("allows an archived course's active batch to update an existing assignment", async () => {
@@ -113,34 +117,39 @@ describe("batch service", () => {
       id: "batch-session-1",
       isReleased: false,
     });
-    batchRepo.upsertSession.mockResolvedValue({
+    batchRepo.updateDelivery.mockResolvedValue({
       id: "batch-session-1",
+      inherited: false,
       isReleased: true,
       availableAt: null,
       courseSession: { session: { title: "Session 1" } },
     });
 
     await expect(
-      upsertBatchSessionService(
+      updateBatchSessionDeliveryService(
         batchFixture().id,
         "80000000-0000-4000-8000-000000000001",
-        { isReleased: true },
+        { mode: "RELEASED" },
         "actor-1",
       ),
-    ).resolves.toMatchObject({ state: "AVAILABLE" });
+    ).resolves.toMatchObject({ state: "RELEASED" });
   });
 
-  it("derives hidden, scheduled, and available states without a background job", async () => {
+  it("derives unreleased, withdrawn, scheduled, and released states", async () => {
     batchRepo.findById.mockResolvedValue(batchFixture());
+    batchRepo.findCompletionReadiness.mockResolvedValue({});
     batchRepo.findSessions.mockResolvedValue([
-      { id: "hidden", isReleased: false, availableAt: null },
+      { id: null, inherited: true, isReleased: false, availableAt: null },
+      { id: "withdrawn", inherited: false, isReleased: false, availableAt: null },
       {
         id: "scheduled",
+        inherited: false,
         isReleased: true,
         availableAt: new Date(Date.now() + 60_000),
       },
       {
         id: "available",
+        inherited: false,
         isReleased: true,
         availableAt: new Date(Date.now() - 60_000),
       },
@@ -148,10 +157,31 @@ describe("batch service", () => {
 
     const result = await getBatchSessionsService(batchFixture().id);
     expect(result.sessions.map(({ state }) => state)).toEqual([
-      "HIDDEN",
+      "UNRELEASED",
+      "WITHDRAWN",
       "SCHEDULED",
-      "AVAILABLE",
+      "RELEASED",
     ]);
   });
-});
 
+  it("blocks manual completion until curriculum and certificate readiness pass", async () => {
+    batchRepo.findById.mockResolvedValue(batchFixture());
+    batchRepo.transitionStatus.mockRejectedValue(
+      new Error("This batch is not ready to complete."),
+    );
+
+    await expect(
+      updateBatchStatusService(
+        batchFixture().id,
+        { status: "COMPLETED" },
+        "actor-1",
+      ),
+    ).rejects.toThrow(/not ready to complete/i);
+    expect(batchRepo.transitionStatus).toHaveBeenCalledWith(
+      batchFixture().id,
+      "ACTIVE",
+      "COMPLETED",
+      { requireCompletionReadiness: true },
+    );
+  });
+});

@@ -38,6 +38,15 @@ function toCurriculumItem(courseSession) {
     usage: {
       batchCount: courseSession._count?.batchLinks ?? 0,
       completionCount: courseSession._count?.completions ?? 0,
+      batches: (courseSession.batchLinks ?? []).map((batchLink) => ({
+        batchSessionId: batchLink.id,
+        batchId: batchLink.batchId,
+        batchName: batchLink.batch.name,
+        batchCode: batchLink.batch.code,
+        batchStatus: batchLink.batch.status,
+        isReleased: batchLink.isReleased,
+        availableAt: batchLink.availableAt,
+      })),
     },
   };
 }
@@ -139,7 +148,10 @@ export async function attachCourseSessionService(courseId, data, actorId) {
 }
 
 export async function reorderCourseCurriculumService(courseId, data, actorId) {
-  const { courseSessions } = parse(reorderCourseCurriculumSchema, data);
+  const { courseSessions, acknowledgeSequenceRisk } = parse(
+    reorderCourseCurriculumSchema,
+    data,
+  );
   const ids = courseSessions.map(({ id }) => id);
   const indexes = courseSessions.map(({ orderIndex }) => orderIndex);
   const expected = courseSessions.map((_, index) => index);
@@ -157,16 +169,25 @@ export async function reorderCourseCurriculumService(courseId, data, actorId) {
   }
 
   const course = await requireOperationalCourse(courseId);
-  await curriculumRepo.reorder(courseId, courseSessions);
+  const impact = await curriculumRepo.reorder(
+    courseId,
+    courseSessions,
+    acknowledgeSequenceRisk,
+  );
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.COURSE_CURRICULUM_REORDERED,
     entityType: ENTITY_TYPES.COURSE,
     entityId: courseId,
     description: `Curriculum reordered for course "${course.title}".`,
-    metadata: { courseSessionIds: ids, ...deliverySummary(course) },
+    metadata: {
+      courseSessionIds: ids,
+      acknowledgeSequenceRisk,
+      ...impact,
+      ...deliverySummary(course),
+    },
   });
-  return { success: true };
+  return { success: true, ...impact };
 }
 
 export async function removeCourseSessionService(
@@ -204,4 +225,3 @@ export async function removeCourseSessionService(
   });
   return result;
 }
-

@@ -37,7 +37,7 @@ describe("Session Library repository", () => {
       AND: [
         {
           courseSessions: {
-            none: { courseId, retiredAt: null },
+            none: { courseId },
           },
         },
         {

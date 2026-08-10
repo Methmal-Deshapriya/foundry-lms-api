@@ -620,6 +620,7 @@ paths:
       operationId: listCourseCurriculum
       summary: List course curriculum
       x-access: ADMIN
+      description: Set includeRetired to show history-preserved curriculum relationships and the batches that still reference them.
       parameters:
         - $ref: "#/components/parameters/CourseId"
         - name: includeRetired
@@ -655,6 +656,8 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/SequenceRisk"
 
   /api/v1/courses/{courseId}/curriculum/{courseSessionId}:
     delete:
@@ -735,69 +738,36 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/batches/{batchId}/initialize-curriculum:
-    post:
-      tags: [08 Batches & Delivery]
-      operationId: initializeBatchCurriculum
-      summary: Snapshot current course curriculum into batch
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
   /api/v1/batches/{batchId}/sessions:
     get:
       tags: [08 Batches & Delivery]
       operationId: listBatchSessions
-      summary: List batch delivery sessions
+      summary: List effective live curriculum and batch delivery states
       x-access: ADMIN
+      description: Live batches inherit active course membership and order. Missing delivery overrides are returned as Unreleased, not omitted.
       parameters:
         - $ref: "#/components/parameters/BatchId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/batches/{batchId}/sessions/reorder:
+  /api/v1/batches/{batchId}/sessions/{courseSessionId}/delivery:
     patch:
       tags: [08 Batches & Delivery]
-      operationId: reorderBatchSessions
-      summary: Reorder batch delivery
+      operationId: updateBatchSessionDelivery
+      summary: Release, schedule, or withdraw an inherited batch session
       x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      requestBody:
-        $ref: "#/components/requestBodies/ReorderBatchSessions"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/batches/{batchId}/sessions/{courseSessionId}:
-    put:
-      tags: [08 Batches & Delivery]
-      operationId: upsertBatchSession
-      summary: Add, release, schedule, or hide batch session
-      x-access: ADMIN
+      description: Cannot change membership or order. Unsafe sequencing returns 409 until explicitly acknowledged.
       parameters:
         - $ref: "#/components/parameters/BatchId"
         - $ref: "#/components/parameters/CourseSessionId"
       requestBody:
-        $ref: "#/components/requestBodies/UpsertBatchSession"
+        $ref: "#/components/requestBodies/UpdateBatchSessionDelivery"
       responses:
         "200":
           $ref: "#/components/responses/Success"
-    delete:
-      tags: [08 Batches & Delivery]
-      operationId: removeBatchSession
-      summary: Remove hidden or withdraw delivered batch session
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-        - $ref: "#/components/parameters/CourseSessionId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/SequenceRisk"
 
   /api/v1/enrollments/my:
     get:
@@ -1195,6 +1165,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    SequenceRisk:
+      description: Explicit confirmation is required because the operation breaks curriculum sequence.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SequenceRiskEnvelope"
 
   parameters:
     TargetUserId:
@@ -1332,7 +1308,7 @@ components:
     AttachableCourseIdFilter:
       name: attachableCourseId
       in: query
-      description: Return only sessions that can currently be attached to this course. Reusable sessions may belong to other courses; one-course sessions must be unused or historically tied only to this course.
+      description: Return picker candidates with no active or retired relationship to this course. Reusable sessions may belong to other courses; one-course sessions must be unused. Retired relationships are restored from the course curriculum history instead of this picker.
       schema: { type: string, format: uuid }
       example: "{{courseId}}"
     BatchStatusFilter:
@@ -1545,10 +1521,12 @@ components:
                   properties:
                     id: { type: string, format: uuid }
                     orderIndex: { type: integer, minimum: 0 }
+              acknowledgeSequenceRisk: { type: boolean, default: false }
           example:
             courseSessions:
               - id: "{{courseSessionId}}"
                 orderIndex: 0
+            acknowledgeSequenceRisk: false
     CreateBatch:
       required: true
       content:
@@ -1561,7 +1539,6 @@ components:
             expectedEndDate: "2026-12-01"
             timezone: Asia/Colombo
             capacity: 30
-            initializeCurriculum: true
     UpdateBatch:
       required: true
       content:
@@ -1582,24 +1559,23 @@ components:
                 $ref: "#/components/schemas/BatchStatus"
           example:
             status: ENROLLING
-    UpsertBatchSession:
+    UpdateBatchSessionDelivery:
       required: true
       content:
         application/json:
-          schema: { type: object }
+          schema:
+            type: object
+            required: [mode]
+            properties:
+              mode:
+                type: string
+                enum: [UNRELEASED, RELEASED, SCHEDULED]
+              availableAt: { type: string, format: date-time, nullable: true }
+              acknowledgeSequenceRisk: { type: boolean, default: false }
           example:
-            orderIndex: 0
-            isReleased: true
+            mode: RELEASED
             availableAt: null
-    ReorderBatchSessions:
-      required: true
-      content:
-        application/json:
-          schema: { type: object }
-          example:
-            batchSessions:
-              - id: "{{batchSessionId}}"
-                orderIndex: 0
+            acknowledgeSequenceRisk: false
     CreatePaidEnrollment:
       required: true
       content:
@@ -1719,6 +1695,24 @@ components:
         code: { type: string }
         field: { type: string, nullable: true }
         details: { nullable: true }
+    SequenceRiskEnvelope:
+      type: object
+      required: [success, error, code, details]
+      properties:
+        success: { type: boolean, example: false }
+        error: { type: string }
+        code:
+          type: string
+          enum: [SEQUENCE_RISK_CONFIRMATION_REQUIRED]
+        details:
+          type: object
+          required: [warningCode, confirmationText]
+          properties:
+            warningCode: { type: string }
+            confirmationText: { type: string, enum: [CONFIRM] }
+            affectedBatchCount: { type: integer, minimum: 0 }
+            affectedBatches: { type: array, items: { type: object } }
+            conflicts: { type: array, items: { type: object } }
     Role:
       type: string
       enum: [STUDENT, ADMIN, SUPER_ADMIN]

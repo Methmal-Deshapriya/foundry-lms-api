@@ -35,9 +35,7 @@ function validateDates(data, context) {
   }
 }
 
-export const createBatchSchema = batchFields
-  .extend({ initializeCurriculum: z.boolean().default(true) })
-  .superRefine(validateDates);
+export const createBatchSchema = batchFields.superRefine(validateDates);
 
 export const updateBatchSchema = batchFields
   .partial()
@@ -54,20 +52,25 @@ export const batchFiltersSchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-export const upsertBatchSessionSchema = z.object({
-  orderIndex: z.number().int().min(0).max(10000).optional(),
-  isReleased: z.boolean().default(false),
-  availableAt: z.coerce.date().nullable().optional(),
-});
-
-export const reorderBatchSessionsSchema = z.object({
-  batchSessions: z
-    .array(
-      z.object({
-        id: z.string().uuid("Invalid batch-session ID."),
-        orderIndex: z.number().int().min(0).max(10000),
-      }),
-    )
-    .min(1),
-});
-
+export const updateBatchSessionDeliverySchema = z
+  .object({
+    mode: z.enum(["UNRELEASED", "RELEASED", "SCHEDULED"]),
+    availableAt: z.coerce.date().nullable().optional(),
+    acknowledgeSequenceRisk: z.boolean().default(false),
+  })
+  .superRefine((data, context) => {
+    if (data.mode === "SCHEDULED" && !data.availableAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["availableAt"],
+        message: "A scheduled session requires an availability time.",
+      });
+    }
+    if (data.mode !== "SCHEDULED" && data.availableAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["availableAt"],
+        message: "Only a scheduled session can have an availability time.",
+      });
+    }
+  });

@@ -43,30 +43,15 @@ router.patch(
   requirePermission(PERMISSIONS.BATCHES_MANAGE),
   batchController.updateBatchStatus,
 );
-router.post(
-  "/:id/initialize-curriculum",
-  requirePermission(PERMISSIONS.BATCHES_MANAGE),
-  batchController.initializeCurriculum,
-);
 router.get(
   "/:id/sessions",
   requirePermission(PERMISSIONS.BATCHES_MANAGE),
   batchController.getBatchSessions,
 );
 router.patch(
-  "/:id/sessions/reorder",
+  "/:id/sessions/:courseSessionId/delivery",
   requirePermission(PERMISSIONS.BATCH_SESSIONS_RELEASE),
-  batchController.reorderBatchSessions,
-);
-router.put(
-  "/:id/sessions/:courseSessionId",
-  requirePermission(PERMISSIONS.BATCH_SESSIONS_RELEASE),
-  batchController.upsertBatchSession,
-);
-router.delete(
-  "/:id/sessions/:courseSessionId",
-  requirePermission(PERMISSIONS.BATCH_SESSIONS_RELEASE),
-  batchController.removeBatchSession,
+  batchController.updateBatchSessionDelivery,
 );
 
 export default router;

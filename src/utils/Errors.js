@@ -66,6 +66,17 @@ export class ConflictError extends CustomError {
 }
 
 /**
+ * 409 used when an operation would break the intended curriculum sequence.
+ * The client may retry only after an explicit, audited acknowledgement.
+ */
+export class SequenceRiskError extends CustomError {
+  constructor(message, details) {
+    super(message, 409, "SEQUENCE_RISK_CONFIRMATION_REQUIRED");
+    this.details = details;
+  }
+}
+
+/**
  * 415 Unsupported Media Type.
  */
 export class UnsupportedMediaTypeError extends CustomError {

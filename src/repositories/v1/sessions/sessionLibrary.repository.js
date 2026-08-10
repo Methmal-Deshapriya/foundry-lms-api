@@ -25,7 +25,6 @@ export async function findAdmin(filters, limit, offset) {
           courseSessions: {
             none: {
               courseId: filters.attachableCourseId,
-              retiredAt: null,
             },
           },
         },

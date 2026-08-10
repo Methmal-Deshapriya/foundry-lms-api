@@ -76,7 +76,48 @@ describe("course curriculum service", () => {
     expect(result.curriculum[0].usage).toEqual({
       batchCount: 2,
       completionCount: 3,
+      batches: [],
     });
+  });
+
+  it("includes batch assignments for retired curriculum relationships", async () => {
+    courseRepo.findById.mockResolvedValue(courseFixture());
+    curriculumRepo.findByCourseId.mockResolvedValue([
+      {
+        ...curriculumFixture(),
+        orderIndex: null,
+        retiredAt: new Date("2026-08-09T09:14:28.079Z"),
+        batchLinks: [
+          {
+            id: "60000000-0000-4000-8000-000000000001",
+            batchId: "70000000-0000-4000-8000-000000000001",
+            isReleased: false,
+            availableAt: null,
+            batch: {
+              name: "August 2026",
+              code: "ML1-2026-AUG",
+              status: "ACTIVE",
+            },
+          },
+        ],
+      },
+    ]);
+
+    const result = await getCourseCurriculumService(courseFixture().id, {
+      includeRetired: "true",
+    });
+
+    expect(curriculumRepo.findByCourseId).toHaveBeenCalledWith(
+      courseFixture().id,
+      true,
+    );
+    expect(result.curriculum[0].usage.batches).toEqual([
+      expect.objectContaining({
+        batchName: "August 2026",
+        batchStatus: "ACTIVE",
+        isReleased: false,
+      }),
+    ]);
   });
 
   it("requires a recording for create-and-attach", async () => {
@@ -131,4 +172,3 @@ describe("course curriculum service", () => {
     expect(curriculumRepo.removeOrRetire).not.toHaveBeenCalled();
   });
 });
-

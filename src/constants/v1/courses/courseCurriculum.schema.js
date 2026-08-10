@@ -30,5 +30,5 @@ export const reorderCourseCurriculumSchema = z.object({
       }),
     )
     .min(1),
+  acknowledgeSequenceRisk: z.boolean().default(false),
 });
-

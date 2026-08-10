@@ -70,18 +70,6 @@ export async function updateBatchStatus(req, res, next) {
   }
 }
 
-export async function initializeCurriculum(req, res, next) {
-  try {
-    return ApiResponse.send(
-      res,
-      await batchService.initializeBatchCurriculumService(req.params.id, req.user.id),
-      "Batch curriculum initialized",
-    );
-  } catch (error) {
-    next(error);
-  }
-}
-
 export async function getBatchSessions(req, res, next) {
   try {
     return ApiResponse.send(
@@ -94,52 +82,19 @@ export async function getBatchSessions(req, res, next) {
   }
 }
 
-export async function upsertBatchSession(req, res, next) {
+export async function updateBatchSessionDelivery(req, res, next) {
   try {
     return ApiResponse.send(
       res,
-      await batchService.upsertBatchSessionService(
+      await batchService.updateBatchSessionDeliveryService(
         req.params.id,
         req.params.courseSessionId,
         req.body,
         req.user.id,
       ),
-      "Batch session updated",
+      "Batch session delivery updated",
     );
   } catch (error) {
     next(error);
   }
 }
-
-export async function reorderBatchSessions(req, res, next) {
-  try {
-    return ApiResponse.send(
-      res,
-      await batchService.reorderBatchSessionsService(
-        req.params.id,
-        req.body,
-        req.user.id,
-      ),
-      "Batch sessions reordered",
-    );
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function removeBatchSession(req, res, next) {
-  try {
-    return ApiResponse.send(
-      res,
-      await batchService.removeBatchSessionService(
-        req.params.id,
-        req.params.courseSessionId,
-        req.user.id,
-      ),
-      "Batch delivery updated",
-    );
-  } catch (error) {
-    next(error);
-  }
-}
-

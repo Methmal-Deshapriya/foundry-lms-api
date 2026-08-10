@@ -36,7 +36,7 @@ export async function findFreeSessions(courseId, enrollmentId) {
 }
 
 export async function findPaidSessions(batchId, enrollmentId, now = new Date()) {
-  return prisma.batchSession.findMany({
+  const rows = await prisma.batchSession.findMany({
     where: {
       batchId,
       isReleased: true,
@@ -45,11 +45,23 @@ export async function findPaidSessions(batchId, enrollmentId, now = new Date()) 
         session: { status: { in: ["READY", "ARCHIVED"] } },
       },
     },
-    orderBy: { orderIndex: "asc" },
     include: {
       courseSession: { include: courseSessionInclude(enrollmentId) },
     },
   });
+  return rows
+    .map((row) => ({
+      ...row,
+      orderIndex:
+        row.courseSession.retiredAt == null
+          ? row.courseSession.orderIndex
+          : row.historicalOrderIndex,
+    }))
+    .sort(
+      (left, right) =>
+        (left.orderIndex ?? Number.MAX_SAFE_INTEGER) -
+        (right.orderIndex ?? Number.MAX_SAFE_INTEGER),
+    );
 }
 
 export async function findCompletion(enrollmentId, courseSessionId) {

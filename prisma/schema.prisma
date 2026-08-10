@@ -305,24 +305,23 @@ model Batch {
 }
 
 model BatchSession {
-  id              String    @id @default(uuid())
-  batchId         String    @map("batch_id")
-  courseSessionId String    @map("course_session_id")
-  courseId        String    @map("course_id")
-  orderIndex      Int       @map("order_index")
-  isReleased      Boolean   @default(false) @map("is_released")
-  availableAt     DateTime? @map("available_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+  id                   String    @id @default(uuid())
+  batchId              String    @map("batch_id")
+  courseSessionId      String    @map("course_session_id")
+  courseId             String    @map("course_id")
+  historicalOrderIndex Int?      @map("historical_order_index")
+  isReleased           Boolean   @default(false) @map("is_released")
+  availableAt          DateTime? @map("available_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
 
   batch         Batch         @relation(fields: [batchId, courseId], references: [id, courseId], onDelete: Cascade)
   courseSession CourseSession @relation(fields: [courseSessionId, courseId], references: [id, courseId], onDelete: Restrict)
 
   @@unique([batchId, courseSessionId])
-  @@unique([batchId, orderIndex])
   @@index([courseSessionId])
   @@index([batchId, isReleased, availableAt])
-  @@index([courseId])
+  @@index([courseId, batchId])
   @@map("batch_sessions")
 }
 

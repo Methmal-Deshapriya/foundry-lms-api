@@ -158,24 +158,9 @@ async function seedLearningDeliveryExamples() {
       status: "DRAFT",
     },
   });
-  for (const [orderIndex, courseSession] of [paidSharedLink, paidLink].entries()) {
-    await prisma.batchSession.upsert({
-      where: {
-        batchId_courseSessionId: {
-          batchId: batch.id,
-          courseSessionId: courseSession.id,
-        },
-      },
-      update: { orderIndex, isReleased: false, availableAt: null },
-      create: {
-        batchId: batch.id,
-        courseSessionId: courseSession.id,
-        courseId: paidCourse.id,
-        orderIndex,
-        isReleased: false,
-      },
-    });
-  }
+  // Draft batches inherit the live course curriculum. No delivery override row
+  // is created until an admin schedules, releases, or withdraws a session.
+  await prisma.batchSession.deleteMany({ where: { batchId: batch.id } });
 
   console.log(
     `Delivery seed complete: 2 library sessions, 3 curriculum links, 1 draft batch, and ${freeLink ? 1 : 0} immediately available free lesson.`,

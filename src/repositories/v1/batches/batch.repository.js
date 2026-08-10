@@ -3,55 +3,83 @@ import { acquireTransactionLock } from "../learning/transactionLock.repository.j
 import {
   ConflictError,
   NotFoundError,
-  ValidationError,
+  SequenceRiskError,
   handlePrismaError,
 } from "../../../utils/Errors.js";
 
+const LIVE_BATCH_STATUSES = ["DRAFT", "ENROLLING", "ACTIVE"];
+
 const batchInclude = {
-  course: { include: { category: true } },
-  _count: { select: { sessions: true, enrollments: true } },
+  course: {
+    include: {
+      category: true,
+      _count: {
+        select: {
+          courseSessions: { where: { retiredAt: null } },
+        },
+      },
+    },
+  },
+  _count: { select: { enrollments: true } },
 };
 
-const batchSessionInclude = {
-  courseSession: { include: { session: true } },
-};
+function isCommitted(delivery) {
+  return Boolean(delivery?.isReleased);
+}
 
-async function copyActiveCurriculum(transaction, batch) {
-  const curriculum = await transaction.courseSession.findMany({
-    where: { courseId: batch.courseId, retiredAt: null },
-    orderBy: { orderIndex: "asc" },
-    select: { id: true, orderIndex: true },
-  });
-  if (curriculum.length > 0) {
-    await transaction.batchSession.createMany({
-      data: curriculum.map((courseSession) => ({
-        batchId: batch.id,
-        courseSessionId: courseSession.id,
-        courseId: batch.courseId,
-        orderIndex: courseSession.orderIndex,
-        isReleased: false,
-      })),
-    });
+export function sequenceRiskDetails(
+  curriculum,
+  deliveries,
+  courseSessionId,
+  mode,
+) {
+  const targetIndex = curriculum.findIndex(({ id }) => id === courseSessionId);
+  if (targetIndex < 0) return null;
+
+  const effectiveCommitted = (item, index) => {
+    if (index === targetIndex) return mode !== "UNRELEASED";
+    return isCommitted(deliveries.get(item.id));
+  };
+
+  if (mode !== "UNRELEASED") {
+    const blockers = curriculum
+      .slice(0, targetIndex)
+      .filter((item, index) => !effectiveCommitted(item, index))
+      .map(({ id, orderIndex, session }) => ({
+        courseSessionId: id,
+        orderIndex,
+        title: session.title,
+        state: deliveries.has(id) ? "WITHDRAWN" : "UNRELEASED",
+      }));
+    if (blockers.length > 0) {
+      return {
+        warningCode: "EARLIER_SESSIONS_UNRELEASED",
+        operation: mode,
+        targetCourseSessionId: courseSessionId,
+        conflicts: blockers,
+        confirmationText: "CONFIRM",
+      };
+    }
+    return null;
   }
-  return curriculum.length;
-}
 
-async function moveBatchSessionsOutOfRange(transaction, batchId) {
-  await transaction.batchSession.updateMany({
-    where: { batchId },
-    data: { orderIndex: { increment: 1_000_000 } },
-  });
-}
-
-async function assignBatchOrder(transaction, orderedIds) {
-  await Promise.all(
-    orderedIds.map((id, orderIndex) =>
-      transaction.batchSession.update({
-        where: { id },
-        data: { orderIndex },
-      }),
-    ),
-  );
+  const laterCommitted = curriculum
+    .slice(targetIndex + 1)
+    .filter((item, offset) => effectiveCommitted(item, targetIndex + 1 + offset))
+    .map(({ id, orderIndex, session }) => ({
+      courseSessionId: id,
+      orderIndex,
+      title: session.title,
+      state: deliveries.get(id)?.availableAt ? "SCHEDULED" : "RELEASED",
+    }));
+  if (laterCommitted.length === 0) return null;
+  return {
+    warningCode: "LATER_SESSIONS_ALREADY_COMMITTED",
+    operation: mode,
+    targetCourseSessionId: courseSessionId,
+    conflicts: laterCommitted,
+    confirmationText: "CONFIRM",
+  };
 }
 
 export async function findAdminByCourse(courseId, filters, limit, offset) {
@@ -84,19 +112,12 @@ export async function findById(id) {
   return prisma.batch.findUnique({ where: { id }, include: batchInclude });
 }
 
-export async function create(courseId, data, initializeCurriculum) {
+export async function create(courseId, data) {
   try {
-    const result = await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-      const batch = await transaction.batch.create({
-        data: { ...data, courseId },
-      });
-      const initializedSessionCount = initializeCurriculum
-        ? await copyActiveCurriculum(transaction, batch)
-        : 0;
-      return { batchId: batch.id, initializedSessionCount };
+    return await prisma.batch.create({
+      data: { ...data, courseId },
+      include: batchInclude,
     });
-    return { batch: await findById(result.batchId), ...result };
   } catch (error) {
     throw handlePrismaError(error);
   }
@@ -114,167 +135,190 @@ export async function update(id, data) {
   }
 }
 
-export async function initializeCurriculum(id) {
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.batch.findUnique({
-        where: { id },
-        select: { courseId: true },
-      });
-      if (!initial) throw new NotFoundError("Batch not found.");
-      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
-      await acquireTransactionLock(transaction, `batch:${id}`);
-
-      const batch = await transaction.batch.findUnique({ where: { id } });
-      const existingCount = await transaction.batchSession.count({
-        where: { batchId: id },
-      });
-      if (existingCount > 0) {
-        throw new ConflictError(
-          "This batch already has a curriculum. Add individual sessions instead.",
-        );
-      }
-      const initializedSessionCount = await copyActiveCurriculum(
-        transaction,
-        batch,
-      );
-      return { batchId: id, initializedSessionCount };
-    });
-  } catch (error) {
-    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
-    throw handlePrismaError(error);
-  }
+async function freezeDeliveryHistoryInTransaction(transaction, batchId) {
+  await transaction.$executeRaw`
+    UPDATE "batch_sessions" AS delivery
+    SET "historical_order_index" = course_session."order_index"
+    FROM "course_sessions" AS course_session
+    WHERE delivery."batch_id" = ${batchId}
+      AND delivery."course_session_id" = course_session."id"
+      AND delivery."historical_order_index" IS NULL
+  `;
 }
 
 export async function findSessions(batchId) {
-  const [batchSessions, completions] = await Promise.all([
-    prisma.batchSession.findMany({
-      where: { batchId },
-      orderBy: { orderIndex: "asc" },
-      include: batchSessionInclude,
-    }),
-    prisma.sessionCompletion.findMany({
-      where: { enrollment: { batchId } },
-      select: { courseSessionId: true },
-    }),
-  ]);
-  const completionCounts = completions.reduce((counts, completion) => {
-    counts.set(
-      completion.courseSessionId,
-      (counts.get(completion.courseSessionId) ?? 0) + 1,
-    );
-    return counts;
-  }, new Map());
-  return batchSessions.map((batchSession) => ({
-    ...batchSession,
-    completionCount: completionCounts.get(batchSession.courseSessionId) ?? 0,
-  }));
+  const batch = await prisma.batch.findUnique({
+    where: { id: batchId },
+    select: { id: true, courseId: true, status: true },
+  });
+  if (!batch) throw new NotFoundError("Batch not found.");
+
+  const isLive = LIVE_BATCH_STATUSES.includes(batch.status);
+  const curriculum = await prisma.courseSession.findMany({
+    where: {
+      courseId: batch.courseId,
+      ...(isLive
+        ? {
+            OR: [
+              { retiredAt: null },
+              { batchLinks: { some: { batchId } } },
+            ],
+          }
+        : { batchLinks: { some: { batchId } } }),
+    },
+    include: {
+      session: true,
+      batchLinks: { where: { batchId }, take: 1 },
+      _count: {
+        select: {
+          completions: { where: { enrollment: { batchId } } },
+        },
+      },
+    },
+  });
+
+  return curriculum
+    .map((courseSession) => {
+      const delivery = courseSession.batchLinks[0] ?? null;
+      const active = courseSession.retiredAt == null;
+      const orderIndex =
+        isLive && active
+          ? courseSession.orderIndex
+          : delivery?.historicalOrderIndex ?? courseSession.orderIndex;
+      return {
+        id: delivery?.id ?? null,
+        batchId,
+        courseId: batch.courseId,
+        courseSessionId: courseSession.id,
+        orderIndex,
+        historicalOrderIndex: delivery?.historicalOrderIndex ?? null,
+        isReleased: delivery?.isReleased ?? false,
+        availableAt: delivery?.availableAt ?? null,
+        inherited: delivery == null,
+        source: active ? "ACTIVE_CURRICULUM" : "RETAINED_HISTORY",
+        completionCount: courseSession._count.completions,
+        courseSession: {
+          ...courseSession,
+          batchLinks: undefined,
+          _count: undefined,
+        },
+      };
+    })
+    .sort((left, right) => {
+      const leftOrder = left.orderIndex ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.orderIndex ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
 }
 
 export async function findSession(batchId, courseSessionId) {
-  return prisma.batchSession.findUnique({
-    where: { batchId_courseSessionId: { batchId, courseSessionId } },
-    include: batchSessionInclude,
-  });
+  const sessions = await findSessions(batchId);
+  return sessions.find((session) => session.courseSessionId === courseSessionId) ?? null;
 }
 
-export async function upsertSession(
+export async function updateDelivery(
   batchId,
   courseSessionId,
-  { orderIndex: requestedOrderIndex, isReleased, availableAt },
+  { mode, availableAt, acknowledgeSequenceRisk },
 ) {
   try {
-    const batchSessionId = await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `batch:${batchId}`);
+    await prisma.$transaction(async (transaction) => {
+      const initialBatch = await transaction.batch.findUnique({
+        where: { id: batchId },
+        select: { courseId: true },
+      });
+      if (!initialBatch) throw new NotFoundError("Batch not found.");
+
       await acquireTransactionLock(
         transaction,
-        `course-session:${courseSessionId}`,
+        `curriculum:${initialBatch.courseId}`,
       );
+      await acquireTransactionLock(transaction, `batch:${batchId}`);
 
-      const [batch, courseSession, existing, ordered] = await Promise.all([
-        transaction.batch.findUnique({ where: { id: batchId } }),
-        transaction.courseSession.findUnique({ where: { id: courseSessionId } }),
-        transaction.batchSession.findUnique({
-          where: { batchId_courseSessionId: { batchId, courseSessionId } },
-        }),
-        transaction.batchSession.findMany({
-          where: { batchId },
-          orderBy: { orderIndex: "asc" },
-          select: { id: true },
-        }),
-      ]);
-      if (!batch) throw new NotFoundError("Batch not found.");
-      if (!courseSession || courseSession.courseId !== batch.courseId) {
-        throw new NotFoundError("Course session not found for this batch's course.");
-      }
-      if (!existing && courseSession.retiredAt) {
-        throw new ConflictError("A retired curriculum session cannot be added to a batch.");
+      const [batch, courseSession, curriculum, existingDeliveries] =
+        await Promise.all([
+          transaction.batch.findUnique({
+            where: { id: batchId },
+            select: { id: true, courseId: true, status: true },
+          }),
+          transaction.courseSession.findUnique({
+            where: { id: courseSessionId },
+          }),
+          transaction.courseSession.findMany({
+            where: { courseId: initialBatch.courseId, retiredAt: null },
+            orderBy: { orderIndex: "asc" },
+            select: {
+              id: true,
+              orderIndex: true,
+              session: { select: { title: true } },
+            },
+          }),
+          transaction.batchSession.findMany({
+            where: { batchId },
+          }),
+        ]);
+
+      const existing = existingDeliveries.find(
+        (delivery) => delivery.courseSessionId === courseSessionId,
+      );
+      if (
+        !courseSession ||
+        courseSession.courseId !== batch.courseId ||
+        (courseSession.retiredAt && !existing)
+      ) {
+        throw new NotFoundError("Course session is not part of this batch curriculum.");
       }
 
-      const currentIndex = existing
-        ? ordered.findIndex(({ id }) => id === existing.id)
-        : -1;
-      const maxIndex = existing ? ordered.length - 1 : ordered.length;
-      const orderIndex = requestedOrderIndex ?? (existing ? currentIndex : maxIndex);
-      if (orderIndex < 0 || orderIndex > maxIndex) {
-        throw new ValidationError(
-          `Order index must be between 0 and ${maxIndex}.`,
-          "orderIndex",
+      if (!courseSession.retiredAt) {
+        const deliveries = new Map(
+          existingDeliveries.map((delivery) => [
+            delivery.courseSessionId,
+            delivery,
+          ]),
         );
+        const risk = sequenceRiskDetails(
+          curriculum,
+          deliveries,
+          courseSessionId,
+          mode,
+        );
+        if (risk && !acknowledgeSequenceRisk) {
+          throw new SequenceRiskError(
+            "This delivery change would break the curriculum release sequence.",
+            risk,
+          );
+        }
       }
 
-      const releaseData = {
-        isReleased,
-        availableAt: isReleased ? (availableAt ?? null) : null,
+      if (mode === "UNRELEASED" && !existing) return;
+
+      const deliveryData = {
+        isReleased: mode !== "UNRELEASED",
+        availableAt: mode === "SCHEDULED" ? availableAt : null,
       };
-      if (existing && orderIndex === currentIndex) {
-        const updated = await transaction.batchSession.update({
-          where: { id: existing.id },
-          data: releaseData,
-          select: { id: true },
-        });
-        return updated.id;
-      }
-
-      await moveBatchSessionsOutOfRange(transaction, batchId);
-      const orderedIds = ordered
-        .map(({ id }) => id)
-        .filter((id) => id !== existing?.id);
-
-      let id = existing?.id;
-      if (!id) {
-        const created = await transaction.batchSession.create({
-          data: {
-            batchId,
-            courseSessionId,
-            courseId: batch.courseId,
-            orderIndex,
-            ...releaseData,
-          },
-          select: { id: true },
-        });
-        id = created.id;
-      }
-      orderedIds.splice(orderIndex, 0, id);
-      await assignBatchOrder(transaction, orderedIds);
       if (existing) {
         await transaction.batchSession.update({
-          where: { id },
-          data: releaseData,
+          where: { id: existing.id },
+          data: deliveryData,
         });
+        return;
       }
-      return id;
+      await transaction.batchSession.create({
+        data: {
+          batchId,
+          courseSessionId,
+          courseId: batch.courseId,
+          ...deliveryData,
+        },
+      });
     });
 
-    return await prisma.batchSession.findUnique({
-      where: { id: batchSessionId },
-      include: batchSessionInclude,
-    });
+    return await findSession(batchId, courseSessionId);
   } catch (error) {
     if (
       error instanceof ConflictError ||
       error instanceof NotFoundError ||
-      error instanceof ValidationError
+      error instanceof SequenceRiskError
     ) {
       throw error;
     }
@@ -282,75 +326,144 @@ export async function upsertSession(
   }
 }
 
-export async function reorderSessions(batchId, orderedBatchSessions) {
+async function calculateCompletionReadiness(client, batchId, now = new Date()) {
+  const batch = await client.batch.findUnique({
+    where: { id: batchId },
+    select: {
+      courseId: true,
+      status: true,
+      course: { select: { certificateEnabled: true } },
+    },
+  });
+  if (!batch) throw new NotFoundError("Batch not found.");
+
+  const enrollmentWhere = { batchId, status: { not: "CANCELLED" } };
+  const liveCurriculum = LIVE_BATCH_STATUSES.includes(batch.status);
+  const [curriculumCount, releasedCount, enrollmentCount, completedCount, certificateCount] =
+    await Promise.all([
+      liveCurriculum
+        ? client.courseSession.count({
+            where: { courseId: batch.courseId, retiredAt: null },
+          })
+        : client.batchSession.count({ where: { batchId } }),
+      liveCurriculum
+        ? client.courseSession.count({
+            where: {
+              courseId: batch.courseId,
+              retiredAt: null,
+              batchLinks: {
+                some: {
+                  batchId,
+                  isReleased: true,
+                  OR: [{ availableAt: null }, { availableAt: { lte: now } }],
+                },
+              },
+            },
+          })
+        : client.batchSession.count({
+            where: {
+              batchId,
+              isReleased: true,
+              OR: [{ availableAt: null }, { availableAt: { lte: now } }],
+            },
+          }),
+      client.enrollment.count({ where: enrollmentWhere }),
+      client.enrollment.count({
+        where: { ...enrollmentWhere, status: "COMPLETED" },
+      }),
+      client.certificate.count({
+        where: {
+          status: "ISSUED",
+          enrollment: enrollmentWhere,
+        },
+      }),
+    ]);
+
+  return {
+    curriculum: {
+      total: curriculumCount,
+      releasedAndAvailable: releasedCount,
+      ready: curriculumCount > 0 && curriculumCount === releasedCount,
+    },
+    enrollments: {
+      total: enrollmentCount,
+      completed: completedCount,
+      ready: enrollmentCount === completedCount,
+    },
+    certificates: {
+      required: true,
+      enabled: batch.course.certificateEnabled,
+      issued: certificateCount,
+      ready:
+        batch.course.certificateEnabled && certificateCount === enrollmentCount,
+    },
+  };
+}
+
+export async function findCompletionReadiness(batchId, now = new Date()) {
+  return calculateCompletionReadiness(prisma, batchId, now);
+}
+
+export async function transitionStatus(
+  batchId,
+  expectedStatus,
+  nextStatus,
+  { requireCompletionReadiness = false } = {},
+) {
   try {
-    await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `batch:${batchId}`);
-      const existing = await transaction.batchSession.findMany({
-        where: { batchId },
-        select: { id: true },
+    const result = await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.batch.findUnique({
+        where: { id: batchId },
+        select: { courseId: true },
       });
-      const expectedIds = new Set(existing.map(({ id }) => id));
-      const suppliedIds = new Set(orderedBatchSessions.map(({ id }) => id));
-      if (
-        expectedIds.size !== suppliedIds.size ||
-        [...suppliedIds].some((id) => !expectedIds.has(id))
-      ) {
-        throw new ValidationError(
-          "Reordering must include every batch session exactly once.",
-          "batchSessions",
+      if (!initial) throw new NotFoundError("Batch not found.");
+      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
+      await acquireTransactionLock(transaction, `batch:${batchId}`);
+
+      const current = await transaction.batch.findUnique({
+        where: { id: batchId },
+        select: { status: true },
+      });
+      if (current.status !== expectedStatus) {
+        throw new ConflictError(
+          "The batch status changed while this request was being processed. Refresh and try again.",
         );
       }
-      await moveBatchSessionsOutOfRange(transaction, batchId);
-      await assignBatchOrder(
-        transaction,
-        [...orderedBatchSessions]
-          .sort((left, right) => left.orderIndex - right.orderIndex)
-          .map(({ id }) => id),
-      );
-    });
-  } catch (error) {
-    if (error instanceof ValidationError) throw error;
-    throw handlePrismaError(error);
-  }
-}
 
-export async function removeOrWithdrawSession(batchId, courseSessionId) {
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `batch:${batchId}`);
-      const batchSession = await transaction.batchSession.findUnique({
-        where: { batchId_courseSessionId: { batchId, courseSessionId } },
-      });
-      if (!batchSession) throw new NotFoundError("Batch session not found.");
-
-      const completionCount = await transaction.sessionCompletion.count({
-        where: { courseSessionId, enrollment: { batchId } },
-      });
-      if (batchSession.isReleased || completionCount > 0) {
-        await transaction.batchSession.update({
-          where: { id: batchSession.id },
-          data: { isReleased: false, availableAt: null },
-        });
-        return { id: batchSession.id, action: "WITHDRAWN", completionCount };
+      let completionReadiness = null;
+      if (requireCompletionReadiness) {
+        completionReadiness = await calculateCompletionReadiness(
+          transaction,
+          batchId,
+        );
+        const ready =
+          completionReadiness.curriculum.ready &&
+          completionReadiness.enrollments.ready &&
+          completionReadiness.certificates.ready;
+        if (!ready) {
+          const error = new ConflictError(
+            "This batch is not ready to complete. Release the full curriculum and finish the required enrollment/certificate work first.",
+          );
+          error.details = completionReadiness;
+          throw error;
+        }
       }
 
-      const remaining = await transaction.batchSession.findMany({
-        where: { batchId, id: { not: batchSession.id } },
-        orderBy: { orderIndex: "asc" },
-        select: { id: true },
+      if (
+        ["COMPLETED", "CANCELLED", "ARCHIVED"].includes(nextStatus) &&
+        LIVE_BATCH_STATUSES.includes(expectedStatus)
+      ) {
+        await freezeDeliveryHistoryInTransaction(transaction, batchId);
+      }
+      await transaction.batch.update({
+        where: { id: batchId },
+        data: { status: nextStatus },
       });
-      await moveBatchSessionsOutOfRange(transaction, batchId);
-      await transaction.batchSession.delete({ where: { id: batchSession.id } });
-      await assignBatchOrder(
-        transaction,
-        remaining.map(({ id }) => id),
-      );
-      return { id: batchSession.id, action: "REMOVED", completionCount: 0 };
+      return { completionReadiness };
     });
+    return { batch: await findById(batchId), ...result };
   } catch (error) {
-    if (error instanceof NotFoundError) throw error;
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
     throw handlePrismaError(error);
   }
 }
-
