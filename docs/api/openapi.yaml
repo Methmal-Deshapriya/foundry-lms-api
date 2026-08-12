@@ -335,7 +335,22 @@ paths:
       operationId: deleteCategoryPermanently
       summary: "[DESTRUCTIVE] Permanently delete archived category"
       x-access: SUPER_ADMIN
-      description: Super-admin only. Deletes every child course and its learning records.
+      description: Super-admin only. Deletes only unused archived catalog setup. Enrolling/active batches and any enrollment, completion, certificate, or project history block deletion.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/CatalogDeletionBlocked"
+
+  /api/v1/categories/{categoryId}/deletion-impact:
+    get:
+      tags: [04 Categories]
+      operationId: getCategoryDeletionImpact
+      summary: Preview whether permanent category deletion is safe
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Aggregates all child-course operational batches and protected learner history without changing data.
       parameters:
         - $ref: "#/components/parameters/CategoryId"
       responses:
@@ -451,7 +466,22 @@ paths:
       operationId: deleteCoursePermanently
       summary: "[DESTRUCTIVE] Permanently delete archived course"
       x-access: SUPER_ADMIN
-      description: Super-admin only. Deletes sessions, enrollments, progress, certificates, and projects.
+      description: Super-admin only. Deletes only unused archived catalog setup. Enrolling/active batches and any enrollment, completion, certificate, or project history block deletion.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/CatalogDeletionBlocked"
+
+  /api/v1/courses/{courseId}/deletion-impact:
+    get:
+      tags: [05 Courses]
+      operationId: getCourseDeletionImpact
+      summary: Preview whether permanent course deletion is safe
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Aggregates operational batches and protected learner history without changing data.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -1171,6 +1201,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/SequenceRiskEnvelope"
+    CatalogDeletionBlocked:
+      description: Permanent deletion would destroy operational delivery or protected learner history.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CatalogDeletionBlockedEnvelope"
 
   parameters:
     TargetUserId:
@@ -1713,6 +1749,53 @@ components:
             affectedBatchCount: { type: integer, minimum: 0 }
             affectedBatches: { type: array, items: { type: object } }
             conflicts: { type: array, items: { type: object } }
+    CatalogDeletionBlockedEnvelope:
+      type: object
+      required: [success, error, code, details]
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: string
+          example: Permanent deletion is blocked because this catalog item contains operational batches or learner history.
+        code:
+          type: string
+          enum: [CATALOG_DELETION_BLOCKED]
+        details:
+          $ref: "#/components/schemas/CatalogDeletionImpact"
+    CatalogDeletionImpact:
+      type: object
+      required: [resourceType, resourceId, status, canDelete, summary, blockers]
+      properties:
+        resourceType: { type: string, enum: [CATEGORY, COURSE] }
+        resourceId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/CatalogStatus" }
+        canDelete: { type: boolean }
+        summary:
+          type: object
+          required: [courses, unarchivedCourses, batches, operationalBatches, enrollments, completions, certificates, projects, curriculumLinks, exclusiveSessions, reusableSessions]
+          properties:
+            courses: { type: integer, minimum: 0 }
+            unarchivedCourses: { type: integer, minimum: 0 }
+            batches: { type: integer, minimum: 0 }
+            operationalBatches: { type: integer, minimum: 0 }
+            enrollments: { type: integer, minimum: 0 }
+            completions: { type: integer, minimum: 0 }
+            certificates: { type: integer, minimum: 0 }
+            projects: { type: integer, minimum: 0 }
+            curriculumLinks: { type: integer, minimum: 0 }
+            exclusiveSessions: { type: integer, minimum: 0 }
+            reusableSessions: { type: integer, minimum: 0 }
+        blockers:
+          type: array
+          items:
+            type: object
+            required: [code, count, message]
+            properties:
+              code:
+                type: string
+                enum: [RESOURCE_NOT_ARCHIVED, UNARCHIVED_COURSES, OPERATIONAL_BATCHES, ENROLLMENT_HISTORY, COMPLETION_HISTORY, CERTIFICATE_HISTORY, PROJECT_HISTORY]
+              count: { type: integer, minimum: 1 }
+              message: { type: string }
     Role:
       type: string
       enum: [STUDENT, ADMIN, SUPER_ADMIN]

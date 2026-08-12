@@ -66,6 +66,22 @@ export class ConflictError extends CustomError {
 }
 
 /**
+ * 409 used when permanent catalog deletion would destroy operational delivery
+ * or learner history. The structured impact is safe to show in an admin
+ * confirmation dialog.
+ */
+export class CatalogDeletionBlockedError extends CustomError {
+  constructor(details) {
+    super(
+      "Permanent deletion is blocked because this catalog item contains operational batches or learner history.",
+      409,
+      "CATALOG_DELETION_BLOCKED",
+    );
+    this.details = details;
+  }
+}
+
+/**
  * 409 used when an operation would break the intended curriculum sequence.
  * The client may retry only after an explicit, audited acknowledgement.
  */

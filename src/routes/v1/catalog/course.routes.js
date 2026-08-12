@@ -18,6 +18,11 @@ router.post(
   enrollmentController.selfEnrollFreeCourseController
 );
 router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), courseController.getCoursesAdmin);
+router.get(
+  "/:id/deletion-impact",
+  requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY),
+  courseController.getCourseDeletionImpact,
+);
 router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), courseController.getCourseAdmin);
 router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), courseController.createCourse);
 router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), courseController.updateCourse);

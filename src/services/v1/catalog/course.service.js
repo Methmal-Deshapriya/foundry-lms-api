@@ -61,6 +61,12 @@ export async function getCourseAdminService(id) {
   return toAdminCourse(course);
 }
 
+export async function getCourseDeletionImpactService(id) {
+  const impact = await courseRepo.findDeletionImpact(id);
+  if (!impact) throw new NotFoundError("Course not found.");
+  return impact;
+}
+
 export async function createCourseService(data, actorId) {
   const input = parseOrThrow(createCourseSchema, data);
   const category = await categoryRepo.findById(input.categoryId);
@@ -214,7 +220,7 @@ export async function deleteCoursePermanentlyService(id, actorId) {
     action: AUDIT_ACTIONS.COURSE_DELETED_PERMANENTLY,
     entityType: ENTITY_TYPES.COURSE,
     entityId: id,
-    description: `Course "${current.title}" and all dependent learning records permanently deleted.`,
+    description: `Unused course "${current.title}" and its catalog setup permanently deleted.`,
     metadata: {
       title: current.title,
       slug: current.slug,

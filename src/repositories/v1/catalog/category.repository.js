@@ -2,8 +2,12 @@ import prisma from "../../../utils/prisma.js";
 import { ConflictError, handlePrismaError } from "../../../utils/Errors.js";
 import {
   addDeletionSummary,
+  assertDeletionAllowed,
+  buildDeletionImpact,
   deleteCourseGraph,
   emptyDeletionSummary,
+  lockArchivedCourses,
+  runSerializableCatalogTransaction,
 } from "./catalogDeletion.repository.js";
 
 export async function findPublicByService(serviceType) {
@@ -106,9 +110,27 @@ export async function archive(id) {
   ]);
 }
 
+export async function findDeletionImpact(id) {
+  const category = await prisma.category.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      status: true,
+      courses: { select: { id: true }, orderBy: { id: "asc" } },
+    },
+  });
+  if (!category) return null;
+  return buildDeletionImpact(prisma, {
+    resourceType: "CATEGORY",
+    resourceId: category.id,
+    resourceStatus: category.status,
+    courseIds: category.courses.map((course) => course.id),
+  });
+}
+
 export async function removePermanently(id) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await runSerializableCatalogTransaction(prisma, async (transaction) => {
       // The no-op conditional update locks the archived category row and
       // prevents an unarchive request from racing this destructive operation.
       const locked = await transaction.category.updateMany({
@@ -127,6 +149,15 @@ export async function removePermanently(id) {
         orderBy: { id: "asc" },
       });
       const courseIds = courses.map((course) => course.id);
+      await lockArchivedCourses(transaction, courseIds);
+
+      const impact = await buildDeletionImpact(transaction, {
+        resourceType: "CATEGORY",
+        resourceId: id,
+        resourceStatus: "ARCHIVED",
+        courseIds,
+      });
+      assertDeletionAllowed(impact);
 
       const summary = emptyDeletionSummary();
       for (const courseId of courseIds) {
@@ -144,7 +175,9 @@ export async function removePermanently(id) {
       };
     });
   } catch (error) {
-    if (error instanceof ConflictError) throw error;
+    if (error instanceof ConflictError || error?.code === "CATALOG_DELETION_BLOCKED") {
+      throw error;
+    }
     throw handlePrismaError(error);
   }
 }

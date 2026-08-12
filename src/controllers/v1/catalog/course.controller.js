@@ -13,6 +13,16 @@ export async function getCourseAdmin(req, res, next) {
   } catch (error) { next(error); }
 }
 
+export async function getCourseDeletionImpact(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await courseService.getCourseDeletionImpactService(req.params.id),
+      "Course deletion impact fetched successfully",
+    );
+  } catch (error) { next(error); }
+}
+
 export async function createCourse(req, res, next) {
   try {
     return ApiResponse.send(

@@ -1,6 +1,12 @@
 import prisma from "../../../utils/prisma.js";
 import { ConflictError, handlePrismaError } from "../../../utils/Errors.js";
-import { deleteCourseGraph } from "./catalogDeletion.repository.js";
+import {
+  assertDeletionAllowed,
+  buildDeletionImpact,
+  deleteCourseGraph,
+  lockArchivedCourses,
+  runSerializableCatalogTransaction,
+} from "./catalogDeletion.repository.js";
 
 export async function findPublicDetail(serviceType, categorySlug, courseSlug) {
   return prisma.course.findFirst({
@@ -145,14 +151,38 @@ export async function update(id, data) {
   }
 }
 
+export async function findDeletionImpact(id) {
+  const course = await prisma.course.findUnique({
+    where: { id },
+    select: { id: true, status: true },
+  });
+  if (!course) return null;
+  return buildDeletionImpact(prisma, {
+    resourceType: "COURSE",
+    resourceId: course.id,
+    resourceStatus: course.status,
+    courseIds: [course.id],
+  });
+}
+
 export async function removePermanently(id) {
   try {
-    return await prisma.$transaction(async (transaction) => {
+    return await runSerializableCatalogTransaction(prisma, async (transaction) => {
+      await lockArchivedCourses(transaction, [id]);
+      const impact = await buildDeletionImpact(transaction, {
+        resourceType: "COURSE",
+        resourceId: id,
+        resourceStatus: "ARCHIVED",
+        courseIds: [id],
+      });
+      assertDeletionAllowed(impact);
       const result = await deleteCourseGraph(transaction, id);
       return { id, ...result };
     });
   } catch (error) {
-    if (error instanceof ConflictError) throw error;
+    if (error instanceof ConflictError || error?.code === "CATALOG_DELETION_BLOCKED") {
+      throw error;
+    }
     throw handlePrismaError(error);
   }
 }

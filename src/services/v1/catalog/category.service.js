@@ -36,6 +36,12 @@ export async function getCategoryAdminService(id) {
   return toAdminCategory(category);
 }
 
+export async function getCategoryDeletionImpactService(id) {
+  const impact = await categoryRepo.findDeletionImpact(id);
+  if (!impact) throw new NotFoundError("Category not found.");
+  return impact;
+}
+
 export async function createCategoryService(data, actorId) {
   const input = parseOrThrow(createCategorySchema, data);
   const category = await categoryRepo.create({
@@ -157,7 +163,7 @@ export async function deleteCategoryPermanentlyService(id, actorId) {
     action: AUDIT_ACTIONS.CATEGORY_DELETED_PERMANENTLY,
     entityType: ENTITY_TYPES.CATEGORY,
     entityId: id,
-    description: `Category "${current.title}" and all dependent learning records permanently deleted.`,
+    description: `Unused category "${current.title}" and its catalog setup permanently deleted.`,
     metadata: {
       title: current.title,
       slug: current.slug,
