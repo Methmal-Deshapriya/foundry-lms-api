@@ -36,7 +36,11 @@ export async function selfEnrollFreeCourseController(req, res, next) {
     return ApiResponse.send(
       res,
       result.enrollment,
-      result.created ? "Course added to your learning dashboard" : "You are already enrolled",
+      result.created
+        ? "Course added to your learning dashboard"
+        : result.reactivated
+          ? "Course restored to your learning dashboard"
+          : "You are already enrolled",
       result.created ? 201 : 200,
     );
   } catch (error) {

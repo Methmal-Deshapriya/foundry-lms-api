@@ -7,6 +7,7 @@ import {
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import {
   ConflictError,
+  EnrollmentCompletedError,
   ForbiddenError,
   NotFoundError,
 } from "../../../utils/Errors.js";
@@ -161,8 +162,21 @@ export async function getClassroomService(enrollmentId, requester) {
   };
 }
 
-async function requireVisibleSession(enrollmentId, courseSessionId, requester) {
-  const context = await requireEnrollmentAccessService(enrollmentId, requester);
+async function requireVisibleSession(
+  enrollmentId,
+  courseSessionId,
+  requester,
+  { completionMutation = false } = {},
+) {
+  if (completionMutation && requester.role !== ROLES.STUDENT) {
+    throw new ForbiddenError("Only students can change session completion.");
+  }
+  const context = await requireEnrollmentAccessService(enrollmentId, requester, {
+    adminsAllowed: !completionMutation,
+  });
+  if (completionMutation && context.enrollment.status === "COMPLETED") {
+    throw new EnrollmentCompletedError();
+  }
   const rows = await visibleSessions(context);
   const row = rows.find(
     ({ courseSession }) => courseSession.id === courseSessionId,
@@ -195,6 +209,7 @@ export async function completeClassroomSessionService(
     enrollmentId,
     courseSessionId,
     requester,
+    { completionMutation: true },
   );
   const existing = row.courseSession.completions?.[0] ?? null;
   if (existing) return { ...existing, created: false };
@@ -232,10 +247,12 @@ export async function uncompleteClassroomSessionService(
     enrollmentId,
     courseSessionId,
     requester,
+    { completionMutation: true },
   );
   const result = await classroomRepo.removeCompletion(
     enrollmentId,
     courseSessionId,
+    context.enrollment.courseId,
   );
   if (result.count > 0) {
     recordActionService({

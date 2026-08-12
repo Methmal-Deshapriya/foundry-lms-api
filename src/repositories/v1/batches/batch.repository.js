@@ -371,12 +371,14 @@ async function calculateCompletionReadiness(client, batchId, now = new Date()) {
       client.enrollment.count({
         where: { ...enrollmentWhere, status: "COMPLETED" },
       }),
-      client.certificate.count({
-        where: {
-          status: "ISSUED",
-          enrollment: enrollmentWhere,
-        },
-      }),
+      batch.course.certificateEnabled
+        ? client.certificate.count({
+            where: {
+              status: "ISSUED",
+              enrollment: enrollmentWhere,
+            },
+          })
+        : 0,
     ]);
 
   return {
@@ -391,11 +393,11 @@ async function calculateCompletionReadiness(client, batchId, now = new Date()) {
       ready: enrollmentCount === completedCount,
     },
     certificates: {
-      required: true,
+      required: batch.course.certificateEnabled,
       enabled: batch.course.certificateEnabled,
       issued: certificateCount,
       ready:
-        batch.course.certificateEnabled && certificateCount === enrollmentCount,
+        !batch.course.certificateEnabled || certificateCount === enrollmentCount,
     },
   };
 }
@@ -441,8 +443,11 @@ export async function transitionStatus(
           completionReadiness.enrollments.ready &&
           completionReadiness.certificates.ready;
         if (!ready) {
+          const certificateWork = completionReadiness.certificates.required
+            ? " and issue certificates for every non-cancelled enrollment"
+            : "";
           const error = new ConflictError(
-            "This batch is not ready to complete. Release the full curriculum and finish the required enrollment/certificate work first.",
+            `This batch is not ready to complete. Release the full curriculum, complete every non-cancelled enrollment${certificateWork} first.`,
           );
           error.details = completionReadiness;
           throw error;

@@ -7,6 +7,7 @@ import {
   lockArchivedCourses,
   runSerializableCatalogTransaction,
 } from "./catalogDeletion.repository.js";
+import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
 export async function findPublicDetail(serviceType, categorySlug, courseSlug) {
   return prisma.course.findFirst({
@@ -59,8 +60,62 @@ export async function findPublishedFreeById(id) {
       accessType: "FREE",
       category: { status: "PUBLISHED", serviceType: "FREE_LEARNING" },
     },
-    include: { category: true },
+    include: {
+      category: true,
+      _count: {
+        select: { courseSessions: { where: { retiredAt: null } } },
+      },
+    },
   });
+}
+
+export async function updateEnrollmentStatus(id, status) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      // Curriculum changes use the same first lock. This makes opening
+      // enrollment and removing the final session mutually exclusive.
+      await acquireTransactionLock(transaction, `curriculum:${id}`);
+      await acquireTransactionLock(transaction, `free-enrollment:${id}`);
+
+      const current = await transaction.course.findUnique({
+        where: { id },
+        include: {
+          category: true,
+          _count: {
+            select: {
+              courseSessions: { where: { retiredAt: null } },
+              batches: true,
+              enrollments: true,
+            },
+          },
+        },
+      });
+      if (!current) return null;
+      if (status === "OPEN" && current._count.courseSessions === 0) {
+        throw new ConflictError(
+          "Attach at least one session before opening Free Learning enrollment.",
+        );
+      }
+
+      return transaction.course.update({
+        where: { id },
+        data: { enrollmentStatus: status },
+        include: {
+          category: true,
+          _count: {
+            select: {
+              courseSessions: { where: { retiredAt: null } },
+              batches: true,
+              enrollments: true,
+            },
+          },
+        },
+      });
+    });
+  } catch (error) {
+    if (error instanceof ConflictError) throw error;
+    throw handlePrismaError(error);
+  }
 }
 
 export async function findAdmin(filters, limit, offset) {

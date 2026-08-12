@@ -16,6 +16,7 @@ import {
   completeClassroomSessionService,
   getClassroomService,
   getClassroomSessionService,
+  uncompleteClassroomSessionService,
 } from "./classroom.service.js";
 
 const enrollmentId = "a0000000-0000-4000-8000-000000000001";
@@ -179,5 +180,59 @@ describe("unified classroom service", () => {
     );
     expect(existing.created).toBe(false);
     expect(classroomRepo.createCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a completed enrollment classroom readable", async () => {
+    classroomRepo.findEnrollmentContext.mockResolvedValue(
+      enrollment({ status: "COMPLETED" }),
+    );
+    classroomRepo.findPaidSessions.mockResolvedValue([
+      {
+        courseSession: curriculumSession(true),
+        orderIndex: 0,
+        availableAt: null,
+      },
+    ]);
+
+    const result = await getClassroomService(enrollmentId, {
+      id: userId,
+      role: "STUDENT",
+    });
+
+    expect(result.enrollment.status).toBe("COMPLETED");
+    expect(result.sessions[0].completed).toBe(true);
+  });
+
+  it.each([
+    ["complete", completeClassroomSessionService],
+    ["uncomplete", uncompleteClassroomSessionService],
+  ])("freezes %s after the enrollment is completed", async (_name, mutate) => {
+    classroomRepo.findEnrollmentContext.mockResolvedValue(
+      enrollment({ status: "COMPLETED" }),
+    );
+
+    await expect(
+      mutate(enrollmentId, courseSessionId, {
+        id: userId,
+        role: "STUDENT",
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: "ENROLLMENT_COMPLETED",
+    });
+    expect(classroomRepo.findPaidSessions).not.toHaveBeenCalled();
+    expect(classroomRepo.createCompletion).not.toHaveBeenCalled();
+    expect(classroomRepo.removeCompletion).not.toHaveBeenCalled();
+  });
+
+  it("does not let an administrator change student session completion", async () => {
+    await expect(
+      completeClassroomSessionService(enrollmentId, courseSessionId, {
+        id: "admin-id",
+        role: "ADMIN",
+      }),
+    ).rejects.toThrow(/only students/i);
+    expect(classroomRepo.findEnrollmentContext).not.toHaveBeenCalled();
+    expect(classroomRepo.createCompletion).not.toHaveBeenCalled();
   });
 });

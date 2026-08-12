@@ -66,6 +66,20 @@ export class ConflictError extends CustomError {
 }
 
 /**
+ * 409 used when a student attempts to mutate frozen learning history after
+ * the administrator has completed the enrollment.
+ */
+export class EnrollmentCompletedError extends CustomError {
+  constructor() {
+    super(
+      "This enrollment is completed. Session completion history is read-only.",
+      409,
+      "ENROLLMENT_COMPLETED",
+    );
+  }
+}
+
+/**
  * 409 used when permanent catalog deletion would destroy operational delivery
  * or learner history. The structured impact is safe to show in an admin
  * confirmation dialog.

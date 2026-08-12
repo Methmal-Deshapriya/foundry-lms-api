@@ -5,11 +5,16 @@ import * as batchRepo from "../../../repositories/v1/batches/batch.repository.js
 import * as enrollmentModel from "../../../models/v1/enrollments/enrollment.model.js";
 import {
   bulkManualEnrollmentSchema,
+  eligibleStudentCursorPayloadSchema,
   eligibleStudentFiltersSchema,
   manualEnrollmentSchema,
   updateEnrollmentSchema,
 } from "../../../constants/v1/enrollments/enrollment.schema.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import {
+  ENROLLMENT_STATUS,
+  ENROLLMENT_STATUS_TRANSITIONS,
+} from "../../../constants/v1/enrollments/enrollment.constants.js";
 import {
   AUDIT_ACTIONS,
   ENTITY_TYPES,
@@ -193,44 +198,45 @@ export async function selfEnrollFreeCourseService(courseId, user) {
   assertSelfPacedService(course.category.serviceType);
   assertVerifiedStudent(student, user.id);
 
-  const existing = await enrollmentRepo.findFree(user.id, courseId);
-  if (existing) {
-    if (existing.status === "CANCELLED") {
-      throw new ConflictError("This enrollment was cancelled. Please contact support.");
-    }
-    return {
-      enrollment: enrollmentModel.toMyEnrollmentResponse(existing),
-      created: false,
-    };
+  if (course.enrollmentStatus === "COMING_SOON") {
+    throw new ConflictError("Enrollment for this course is coming soon.");
+  }
+  if (course.enrollmentStatus === "CLOSED") {
+    throw new ConflictError("Enrollment for this course is closed.");
+  }
+  if (course._count.courseSessions === 0) {
+    throw new ConflictError("This course curriculum is still being prepared.");
   }
 
-  let enrollment;
-  try {
-    enrollment = await enrollmentRepo.createFree(user.id, courseId);
-  } catch (error) {
-    if (!(error instanceof ConflictError)) throw error;
-    enrollment = await enrollmentRepo.findFree(user.id, courseId);
-    if (!enrollment) throw error;
-    if (enrollment.status === "CANCELLED") {
-      throw new ConflictError("This enrollment was cancelled. Please contact support.");
-    }
-    return {
-      enrollment: enrollmentModel.toMyEnrollmentResponse(enrollment),
-      created: false,
-    };
+  const { enrollment, outcome } = await enrollmentRepo.enrollFree(
+    user.id,
+    courseId,
+  );
+  if (outcome !== "EXISTING") {
+    recordActionService({
+      actorUserId: user.id,
+      action: outcome === "REACTIVATED"
+        ? AUDIT_ACTIONS.STUDENT_SELF_REENROLLED
+        : AUDIT_ACTIONS.STUDENT_SELF_ENROLLED,
+      entityType: ENTITY_TYPES.ENROLLMENT,
+      entityId: enrollment.id,
+      description: outcome === "REACTIVATED"
+        ? `Student ${student.email} re-enrolled in "${course.title}".`
+        : `Student ${student.email} self-enrolled in "${course.title}".`,
+      metadata: {
+        courseId,
+        courseTitle: course.title,
+        outcome,
+        ...(outcome === "REACTIVATED"
+          ? { previousStatus: "CANCELLED", newStatus: "ACTIVE" }
+          : {}),
+      },
+    });
   }
-
-  recordActionService({
-    actorUserId: user.id,
-    action: AUDIT_ACTIONS.STUDENT_SELF_ENROLLED,
-    entityType: ENTITY_TYPES.ENROLLMENT,
-    entityId: enrollment.id,
-    description: `Student ${student.email} self-enrolled in "${course.title}".`,
-    metadata: { courseId, courseTitle: course.title },
-  });
   return {
     enrollment: enrollmentModel.toMyEnrollmentResponse(enrollment),
-    created: true,
+    created: outcome === "CREATED",
+    reactivated: outcome === "REACTIVATED",
   };
 }
 
@@ -250,6 +256,29 @@ export async function updateEnrollmentService(enrollmentId, data, actorId) {
   ) {
     throw new ConflictError("Payment details cannot be changed for free self-enrollment.");
   }
+  if (
+    enrollment.source === "SELF" &&
+    enrollment.status === "CANCELLED" &&
+    input.status &&
+    input.status !== "CANCELLED"
+  ) {
+    throw new ConflictError(
+      "Free Learning re-enrollment must be initiated by the student.",
+    );
+  }
+  if (input.status && input.status !== enrollment.status) {
+    const allowed = ENROLLMENT_STATUS_TRANSITIONS[enrollment.status] ?? [];
+    if (!allowed.includes(input.status)) {
+      if (enrollment.status === ENROLLMENT_STATUS.COMPLETED) {
+        throw new ConflictError(
+          "A completed enrollment is terminal and cannot be reopened or cancelled.",
+        );
+      }
+      throw new ConflictError(
+        `Enrollment cannot move from ${enrollment.status} to ${input.status}.`,
+      );
+    }
+  }
 
   const updateData = { ...input };
   const effectivePaymentStatus = input.paymentStatus ?? enrollment.paymentStatus;
@@ -266,11 +295,18 @@ export async function updateEnrollmentService(enrollmentId, data, actorId) {
     updateData.paymentCompletedAt =
       input.paymentStatus === "COMPLETED" ? new Date() : null;
   }
-  if (input.status) {
+  if (input.status && input.status !== enrollment.status) {
     updateData.completedAt = input.status === "COMPLETED" ? new Date() : null;
   }
 
-  const updated = await enrollmentRepo.update(enrollmentId, updateData);
+  const updated = await enrollmentRepo.update(
+    enrollmentId,
+    {
+      status: enrollment.status,
+      paymentStatus: enrollment.paymentStatus,
+    },
+    updateData,
+  );
   if (input.paymentStatus && input.paymentStatus !== enrollment.paymentStatus) {
     recordActionService({
       actorUserId: actorId,
@@ -333,15 +369,46 @@ export async function getEligibleStudentsForBatchService(batchId, query = {}) {
   const batch = await batchRepo.findById(batchId);
   assertBatchAcceptsEnrollments(batch);
   const filters = parse(eligibleStudentFiltersSchema, query);
-  const students = await userRepo.searchEligibleStudentsForBatch(
+  let cursor = null;
+  if (filters.cursor) {
+    try {
+      const decodedCursor = eligibleStudentCursorPayloadSchema.safeParse(
+        JSON.parse(Buffer.from(filters.cursor, "base64url").toString("utf8")),
+      );
+      if (!decodedCursor.success) throw new Error("Invalid cursor payload.");
+      if (
+        decodedCursor.data.batchId !== batchId ||
+        decodedCursor.data.q !== filters.q
+      ) {
+        throw new Error("Cursor does not match this search.");
+      }
+      cursor = decodedCursor.data;
+    } catch {
+      throw new ValidationError("Invalid eligible-student cursor.", "cursor");
+    }
+  }
+  const rows = await userRepo.searchEligibleStudentsForBatch(
     batchId,
     filters.q,
     filters.limit,
+    cursor,
   );
-  return students.map(({ id, firstName, lastName, email }) => ({
-    id,
-    firstName,
-    lastName,
-    email,
-  }));
+  const hasMore = rows.length > filters.limit;
+  const students = rows.slice(0, filters.limit);
+  const lastStudent = students.at(-1);
+  return {
+    students,
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore && lastStudent
+        ? Buffer.from(JSON.stringify({
+            email: lastStudent.email,
+            id: lastStudent.id,
+            batchId,
+            q: filters.q,
+          })).toString("base64url")
+        : null,
+    },
+  };
 }

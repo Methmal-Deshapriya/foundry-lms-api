@@ -31,6 +31,12 @@ export const COURSE_LEVELS = Object.freeze([
 ]);
 
 export const COURSE_ACCESS_TYPES = Object.freeze(["FREE", "PAID"]);
+export const COURSE_ENROLLMENT_STATUSES = Object.freeze([
+  "COMING_SOON",
+  "OPEN",
+  "CLOSED",
+]);
+export const COURSE_CURRENCY = "LKR";
 export const DURATION_UNITS = Object.freeze([
   "SESSION",
   "DAY",

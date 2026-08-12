@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CATALOG_STATUSES,
   COURSE_ACCESS_TYPES,
+  COURSE_ENROLLMENT_STATUSES,
   COURSE_LEVELS,
   DURATION_UNITS,
   LEARNING_SERVICE_TYPES,
@@ -21,8 +22,9 @@ const courseObject = z.object({
   durationUnit: z.enum(DURATION_UNITS).nullable().optional(),
   accessType: z.enum(COURSE_ACCESS_TYPES),
   price: z.number().min(0).max(99999999),
-  currency: z.string().trim().length(3).toUpperCase().default("LKR"),
-  certificateEnabled: z.boolean().optional(),
+  certificateEnabled: z.boolean({
+    error: "Select whether this course issues certificates.",
+  }),
   highlights: optionalStringArray,
   skills: optionalStringArray,
   prerequisites: optionalStringArray,
@@ -51,8 +53,13 @@ function validateCourseConsistency(data, context) {
 export const createCourseSchema = courseObject.superRefine(validateCourseConsistency);
 
 export const updateCourseSchema = courseObject
+  .omit({ certificateEnabled: true })
   .partial()
   .refine((data) => Object.keys(data).length > 0, "At least one field is required.");
+
+export const courseEnrollmentStatusSchema = z.object({
+  status: z.enum(COURSE_ENROLLMENT_STATUSES),
+});
 
 export const courseAdminFiltersSchema = z.object({
   serviceType: z.enum(Object.values(LEARNING_SERVICE_TYPES)).optional(),

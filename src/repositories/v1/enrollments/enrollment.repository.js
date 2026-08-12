@@ -60,21 +60,72 @@ export async function createPaid(batchId, userId, actorId, payment) {
   }
 }
 
-export async function createFree(userId, courseId) {
+export async function enrollFree(userId, courseId) {
   try {
-    return await prisma.enrollment.create({
-      data: {
-        userId,
-        courseId,
-        batchId: null,
-        source: "SELF",
-        enrolledByUserId: null,
-        status: "ACTIVE",
-        paymentStatus: "NOT_REQUIRED",
-      },
-      include: enrollmentInclude,
+    const result = await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `free-enrollment:${courseId}`);
+      const course = await transaction.course.findFirst({
+        where: {
+          id: courseId,
+          status: "PUBLISHED",
+          accessType: "FREE",
+          enrollmentStatus: "OPEN",
+          category: { status: "PUBLISHED", serviceType: "FREE_LEARNING" },
+          courseSessions: { some: { retiredAt: null } },
+        },
+        select: { id: true },
+      });
+      if (!course) {
+        throw new ConflictError("This Free Learning course is not open for enrollment.");
+      }
+
+      const existing = await transaction.enrollment.findFirst({
+        where: {
+          userId,
+          courseId,
+          batchId: null,
+          source: "SELF",
+        },
+        select: { id: true, status: true },
+      });
+      if (existing) {
+        await acquireTransactionLock(transaction, `enrollment:${existing.id}`);
+        const current = await transaction.enrollment.findUnique({
+          where: { id: existing.id },
+          select: { id: true, status: true },
+        });
+        if (!current) throw new NotFoundError("Enrollment not found.");
+        if (current.status !== "CANCELLED") {
+          return { enrollmentId: current.id, outcome: "EXISTING" };
+        }
+
+        await transaction.enrollment.update({
+          where: { id: current.id },
+          data: { status: "ACTIVE", completedAt: null },
+        });
+        return { enrollmentId: current.id, outcome: "REACTIVATED" };
+      }
+
+      const enrollment = await transaction.enrollment.create({
+        data: {
+          userId,
+          courseId,
+          batchId: null,
+          source: "SELF",
+          enrolledByUserId: null,
+          status: "ACTIVE",
+          paymentStatus: "NOT_REQUIRED",
+        },
+        select: { id: true },
+      });
+      return { enrollmentId: enrollment.id, outcome: "CREATED" };
     });
+    return {
+      enrollment: await findById(result.enrollmentId),
+      outcome: result.outcome,
+    };
   } catch (error) {
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
     throw handlePrismaError(error);
   }
 }
@@ -83,23 +134,33 @@ export async function findById(id) {
   return prisma.enrollment.findUnique({ where: { id }, include: enrollmentInclude });
 }
 
-export async function update(id, data) {
+export async function update(id, expected, data) {
   try {
-    return await prisma.enrollment.update({
-      where: { id },
-      data,
-      include: enrollmentInclude,
+    return await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `enrollment:${id}`);
+      const current = await transaction.enrollment.findUnique({
+        where: { id },
+        select: { status: true, paymentStatus: true },
+      });
+      if (!current) throw new NotFoundError("Enrollment not found.");
+      if (
+        current.status !== expected.status ||
+        current.paymentStatus !== expected.paymentStatus
+      ) {
+        throw new ConflictError(
+          "The enrollment or payment status changed while this request was being processed. Refresh and try again.",
+        );
+      }
+      return transaction.enrollment.update({
+        where: { id },
+        data,
+        include: enrollmentInclude,
+      });
     });
   } catch (error) {
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
     throw handlePrismaError(error);
   }
-}
-
-export async function findFree(userId, courseId) {
-  return prisma.enrollment.findFirst({
-    where: { userId, courseId, batchId: null },
-    include: enrollmentInclude,
-  });
 }
 
 export async function findUserEnrollments(userId) {

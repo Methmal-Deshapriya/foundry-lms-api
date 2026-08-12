@@ -51,6 +51,7 @@ export function toPublicCourseCard(course) {
     durationUnit: course.durationUnit,
     durationLabel: formatDuration(course.durationValue, course.durationUnit),
     accessType: course.accessType,
+    enrollmentStatus: course.enrollmentStatus,
     price: Number(course.price),
     currency: course.currency,
     certificateEnabled: course.certificateEnabled,

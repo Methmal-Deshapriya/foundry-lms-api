@@ -2,10 +2,15 @@ import * as categoryRepo from "../../../repositories/v1/catalog/category.reposit
 import * as courseRepo from "../../../repositories/v1/catalog/course.repository.js";
 import {
   courseAdminFiltersSchema,
+  courseEnrollmentStatusSchema,
   createCourseSchema,
   updateCourseSchema,
 } from "../../../constants/v1/catalog/course.schema.js";
-import { CATALOG_STATUSES } from "../../../constants/v1/catalog/catalog.constants.js";
+import {
+  CATALOG_STATUSES,
+  COURSE_CURRENCY,
+  LEARNING_SERVICE_TYPES,
+} from "../../../constants/v1/catalog/catalog.constants.js";
 import { toAdminCourse } from "../../../models/v1/catalog/catalog.model.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
@@ -77,6 +82,7 @@ export async function createCourseService(data, actorId) {
   assertCourseConfigurationForService(category.serviceType, input);
   const course = await courseRepo.create({
     ...input,
+    currency: COURSE_CURRENCY,
     status: CATALOG_STATUSES.DRAFT,
   });
   recordActionService({
@@ -91,6 +97,11 @@ export async function createCourseService(data, actorId) {
 }
 
 export async function updateCourseService(id, data, actorId) {
+  if (Object.hasOwn(data, "certificateEnabled")) {
+    throw new ConflictError(
+      "Certificate policy is selected when the course is created and cannot be changed later.",
+    );
+  }
   const input = parseOrThrow(updateCourseSchema, data);
   const current = await courseRepo.findById(id);
   if (!current) throw new NotFoundError("Course not found.");
@@ -127,6 +138,44 @@ export async function updateCourseService(id, data, actorId) {
     entityId: id,
     description: `Course "${course.title}" updated.`,
     metadata: { changedFields: Object.keys(input) },
+  });
+  if (current.status === CATALOG_STATUSES.PUBLISHED) {
+    await revalidatePublicCatalogCache();
+  }
+  return toAdminCourse(course);
+}
+
+export async function setCourseEnrollmentStatusService(id, data, actorId) {
+  const { status } = parseOrThrow(courseEnrollmentStatusSchema, data);
+  const current = await courseRepo.findById(id);
+  if (!current) throw new NotFoundError("Course not found.");
+  if (current.status === CATALOG_STATUSES.ARCHIVED) {
+    throw new ConflictError("Archived courses cannot change enrollment availability.");
+  }
+  if (
+    current.category.serviceType !== LEARNING_SERVICE_TYPES.FREE_LEARNING ||
+    current.accessType !== "FREE"
+  ) {
+    throw new ConflictError(
+      "Enrollment availability is managed here only for Free Learning courses.",
+    );
+  }
+  if (status === "OPEN" && current._count.courseSessions === 0) {
+    throw new ConflictError(
+      "Attach at least one session before opening Free Learning enrollment.",
+    );
+  }
+  if (current.enrollmentStatus === status) return toAdminCourse(current);
+
+  const course = await courseRepo.updateEnrollmentStatus(id, status);
+  if (!course) throw new NotFoundError("Course not found.");
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.COURSE_ENROLLMENT_STATUS_CHANGED,
+    entityType: ENTITY_TYPES.COURSE,
+    entityId: id,
+    description: `Enrollment for course "${course.title}" changed from ${current.enrollmentStatus} to ${status}.`,
+    metadata: { from: current.enrollmentStatus, to: status },
   });
   if (current.status === CATALOG_STATUSES.PUBLISHED) {
     await revalidatePublicCatalogCache();

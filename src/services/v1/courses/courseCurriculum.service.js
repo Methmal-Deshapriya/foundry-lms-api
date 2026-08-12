@@ -11,6 +11,7 @@ import {
 } from "../../../constants/v1/audit/audit.constants.js";
 import { getLearningServicePolicy } from "../../../constants/v1/catalog/learningServicePolicy.constants.js";
 import {
+  ConflictError,
   NotFoundError,
   ValidationError,
 } from "../../../utils/Errors.js";
@@ -199,6 +200,16 @@ export async function removeCourseSessionService(
   const courseSession = await curriculumRepo.findById(courseSessionId);
   if (!courseSession || courseSession.courseId !== courseId) {
     throw new NotFoundError("Course session not found.");
+  }
+  if (
+    course.category.serviceType === "FREE_LEARNING" &&
+    course.enrollmentStatus === "OPEN" &&
+    !courseSession.retiredAt &&
+    course._count.courseSessions === 1
+  ) {
+    throw new ConflictError(
+      "Move enrollment to Coming soon or Closed before removing the final active session.",
+    );
   }
 
   const result = await curriculumRepo.removeOrRetire(

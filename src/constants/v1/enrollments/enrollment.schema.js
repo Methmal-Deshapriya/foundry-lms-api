@@ -48,5 +48,13 @@ export const updateEnrollmentSchema = z
 
 export const eligibleStudentFiltersSchema = z.object({
   q: z.string().trim().max(100).default(""),
-  limit: z.coerce.number().int().min(1).max(50).default(10),
+  limit: z.coerce.number().int().min(1).max(50).default(25),
+  cursor: z.string().trim().min(1).max(512).optional(),
+});
+
+export const eligibleStudentCursorPayloadSchema = z.object({
+  batchId: z.string().uuid(),
+  q: z.string().max(100),
+  email: z.string().email().max(320),
+  id: z.string().uuid(),
 });

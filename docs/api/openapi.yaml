@@ -432,6 +432,7 @@ paths:
       operationId: createCourse
       summary: Create course draft
       x-access: ADMIN
+      description: Certificate policy must be selected explicitly at creation and is immutable afterward. It applies to every batch of the course.
       requestBody:
         $ref: "#/components/requestBodies/CreateCourse"
       responses:
@@ -454,6 +455,7 @@ paths:
       operationId: updateCourse
       summary: Update course
       x-access: ADMIN
+      description: Certificate policy is not editable. It was fixed when the course was created.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       requestBody:
@@ -487,6 +489,23 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/enrollment-status:
+    patch:
+      tags: [05 Courses]
+      operationId: setCourseEnrollmentStatus
+      summary: Set Free Learning enrollment availability
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Coming soon and Closed block new self-enrollments. Open requires at least one active curriculum session. Publication remains an independent public-visibility lifecycle.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/SetCourseEnrollmentStatus"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
 
   /api/v1/courses/{courseId}/publish:
     patch:
@@ -546,7 +565,7 @@ paths:
       operationId: selfEnrollFreeCourse
       summary: Self-enroll in free course
       x-access: STUDENT
-      description: Student-only. Course and parent category must be published and the course must be free.
+      description: Student-only. Course and parent category must be published, enrollment must be Open, and the Free Learning course must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -760,6 +779,7 @@ paths:
       operationId: updateBatchStatus
       summary: Transition batch lifecycle status
       x-access: ADMIN
+      description: Completing a batch requires released/available curriculum and every non-cancelled enrollment completed. Certificates are additionally required only when the immutable course policy enables them; otherwise certificate readiness is not applicable.
       parameters:
         - $ref: "#/components/parameters/BatchId"
       requestBody:
@@ -853,7 +873,8 @@ paths:
       tags: [09 Enrollments & Classroom]
       operationId: completeClassroomSession
       summary: Mark accessible session complete
-      x-access: AUTHENTICATED
+      x-access: STUDENT
+      description: Enrollment owner only. Completion may change only while the enrollment is Active; a Completed enrollment remains readable but its learning history is frozen.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
         - $ref: "#/components/parameters/CourseSessionId"
@@ -862,17 +883,22 @@ paths:
           $ref: "#/components/responses/Created"
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
     delete:
       tags: [09 Enrollments & Classroom]
       operationId: uncompleteClassroomSession
       summary: Remove accessible session completion
-      x-access: AUTHENTICATED
+      x-access: STUDENT
+      description: Enrollment owner only. Completion may change only while the enrollment is Active; a Completed enrollment returns ENROLLMENT_COMPLETED and preserves its history.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
         - $ref: "#/components/parameters/CourseSessionId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
 
   /api/v1/enrollments/{enrollmentId}:
     patch:
@@ -880,7 +906,7 @@ paths:
       operationId: updateEnrollment
       summary: Update enrollment or payment status
       x-access: ADMIN
-      description: Admin/enrollment-management permission required.
+      description: Admin/enrollment-management permission required. Active may move to Completed or Cancelled. Cancelled paid/admin enrollment may return to Active; cancelled self-enrollment is reactivated only by its student enrollment endpoint. Completed is terminal and cannot be reopened or cancelled through this operation. Status writes are serialized with student completion mutations.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
       requestBody:
@@ -888,6 +914,8 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
 
   /api/v1/batches/{batchId}/eligible-students:
     get:
@@ -895,10 +923,12 @@ paths:
       operationId: listBatchEligibleStudents
       summary: Search verified students eligible for this batch
       x-access: ADMIN
+      description: Returns a stable email-and-ID keyset page. Pass the opaque nextCursor from one response as cursor to request the next page; changing q starts a new search.
       parameters:
         - $ref: "#/components/parameters/BatchId"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/EligibleLimit"
+        - $ref: "#/components/parameters/EligibleCursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1360,7 +1390,14 @@ components:
     EligibleLimit:
       name: limit
       in: query
-      schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      description: Page size. Use cursor for additional pages instead of increasing the limit.
+      schema: { type: integer, minimum: 1, maximum: 50, default: 25 }
+    EligibleCursor:
+      name: cursor
+      in: query
+      description: Opaque next-page cursor returned by the preceding eligible-student response. It is valid only with the same batch and search query.
+      schema: { type: string, maxLength: 512 }
+      example: "{{eligibleStudentsCursor}}"
     Offset:
       name: offset
       in: query
@@ -1485,7 +1522,6 @@ components:
             durationUnit: WEEK
             accessType: FREE
             price: 0
-            currency: LKR
             certificateEnabled: true
             highlights: [Requests, Environments, Tests]
             skills: [Postman, HTTP, API Testing]
@@ -1501,7 +1537,18 @@ components:
           example:
             title: Postman and API Testing Foundations
             summary: Learn practical API exploration, environments, and automated tests.
-            certificateEnabled: true
+    SetCourseEnrollmentStatus:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status]
+            properties:
+              status:
+                $ref: "#/components/schemas/CourseEnrollmentStatus"
+          example:
+            status: OPEN
     CreateSession:
       required: true
       content:
@@ -1811,6 +1858,9 @@ components:
     CourseAccessType:
       type: string
       enum: [FREE, PAID]
+    CourseEnrollmentStatus:
+      type: string
+      enum: [COMING_SOON, OPEN, CLOSED]
     DurationUnit:
       type: string
       enum: [SESSION, DAY, WEEK, MONTH]
@@ -1890,7 +1940,7 @@ components:
         sortOrder: { type: integer, minimum: 0 }
     CreateCourseInput:
       type: object
-      required: [categoryId, slug, title, summary, description, level, accessType, price]
+      required: [categoryId, slug, title, summary, description, level, accessType, price, certificateEnabled]
       properties:
         categoryId: { type: string, format: uuid }
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
@@ -1907,8 +1957,9 @@ components:
         accessType:
           $ref: "#/components/schemas/CourseAccessType"
         price: { type: number, minimum: 0, maximum: 99999999 }
-        currency: { type: string, minLength: 3, maxLength: 3, default: LKR }
-        certificateEnabled: { type: boolean, default: false }
+        certificateEnabled:
+          type: boolean
+          description: Immutable course-level policy selected once at creation. When false, certificate requirements are not applicable to batch completion.
         highlights:
           type: array
           maxItems: 30
@@ -1942,8 +1993,6 @@ components:
         accessType:
           $ref: "#/components/schemas/CourseAccessType"
         price: { type: number, minimum: 0, maximum: 99999999 }
-        currency: { type: string, minLength: 3, maxLength: 3 }
-        certificateEnabled: { type: boolean }
         highlights:
           type: array
           maxItems: 30

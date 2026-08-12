@@ -46,6 +46,12 @@ enum CourseAccessType {
   PAID
 }
 
+enum CourseEnrollmentStatus {
+  COMING_SOON
+  OPEN
+  CLOSED
+}
+
 enum SessionReusePolicy {
   SINGLE_COURSE
   REUSABLE
@@ -118,6 +124,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   emailOtps           EmailOtp[]
 
+  @@index([role, emailVerified, email, id])
   @@map("users")
 }
 
@@ -173,27 +180,28 @@ model Category {
 }
 
 model Course {
-  id                 String           @id @default(uuid())
-  categoryId         String           @map("category_id")
+  id                 String                 @id @default(uuid())
+  categoryId         String                 @map("category_id")
   slug               String
   title              String
   summary            String
   description        String
   level              CourseLevel
-  durationValue      Int?             @map("duration_value")
-  durationUnit       DurationUnit?    @map("duration_unit")
-  accessType         CourseAccessType @map("access_type")
-  price              Decimal          @default(0) @db.Decimal(12, 2)
-  currency           String           @default("LKR")
-  certificateEnabled Boolean          @default(false) @map("certificate_enabled")
-  highlights         String[]         @default([])
-  skills             String[]         @default([])
-  prerequisites      String[]         @default([])
-  thumbnailUrl       String?          @map("thumbnail_url")
-  status             CatalogStatus    @default(DRAFT)
-  sortOrder          Int              @default(0) @map("sort_order")
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
+  durationValue      Int?                   @map("duration_value")
+  durationUnit       DurationUnit?          @map("duration_unit")
+  accessType         CourseAccessType       @map("access_type")
+  price              Decimal                @default(0) @db.Decimal(12, 2)
+  currency           String                 @default("LKR")
+  enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status")
+  certificateEnabled Boolean                @map("certificate_enabled")
+  highlights         String[]               @default([])
+  skills             String[]               @default([])
+  prerequisites      String[]               @default([])
+  thumbnailUrl       String?                @map("thumbnail_url")
+  status             CatalogStatus          @default(DRAFT)
+  sortOrder          Int                    @default(0) @map("sort_order")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
 
   category        Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   enrollments     Enrollment[]

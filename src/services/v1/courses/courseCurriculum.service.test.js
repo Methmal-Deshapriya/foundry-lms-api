@@ -171,4 +171,21 @@ describe("course curriculum service", () => {
     ).rejects.toThrow(/not found/i);
     expect(curriculumRepo.removeOrRetire).not.toHaveBeenCalled();
   });
+
+  it("does not remove the final session while Free Learning enrollment is open", async () => {
+    courseRepo.findById.mockResolvedValue({
+      ...courseFixture("FREE_LEARNING"),
+      enrollmentStatus: "OPEN",
+    });
+    curriculumRepo.findById.mockResolvedValue(curriculumFixture());
+
+    await expect(
+      removeCourseSessionService(
+        courseFixture().id,
+        curriculumFixture().id,
+        "actor-1",
+      ),
+    ).rejects.toThrow(/Coming soon or Closed/i);
+    expect(curriculumRepo.removeOrRetire).not.toHaveBeenCalled();
+  });
 });

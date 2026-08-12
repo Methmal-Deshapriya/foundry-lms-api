@@ -26,6 +26,11 @@ router.get(
 router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), courseController.getCourseAdmin);
 router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), courseController.createCourse);
 router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), courseController.updateCourse);
+router.patch(
+  "/:id/enrollment-status",
+  requirePermission(PERMISSIONS.CATALOG_PUBLISH),
+  courseController.setCourseEnrollmentStatus,
+);
 router.patch("/:id/publish", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.publishCourse);
 router.patch("/:id/unpublish", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.unpublishCourse);
 router.patch("/:id/archive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), courseController.archiveCourse);

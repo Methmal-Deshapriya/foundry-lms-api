@@ -40,6 +40,20 @@ export async function updateCourse(req, res, next) {
   } catch (error) { next(error); }
 }
 
+export async function setCourseEnrollmentStatus(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await courseService.setCourseEnrollmentStatusService(
+        req.params.id,
+        req.body,
+        req.user.id,
+      ),
+      "Course enrollment availability updated",
+    );
+  } catch (error) { next(error); }
+}
+
 export async function publishCourse(req, res, next) {
   try {
     return ApiResponse.send(res, await courseService.setCoursePublicationService(req.params.id, true, req.user.id));

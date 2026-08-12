@@ -321,16 +321,38 @@ export async function removeOrRetire(id, serviceType) {
       if (!initial) throw new NotFoundError("Course session not found.");
 
       await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
+      await acquireTransactionLock(transaction, `free-enrollment:${initial.courseId}`);
       await acquireTransactionLock(transaction, `course-session:${id}`);
 
       const courseSession = await transaction.courseSession.findUnique({
         where: { id },
         include: {
           _count: { select: { batchLinks: true, completions: true } },
-          course: { select: { _count: { select: { enrollments: true } } } },
+          course: {
+            select: {
+              enrollmentStatus: true,
+              _count: {
+                select: {
+                  enrollments: true,
+                  courseSessions: { where: { retiredAt: null } },
+                },
+              },
+            },
+          },
         },
       });
       if (!courseSession) throw new NotFoundError("Course session not found.");
+
+      if (
+        isSelfPacedService(serviceType) &&
+        courseSession.course.enrollmentStatus === "OPEN" &&
+        !courseSession.retiredAt &&
+        courseSession.course._count.courseSessions === 1
+      ) {
+        throw new ConflictError(
+          "Move enrollment to Coming soon or Closed before removing the final active session.",
+        );
+      }
 
       const hasHistory =
         courseSession._count.batchLinks > 0 ||
@@ -374,7 +396,7 @@ export async function removeOrRetire(id, serviceType) {
       return { id, action: hasHistory ? "RETIRED" : "DETACHED" };
     });
   } catch (error) {
-    if (error instanceof NotFoundError) throw error;
+    if (error instanceof NotFoundError || error instanceof ConflictError) throw error;
     throw handlePrismaError(error);
   }
 }
