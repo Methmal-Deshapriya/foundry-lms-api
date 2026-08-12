@@ -7,6 +7,54 @@ import { transformCertificate } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 
+const CERTIFICATE_CODE_ATTEMPTS = 5;
+
+async function createCertificateWithUniqueCode(enrollment, certificateInput) {
+  const publicAppUrl = process.env.PUBLIC_APP_URL || "http://localhost:3000";
+
+  for (let attempt = 1; attempt <= CERTIFICATE_CODE_ATTEMPTS; attempt += 1) {
+    const certificateCode = generateCertificateCode();
+    try {
+      const certificate = await certificateRepo.create({
+        enrollmentId: enrollment.id,
+        certificateCode,
+        studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
+        courseName: enrollment.course.title,
+        description: certificateInput.description,
+        issuedDate: certificateInput.issuedDate
+          ? new Date(certificateInput.issuedDate)
+          : new Date(),
+        status: "ISSUED",
+        certificateData: {
+          skills: enrollment.course.skills,
+          studentEmail: enrollment.user.email,
+          courseSlug: enrollment.course.slug,
+        },
+        snapshotUrl: `${publicAppUrl}/certificates/verify/${certificateCode}`,
+      });
+      return { certificate, certificateCode };
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+
+      // A create conflict may also mean another request issued a certificate
+      // for this enrollment. Retry only when this exact random code exists.
+      const collidedCode = await certificateRepo.findByCode(certificateCode);
+      if (!collidedCode) throw error;
+      if (attempt === CERTIFICATE_CODE_ATTEMPTS) {
+        throw new ConflictError(
+          "Could not generate a unique certificate code after several attempts. Please retry.",
+          "CERTIFICATE_CODE_GENERATION_FAILED",
+        );
+      }
+    }
+  }
+
+  throw new ConflictError(
+    "Could not generate a unique certificate code.",
+    "CERTIFICATE_CODE_GENERATION_FAILED",
+  );
+}
+
 /**
  * Certificate Service
  */
@@ -41,26 +89,9 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
     throw new ConflictError("A certificate has already been issued for this enrollment.");
   }
 
-  // 4. Action: Prepare snapshot and create
-  const certificateCode = generateCertificateCode();
-  const publicAppUrl = process.env.PUBLIC_APP_URL || "http://localhost:3000";
-  const snapshotUrl = `${publicAppUrl}/certificates/verify/${certificateCode}`;
-  
-  const certificate = await certificateRepo.create({
-    enrollmentId,
-    certificateCode,
-    studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
-    courseName: enrollment.course.title,
-    description: validation.data.description,
-    issuedDate: validation.data.issuedDate ? new Date(validation.data.issuedDate) : new Date(),
-    status: "ISSUED",
-    certificateData: {
-      skills: enrollment.course.skills,
-      studentEmail: enrollment.user.email,
-      courseSlug: enrollment.course.slug,
-    },
-    snapshotUrl,
-  });
+  // 4. Action: Prepare snapshot and create with bounded random-code retry.
+  const { certificate, certificateCode } =
+    await createCertificateWithUniqueCode(enrollment, validation.data);
 
   // 5. Audit
   recordActionService({
@@ -86,32 +117,28 @@ export async function revokeCertificateService(id, data, actorId) {
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  // 2. Existence Check
-  const certificate = await certificateRepo.findById(id);
-  if (!certificate) {
-    throw new NotFoundError("Certificate not found.");
-  }
+  // 2. Action. The repository locks and rechecks both the credential and its
+  // enrollment lifecycle before writing, preventing concurrent double revoke
+  // or a stale lifecycle snapshot.
+  const { certificate: updated, lifecycleContext } =
+    await certificateRepo.revokeIssued(id, {
+      status: "REVOKED",
+      revokedAt: new Date(),
+      revokedBy: actorId,
+      revocationReason: validation.data.revocationReason,
+    });
 
-  if (certificate.status === "REVOKED") {
-    throw new ConflictError("Certificate is already revoked.");
-  }
-
-  // 3. Action
-  const updated = await certificateRepo.update(id, {
-    status: "REVOKED",
-    revokedAt: new Date(),
-    revokedBy: actorId,
-    revocationReason: validation.data.revocationReason,
-  });
-
-  // 4. Audit
+  // 3. Audit
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.CERTIFICATE_REVOKED,
     entityType: ENTITY_TYPES.CERTIFICATE,
     entityId: id,
-    description: `Certificate ${certificate.certificateCode} revoked by Admin ${actorId}`,
-    metadata: { reason: validation.data.revocationReason }
+    description: `Certificate ${updated.certificateCode} revoked by Admin ${actorId}`,
+    metadata: {
+      reason: validation.data.revocationReason,
+      ...lifecycleContext,
+    },
   });
 
   return transformCertificate(updated);

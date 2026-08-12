@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ConflictError } from "../../../utils/Errors.js";
+import {
+  BatchCapacityReachedError,
+  ConflictError,
+} from "../../../utils/Errors.js";
 
 vi.mock("../../../repositories/v1/enrollments/enrollment.repository.js", () => ({
   createPaid: vi.fn(),
@@ -171,6 +174,42 @@ describe("service-aware enrollment", () => {
       "CREATED",
       "FAILED",
     ]);
+  });
+
+  it("stops opening transactions after capacity is authoritatively exhausted", async () => {
+    const thirdUserId = "90000000-0000-4000-8000-000000000007";
+    const ineligibleUserId = "90000000-0000-4000-8000-000000000008";
+    batchRepo.findById.mockResolvedValue(batchFixture());
+    userRepo.findVerifiedStudentsByIds.mockResolvedValue([
+      studentFixture(userId),
+      studentFixture(secondUserId),
+      studentFixture(thirdUserId),
+    ]);
+    enrollmentRepo.createPaid.mockRejectedValueOnce(
+      new BatchCapacityReachedError(),
+    );
+
+    const result = await bulkEnrollStudentsInBatchService(
+      batchId,
+      {
+        students: [
+          { userId },
+          { userId: secondUserId },
+          { userId: ineligibleUserId },
+          { userId: thirdUserId },
+        ],
+      },
+      actorId,
+    );
+
+    expect(enrollmentRepo.createPaid).toHaveBeenCalledTimes(1);
+    expect(result.results).toEqual([
+      expect.objectContaining({ userId, code: "BATCH_CAPACITY_REACHED" }),
+      expect.objectContaining({ userId: secondUserId, code: "BATCH_CAPACITY_REACHED" }),
+      expect.objectContaining({ userId: ineligibleUserId, code: "INELIGIBLE_STUDENT" }),
+      expect.objectContaining({ userId: thirdUserId, code: "BATCH_CAPACITY_REACHED" }),
+    ]);
+    expect(result.summary).toEqual({ requested: 4, created: 0, failed: 4 });
   });
 
   it("makes Free Learning self-enrollment idempotent", async () => {

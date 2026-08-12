@@ -21,6 +21,7 @@ import {
 } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 import {
+  BatchCapacityReachedError,
   ConflictError,
   NotFoundError,
   ValidationError,
@@ -127,7 +128,8 @@ export async function bulkEnrollStudentsInBatchService(batchId, data, actorId) {
 
   // Sequential writes keep capacity decisions deterministic; each write also
   // holds a short database advisory lock so concurrent requests remain safe.
-  for (const input of students) {
+  for (let index = 0; index < students.length; index += 1) {
+    const input = students[index];
     const student = usersById.get(input.userId);
     if (!student) {
       results.push({
@@ -159,6 +161,28 @@ export async function bulkEnrollStudentsInBatchService(batchId, data, actorId) {
         code: error.code,
         error: error.message,
       });
+      if (error instanceof BatchCapacityReachedError) {
+        for (const remaining of students.slice(index + 1)) {
+          const remainingStudent = usersById.get(remaining.userId);
+          results.push(
+            remainingStudent
+              ? {
+                  userId: remaining.userId,
+                  status: "FAILED",
+                  code: error.code,
+                  error: error.message,
+                }
+              : {
+                  userId: remaining.userId,
+                  status: "FAILED",
+                  code: "INELIGIBLE_STUDENT",
+                  error:
+                    "Student was not found, is unverified, or is not a student account.",
+                },
+          );
+        }
+        break;
+      }
     }
   }
 

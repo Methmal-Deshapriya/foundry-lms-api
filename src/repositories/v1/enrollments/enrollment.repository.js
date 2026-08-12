@@ -1,6 +1,7 @@
 import prisma from "../../../utils/prisma.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 import {
+  BatchCapacityReachedError,
   ConflictError,
   NotFoundError,
   handlePrismaError,
@@ -35,7 +36,7 @@ export async function createPaid(batchId, userId, actorId, payment) {
           where: { batchId, status: { not: "CANCELLED" } },
         });
         if (occupied >= batch.capacity) {
-          throw new ConflictError("This batch has reached its enrollment capacity.");
+          throw new BatchCapacityReachedError();
         }
       }
 

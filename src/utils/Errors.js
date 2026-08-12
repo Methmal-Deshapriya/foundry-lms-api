@@ -60,8 +60,21 @@ export class NotFoundError extends CustomError {
  * 409 Conflict — Use for duplicate records or resource state conflicts.
  */
 export class ConflictError extends CustomError {
-  constructor(message = "Resource already exists") {
-    super(message, 409, "CONFLICT");
+  constructor(message = "Resource already exists", code = "CONFLICT") {
+    super(message, 409, code);
+  }
+}
+
+/**
+ * 409 used when a capacity check executed under the batch-enrollment lock
+ * proves that no additional learner can be inserted.
+ */
+export class BatchCapacityReachedError extends ConflictError {
+  constructor() {
+    super(
+      "This batch has reached its enrollment capacity.",
+      "BATCH_CAPACITY_REACHED",
+    );
   }
 }
 

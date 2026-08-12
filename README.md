@@ -51,3 +51,13 @@ http://localhost:5000/api/postman/environment
 ```
 
 See `docs/README.md` for architecture and contribution rules.
+
+## Accepted audit durability limitation
+
+Audit writes are currently best-effort and deliberately do not delay or roll
+back the business operation that produced them. A failed audit insert is sent
+to the server logger with an `AUDIT_FAILED` marker, but there is no transactional
+outbox, durable queue, or automatic retry. Audit history is useful for
+administration and troubleshooting, but it is not a guaranteed legal or
+financial ledger. Revisit this decision before production requirements demand
+lossless security or compliance evidence.

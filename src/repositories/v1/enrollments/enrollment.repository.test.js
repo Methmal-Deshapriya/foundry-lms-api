@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
+    batch: { findUnique: vi.fn() },
     course: { findFirst: vi.fn() },
     enrollment: {
+      count: vi.fn(),
       findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -25,7 +27,7 @@ vi.mock("../../../utils/prisma.js", () => ({
   },
 }));
 
-import { enrollFree, update } from "./enrollment.repository.js";
+import { createPaid, enrollFree, update } from "./enrollment.repository.js";
 
 const userId = "90000000-0000-4000-8000-000000000001";
 const courseId = "90000000-0000-4000-8000-000000000002";
@@ -153,5 +155,30 @@ describe("Free Learning enrollment repository", () => {
       select: { id: true },
     });
     expect(result.outcome).toBe("CREATED");
+  });
+
+  it("reports an authoritative capacity result from inside the batch lock", async () => {
+    mocks.transaction.batch.findUnique.mockResolvedValue({
+      id: "batch-1",
+      courseId,
+      capacity: 50,
+    });
+    mocks.transaction.enrollment.findFirst.mockResolvedValue(null);
+    mocks.transaction.enrollment.count.mockResolvedValue(50);
+
+    await expect(
+      createPaid("batch-1", userId, "admin-1", {
+        paymentStatus: "COMPLETED",
+      }),
+    ).rejects.toMatchObject({
+      code: "BATCH_CAPACITY_REACHED",
+      statusCode: 409,
+    });
+
+    expect(mocks.transaction.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.stringContaining("pg_advisory_xact_lock"),
+      "batch-enrollment:batch-1",
+    );
+    expect(mocks.transaction.enrollment.create).not.toHaveBeenCalled();
   });
 });

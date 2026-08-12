@@ -963,7 +963,12 @@ paths:
       operationId: bulkEnrollStudents
       summary: Process batch enrollment for multiple students
       x-access: ADMIN
-      description: Returns per-student CREATED or FAILED results; capacity and duplicates are concurrency-safe.
+      description: >-
+        Returns ordered per-student CREATED or FAILED results. Writes are
+        serialized behind the batch-enrollment lock so capacity and duplicate
+        decisions remain concurrency-safe. Once a locked transaction proves
+        capacity is exhausted, the remaining eligible rows receive
+        BATCH_CAPACITY_REACHED without opening additional insert transactions.
       parameters:
         - $ref: "#/components/parameters/BatchId"
       requestBody:
@@ -990,7 +995,11 @@ paths:
       operationId: issueCertificate
       summary: Issue certificate
       x-access: ADMIN
-      description: Admin-only. Enrollment must be completed and the course must have certificates enabled.
+      description: >-
+        Admin-only. Enrollment must be completed and the course must have
+        certificates enabled. Random certificate-code collisions are retried
+        up to five times; a competing certificate for the same enrollment is
+        not treated as a retryable code collision.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
       requestBody:
@@ -1052,7 +1061,12 @@ paths:
       operationId: revokeCertificate
       summary: Revoke certificate
       x-access: ADMIN
-      description: Admin/certificate-management permission required.
+      description: >-
+        Admin/certificate-management permission required. Revocation locks the
+        enrollment, rereads the certificate and its batch/catalog lifecycle in
+        one transaction, and rejects a repeated revocation. A credential may
+        still be revoked after its batch or catalog parents become terminal or
+        archived because invalid credentials must remain revocable.
       parameters:
         - $ref: "#/components/parameters/CertificateId"
       requestBody:
