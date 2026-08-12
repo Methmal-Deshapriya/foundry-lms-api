@@ -12,6 +12,7 @@ const enrollmentInclude = {
   enrolledBy: true,
   course: { include: courseInclude },
   batch: true,
+  certificate: true,
 };
 
 export async function createPaid(batchId, userId, actorId, payment) {

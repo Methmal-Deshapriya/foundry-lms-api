@@ -14,6 +14,16 @@ function toBatchSummary(batch) {
   };
 }
 
+function toCertificateSummary(certificate) {
+  if (!certificate) return null;
+  return {
+    id: certificate.id,
+    certificateCode: certificate.certificateCode,
+    status: certificate.status,
+    issuedDate: certificate.issuedDate,
+  };
+}
+
 function commonFields(enrollment) {
   return {
     id: enrollment.id,
@@ -29,6 +39,7 @@ function commonFields(enrollment) {
     createdAt: enrollment.createdAt,
     updatedAt: enrollment.updatedAt,
     batch: toBatchSummary(enrollment.batch),
+    certificate: toCertificateSummary(enrollment.certificate),
   };
 }
 
