@@ -1,12 +1,20 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import app from "../../../app.js";
 import { generateToken } from "../../../utils/jwt.js";
+
+vi.mock("../../../repositories/v1/users/user.repository.js", () => ({
+  findUserById: vi.fn(async (id) => ({
+    id,
+    role: id.replace("test-", ""),
+    emailVerified: true,
+  })),
+}));
 
 process.env.JWT_SECRET ||= "foundry-session-library-route-test";
 
 function cookieFor(role) {
-  return `token=${generateToken({ id: "test-user", role })}`;
+  return `token=${generateToken({ id: `test-${role}`, role })}`;
 }
 
 describe("Session Library route access", () => {
@@ -37,4 +45,3 @@ describe("Session Library route access", () => {
     expect(response.status).toBe(403);
   });
 });
-

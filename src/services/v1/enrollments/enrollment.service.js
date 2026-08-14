@@ -7,6 +7,8 @@ import {
   bulkManualEnrollmentSchema,
   eligibleStudentCursorPayloadSchema,
   eligibleStudentFiltersSchema,
+  enrollmentRosterCursorSchema,
+  enrollmentRosterFiltersSchema,
   manualEnrollmentSchema,
   updateEnrollmentSchema,
 } from "../../../constants/v1/enrollments/enrollment.schema.js";
@@ -303,6 +305,15 @@ export async function updateEnrollmentService(enrollmentId, data, actorId) {
       );
     }
   }
+  if (
+    enrollment.status === ENROLLMENT_STATUS.COMPLETED &&
+    input.paymentStatus &&
+    input.paymentStatus !== enrollment.paymentStatus
+  ) {
+    throw new ConflictError(
+      "Payment status is frozen after enrollment completion. Use a separate audited correction process if historical payment evidence is wrong.",
+    );
+  }
 
   const updateData = { ...input };
   const effectivePaymentStatus = input.paymentStatus ?? enrollment.paymentStatus;
@@ -371,22 +382,75 @@ export async function getMyEnrollmentsService(userId) {
   );
 }
 
-export async function getBatchEnrollmentsService(batchId) {
+function decodeRosterCursor(filters, scopeType, scopeId) {
+  if (!filters.cursor) return null;
+  try {
+    const parsed = enrollmentRosterCursorSchema.safeParse(
+      JSON.parse(Buffer.from(filters.cursor, "base64url").toString("utf8")),
+    );
+    if (!parsed.success) throw new Error("Invalid cursor payload.");
+    const cursor = parsed.data;
+    if (
+      cursor.scopeType !== scopeType ||
+      cursor.scopeId !== scopeId ||
+      cursor.q !== filters.q ||
+      cursor.status !== (filters.status ?? null)
+    ) {
+      throw new Error("Cursor does not match this roster query.");
+    }
+    return { ...cursor, createdAt: new Date(cursor.createdAt) };
+  } catch {
+    throw new ValidationError("Invalid roster cursor.", "cursor");
+  }
+}
+
+function toRosterPage(rows, filters, scopeType, scopeId) {
+  const hasMore = rows.length > filters.limit;
+  const pageRows = rows.slice(0, filters.limit);
+  const last = pageRows.at(-1);
+  return {
+    enrollments: enrollmentModel.toAdminEnrollmentListResponse(pageRows),
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore && last
+        ? Buffer.from(JSON.stringify({
+            scopeType,
+            scopeId,
+            q: filters.q,
+            status: filters.status ?? null,
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+          })).toString("base64url")
+        : null,
+    },
+  };
+}
+
+export async function getBatchEnrollmentsService(batchId, query = {}) {
   const batch = await batchRepo.findById(batchId);
   if (!batch) throw new NotFoundError("Batch not found.");
   assertCohortService(batch.course.category.serviceType);
-  return enrollmentModel.toAdminEnrollmentListResponse(
-    await enrollmentRepo.findBatchEnrollments(batchId),
+  const filters = parse(enrollmentRosterFiltersSchema, query);
+  const cursor = decodeRosterCursor(filters, "BATCH", batchId);
+  const rows = await enrollmentRepo.findBatchEnrollments(
+    batchId,
+    { ...filters, cursor },
   );
+  return toRosterPage(rows, filters, "BATCH", batchId);
 }
 
-export async function getCourseStudentsService(courseId) {
+export async function getCourseStudentsService(courseId, query = {}) {
   if (!(await courseRepo.findById(courseId))) {
     throw new NotFoundError("Course not found.");
   }
-  return enrollmentModel.toAdminEnrollmentListResponse(
-    await enrollmentRepo.findCourseEnrollments(courseId),
+  const filters = parse(enrollmentRosterFiltersSchema, query);
+  const cursor = decodeRosterCursor(filters, "COURSE", courseId);
+  const rows = await enrollmentRepo.findCourseEnrollments(
+    courseId,
+    { ...filters, cursor },
   );
+  return toRosterPage(rows, filters, "COURSE", courseId);
 }
 
 export async function getEligibleStudentsForBatchService(batchId, query = {}) {

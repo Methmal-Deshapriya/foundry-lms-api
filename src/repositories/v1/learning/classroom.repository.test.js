@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
     enrollment: { findUnique: vi.fn() },
+    courseSession: { findUnique: vi.fn() },
+    batchSession: { findUnique: vi.fn() },
     sessionCompletion: {
       create: vi.fn(),
       deleteMany: vi.fn(),
@@ -28,9 +30,20 @@ const courseSessionId = "a0000000-0000-4000-8000-000000000003";
 describe("classroom completion repository", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.transaction.enrollment.findUnique.mockResolvedValue({
+    mocks.transaction.enrollment.findUnique
+      .mockResolvedValueOnce({ courseId, batchId: null })
+      .mockResolvedValue({
+        courseId,
+        batchId: null,
+        source: "SELF",
+        status: "ACTIVE",
+        paymentStatus: "NOT_REQUIRED",
+        batch: null,
+      });
+    mocks.transaction.courseSession.findUnique.mockResolvedValue({
       courseId,
-      status: "ACTIVE",
+      retiredAt: null,
+      session: { status: "READY" },
     });
   });
 
@@ -57,10 +70,17 @@ describe("classroom completion repository", () => {
   it.each([createCompletion, removeCompletion])(
     "rejects a completion mutation after enrollment completion",
     async (mutate) => {
-      mocks.transaction.enrollment.findUnique.mockResolvedValue({
-        courseId,
-        status: "COMPLETED",
-      });
+      mocks.transaction.enrollment.findUnique
+        .mockReset()
+        .mockResolvedValueOnce({ courseId, batchId: null })
+        .mockResolvedValue({
+          courseId,
+          batchId: null,
+          source: "SELF",
+          status: "COMPLETED",
+          paymentStatus: "NOT_REQUIRED",
+          batch: null,
+        });
 
       await expect(
         mutate(enrollmentId, courseSessionId, courseId),
@@ -86,5 +106,31 @@ describe("classroom completion repository", () => {
       where: { enrollmentId, courseSessionId },
     });
     expect(result).toEqual({ count: 1 });
+  });
+
+  it("rejects completion after the locked paid delivery has been withdrawn", async () => {
+    const batchId = "a0000000-0000-4000-8000-000000000004";
+    mocks.transaction.enrollment.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({ courseId, batchId })
+      .mockResolvedValue({
+        courseId,
+        batchId,
+        source: "ADMIN",
+        status: "ACTIVE",
+        paymentStatus: "COMPLETED",
+        batch: { status: "ACTIVE" },
+      });
+    mocks.transaction.batchSession.findUnique.mockResolvedValue({
+      courseId,
+      isReleased: false,
+      availableAt: null,
+    });
+
+    await expect(
+      createCompletion(enrollmentId, courseSessionId, courseId),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    expect(mocks.transaction.sessionCompletion.create).not.toHaveBeenCalled();
   });
 });

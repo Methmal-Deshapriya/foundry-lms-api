@@ -184,4 +184,41 @@ describe("batch service", () => {
       { requireCompletionReadiness: true },
     );
   });
+
+  it("allows a draft batch under archived catalog to move only to cleanup", async () => {
+    const archivedDraft = batchFixture({
+      status: "DRAFT",
+      course: courseFixture("BOOTCAMPS", "ARCHIVED"),
+    });
+    batchRepo.findById.mockResolvedValue(archivedDraft);
+    batchRepo.transitionStatus.mockResolvedValue({
+      batch: { ...archivedDraft, status: "CANCELLED" },
+      completionReadiness: null,
+    });
+
+    await expect(
+      updateBatchStatusService(
+        archivedDraft.id,
+        { status: "CANCELLED" },
+        "actor-1",
+      ),
+    ).resolves.toMatchObject({ status: "CANCELLED" });
+  });
+
+  it("does not allow an enrolling batch under archived catalog to activate", async () => {
+    const archivedEnrolling = batchFixture({
+      status: "ENROLLING",
+      course: courseFixture("BOOTCAMPS", "ARCHIVED"),
+    });
+    batchRepo.findById.mockResolvedValue(archivedEnrolling);
+
+    await expect(
+      updateBatchStatusService(
+        archivedEnrolling.id,
+        { status: "ACTIVE" },
+        "actor-1",
+      ),
+    ).rejects.toThrow(/only to cancel or archive/i);
+    expect(batchRepo.transitionStatus).not.toHaveBeenCalled();
+  });
 });

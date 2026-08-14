@@ -1,11 +1,12 @@
 import { verifyToken } from "../utils/jwt.js";
 import { UnauthorizedError } from "../utils/Errors.js";
+import { findUserById } from "../repositories/v1/users/user.repository.js";
 
 /**
  * Authentication Middleware - The "Security Guard"
  * Ensures the user is logged in before allowing access to a route.
  */
-export const authenticate = (req, res, next) => {
+export const authenticate = async (req, res, next) => {
   try {
     // 1. Look for the JWT token in the HTTP-only cookies
     // Note: We'll name our cookie "token" when we build the login logic later.
@@ -20,11 +21,16 @@ export const authenticate = (req, res, next) => {
     // If the token is fake or expired, verifyToken will throw an error.
     const decoded = verifyToken(token);
 
-    // 3. Attach the decoded user data (id, role) to the request object.
-    // This makes the user's info available in the Controller and Service layers.
+    // The token proves identity; current database state decides authority.
+    const user = await findUserById(decoded.id);
+    if (!user) {
+      throw new UnauthorizedError("User session not found. Please log in again.");
+    }
+
     req.user = {
-      id: decoded.id,
-      role: decoded.role,
+      id: user.id,
+      role: user.role,
+      emailVerified: user.emailVerified,
     };
 
     // 4. Everything is good! Move to the next middleware or controller.

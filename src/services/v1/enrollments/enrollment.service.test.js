@@ -376,6 +376,24 @@ describe("service-aware enrollment", () => {
     },
   );
 
+  it("freezes payment status after a paid enrollment is completed", async () => {
+    const completed = enrollmentFixture({
+      status: "COMPLETED",
+      paymentStatus: "COMPLETED",
+      completedAt: new Date(),
+    });
+    enrollmentRepo.findById.mockResolvedValue(completed);
+
+    await expect(
+      updateEnrollmentService(
+        completed.id,
+        { paymentStatus: "PARTIAL" },
+        actorId,
+      ),
+    ).rejects.toThrow(/payment status is frozen/i);
+    expect(enrollmentRepo.update).not.toHaveBeenCalled();
+  });
+
   it("does not rewrite the completion timestamp during a same-status correction", async () => {
     const completedAt = new Date("2026-08-12T10:00:00.000Z");
     const completed = enrollmentFixture({ status: "COMPLETED", completedAt });

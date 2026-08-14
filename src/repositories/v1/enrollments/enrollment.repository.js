@@ -13,15 +13,52 @@ const enrollmentInclude = {
   enrolledBy: true,
   course: { include: courseInclude },
   batch: true,
-  certificate: true,
+  certificates: {
+    where: { status: "ISSUED" },
+    orderBy: { issuedDate: "desc" },
+    take: 1,
+  },
 };
 
 export async function createPaid(batchId, userId, actorId, payment) {
   try {
     const enrollmentId = await prisma.$transaction(async (transaction) => {
+      const initialBatch = await transaction.batch.findUnique({
+        where: { id: batchId },
+        select: { courseId: true },
+      });
+      if (!initialBatch) throw new NotFoundError("Batch not found.");
+      await acquireTransactionLock(
+        transaction,
+        `curriculum:${initialBatch.courseId}`,
+      );
       await acquireTransactionLock(transaction, `batch-enrollment:${batchId}`);
-      const batch = await transaction.batch.findUnique({ where: { id: batchId } });
+      const batch = await transaction.batch.findUnique({
+        where: { id: batchId },
+        include: { course: { include: { category: true } } },
+      });
+      const student = await transaction.user.findUnique({
+        where: { id: userId },
+        select: { role: true, emailVerified: true },
+      });
       if (!batch) throw new NotFoundError("Batch not found.");
+      if (!student || student.role !== "STUDENT" || !student.emailVerified) {
+        throw new ConflictError(
+          "The account must remain a verified student while enrollment is created.",
+          "INELIGIBLE_STUDENT",
+        );
+      }
+      if (
+        !["ENROLLING", "ACTIVE"].includes(batch.status) ||
+        batch.course.status !== "PUBLISHED" ||
+        batch.course.category.status !== "PUBLISHED" ||
+        !["BOOTCAMPS", "PRETECH"].includes(batch.course.category.serviceType)
+      ) {
+        throw new ConflictError(
+          "This batch is no longer accepting enrollment.",
+          "BATCH_ENROLLMENT_CLOSED",
+        );
+      }
 
       const existing = await transaction.enrollment.findFirst({
         where: { userId, batchId },
@@ -64,6 +101,7 @@ export async function createPaid(batchId, userId, actorId, payment) {
 export async function enrollFree(userId, courseId) {
   try {
     const result = await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `curriculum:${courseId}`);
       await acquireTransactionLock(transaction, `free-enrollment:${courseId}`);
       const course = await transaction.course.findFirst({
         where: {
@@ -172,18 +210,56 @@ export async function findUserEnrollments(userId) {
   });
 }
 
-export async function findBatchEnrollments(batchId) {
+function rosterWhere(scope, q, status, cursor) {
+  return {
+    ...scope,
+    ...(status ? { status } : {}),
+    ...(q
+      ? {
+          user: {
+            OR: [
+              { email: { contains: q, mode: "insensitive" } },
+              { firstName: { contains: q, mode: "insensitive" } },
+              { lastName: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        }
+      : {}),
+    ...(cursor
+      ? {
+          AND: [
+            {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+export async function findBatchEnrollments(
+  batchId,
+  { q = "", status, limit = 50, cursor = null },
+) {
   return prisma.enrollment.findMany({
-    where: { batchId },
+    where: rosterWhere({ batchId }, q, status, cursor),
     include: enrollmentInclude,
-    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 }
 
-export async function findCourseEnrollments(courseId) {
+export async function findCourseEnrollments(
+  courseId,
+  { q = "", status, limit = 50, cursor = null },
+) {
   return prisma.enrollment.findMany({
-    where: { courseId },
+    where: rosterWhere({ courseId }, q, status, cursor),
     include: enrollmentInclude,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 }

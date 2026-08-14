@@ -4,6 +4,7 @@ import {
   ConflictError,
   NotFoundError,
   SequenceRiskError,
+  ValidationError,
   handlePrismaError,
 } from "../../../utils/Errors.js";
 
@@ -114,11 +115,32 @@ export async function findById(id) {
 
 export async function create(courseId, data) {
   try {
-    return await prisma.batch.create({
-      data: { ...data, courseId },
-      include: batchInclude,
+    return await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `curriculum:${courseId}`);
+      const course = await transaction.course.findUnique({
+        where: { id: courseId },
+        select: {
+          status: true,
+          category: { select: { status: true, serviceType: true } },
+        },
+      });
+      if (
+        !course ||
+        course.status === "ARCHIVED" ||
+        course.category.status === "ARCHIVED"
+      ) {
+        throw new ConflictError("Archived courses cannot accept new batches.");
+      }
+      if (!['BOOTCAMPS', 'PRETECH'].includes(course.category.serviceType)) {
+        throw new ConflictError("Batches are available only for cohort courses.");
+      }
+      return transaction.batch.create({
+        data: { ...data, courseId },
+        include: batchInclude,
+      });
     });
   } catch (error) {
+    if (error instanceof ConflictError) throw error;
     throw handlePrismaError(error);
   }
 }
@@ -131,6 +153,68 @@ export async function update(id, data) {
       include: batchInclude,
     });
   } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+export async function updateSetup(id, expectedStatus, data) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.batch.findUnique({
+        where: { id },
+        select: { courseId: true },
+      });
+      if (!initial) throw new NotFoundError("Batch not found.");
+
+      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
+      await acquireTransactionLock(transaction, `batch:${id}`);
+
+      const current = await transaction.batch.findUnique({
+        where: { id },
+        include: batchInclude,
+      });
+      if (!current) throw new NotFoundError("Batch not found.");
+      if (
+        current.status !== expectedStatus ||
+        !["DRAFT", "ENROLLING"].includes(current.status)
+      ) {
+        throw new ConflictError(
+          "The batch lifecycle changed while this edit was being processed. Refresh and try again.",
+        );
+      }
+      if (
+        current.course.status === "ARCHIVED" ||
+        current.course.category.status === "ARCHIVED"
+      ) {
+        throw new ConflictError("Archived courses cannot change batch setup.");
+      }
+      if (!["BOOTCAMPS", "PRETECH"].includes(current.course.category.serviceType)) {
+        throw new ConflictError("Batches are available only for cohort courses.");
+      }
+
+      const startDate = data.startDate ?? current.startDate;
+      const expectedEndDate = data.expectedEndDate ?? current.expectedEndDate;
+      if (expectedEndDate < startDate) {
+        throw new ValidationError(
+          "Expected end date cannot be before the start date.",
+          "expectedEndDate",
+        );
+      }
+
+      return transaction.batch.update({
+        where: { id },
+        data,
+        include: batchInclude,
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof ConflictError ||
+      error instanceof NotFoundError ||
+      error instanceof ValidationError
+    ) {
+      throw error;
+    }
     throw handlePrismaError(error);
   }
 }
@@ -235,32 +319,47 @@ export async function updateDelivery(
       );
       await acquireTransactionLock(transaction, `batch:${batchId}`);
 
-      const [batch, courseSession, curriculum, existingDeliveries] =
-        await Promise.all([
-          transaction.batch.findUnique({
-            where: { id: batchId },
-            select: { id: true, courseId: true, status: true },
-          }),
-          transaction.courseSession.findUnique({
-            where: { id: courseSessionId },
-          }),
-          transaction.courseSession.findMany({
-            where: { courseId: initialBatch.courseId, retiredAt: null },
-            orderBy: { orderIndex: "asc" },
-            select: {
-              id: true,
-              orderIndex: true,
-              session: { select: { title: true } },
-            },
-          }),
-          transaction.batchSession.findMany({
-            where: { batchId },
-          }),
-        ]);
+      // Interactive transactions own one PostgreSQL connection. Explicitly
+      // sequence queries because Promise.all cannot parallelize that connection.
+      const batch = await transaction.batch.findUnique({
+        where: { id: batchId },
+        select: { id: true, courseId: true, status: true },
+      });
+      const courseSession = await transaction.courseSession.findUnique({
+        where: { id: courseSessionId },
+      });
+      const curriculum = await transaction.courseSession.findMany({
+        where: { courseId: initialBatch.courseId, retiredAt: null },
+        orderBy: { orderIndex: "asc" },
+        select: {
+          id: true,
+          orderIndex: true,
+          session: { select: { title: true } },
+        },
+      });
+      const existingDeliveries = await transaction.batchSession.findMany({
+        where: { batchId },
+      });
 
       const existing = existingDeliveries.find(
         (delivery) => delivery.courseSessionId === courseSessionId,
       );
+      if (!batch || !LIVE_BATCH_STATUSES.includes(batch.status)) {
+        throw new ConflictError("This batch no longer accepts delivery changes.");
+      }
+      if (mode !== "UNRELEASED" && batch.status !== "ACTIVE") {
+        throw new ConflictError(
+          "Sessions can be released or scheduled only while the batch is active.",
+        );
+      }
+      if (
+        mode === "SCHEDULED" &&
+        (!availableAt || availableAt.getTime() <= Date.now())
+      ) {
+        throw new ConflictError(
+          "A scheduled session must use a future availability time.",
+        );
+      }
       if (
         !courseSession ||
         courseSession.courseId !== batch.courseId ||
@@ -326,7 +425,12 @@ export async function updateDelivery(
   }
 }
 
-async function calculateCompletionReadiness(client, batchId, now = new Date()) {
+async function calculateCompletionReadiness(
+  client,
+  batchId,
+  now = new Date(),
+  { sequential = false } = {},
+) {
   const batch = await client.batch.findUnique({
     where: { id: batchId },
     select: {
@@ -339,13 +443,14 @@ async function calculateCompletionReadiness(client, batchId, now = new Date()) {
 
   const enrollmentWhere = { batchId, status: { not: "CANCELLED" } };
   const liveCurriculum = LIVE_BATCH_STATUSES.includes(batch.status);
-  const [curriculumCount, releasedCount, enrollmentCount, completedCount, certificateCount] =
-    await Promise.all([
+  const queries = [
+    () =>
       liveCurriculum
         ? client.courseSession.count({
             where: { courseId: batch.courseId, retiredAt: null },
           })
         : client.batchSession.count({ where: { batchId } }),
+    () =>
       liveCurriculum
         ? client.courseSession.count({
             where: {
@@ -367,10 +472,11 @@ async function calculateCompletionReadiness(client, batchId, now = new Date()) {
               OR: [{ availableAt: null }, { availableAt: { lte: now } }],
             },
           }),
-      client.enrollment.count({ where: enrollmentWhere }),
-      client.enrollment.count({
+    () => client.enrollment.count({ where: enrollmentWhere }),
+    () => client.enrollment.count({
         where: { ...enrollmentWhere, status: "COMPLETED" },
       }),
+    () =>
       batch.course.certificateEnabled
         ? client.certificate.count({
             where: {
@@ -379,7 +485,20 @@ async function calculateCompletionReadiness(client, batchId, now = new Date()) {
             },
           })
         : 0,
-    ]);
+  ];
+  const readinessCounts = [];
+  if (sequential) {
+    for (const query of queries) readinessCounts.push(await query());
+  } else {
+    readinessCounts.push(...(await Promise.all(queries.map((query) => query()))));
+  }
+  const [
+    curriculumCount,
+    releasedCount,
+    enrollmentCount,
+    completedCount,
+    certificateCount,
+  ] = readinessCounts;
 
   return {
     curriculum: {
@@ -390,14 +509,15 @@ async function calculateCompletionReadiness(client, batchId, now = new Date()) {
     enrollments: {
       total: enrollmentCount,
       completed: completedCount,
-      ready: enrollmentCount === completedCount,
+      ready: enrollmentCount > 0 && enrollmentCount === completedCount,
     },
     certificates: {
       required: batch.course.certificateEnabled,
       enabled: batch.course.certificateEnabled,
       issued: certificateCount,
       ready:
-        !batch.course.certificateEnabled || certificateCount === enrollmentCount,
+        !batch.course.certificateEnabled ||
+        (enrollmentCount > 0 && certificateCount === enrollmentCount),
     },
   };
 }
@@ -437,6 +557,8 @@ export async function transitionStatus(
         completionReadiness = await calculateCompletionReadiness(
           transaction,
           batchId,
+          new Date(),
+          { sequential: true },
         );
         const ready =
           completionReadiness.curriculum.ready &&

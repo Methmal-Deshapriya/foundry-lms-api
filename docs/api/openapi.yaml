@@ -941,6 +941,10 @@ paths:
       x-access: ADMIN
       parameters:
         - $ref: "#/components/parameters/BatchId"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/EnrollmentStatusFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -985,6 +989,10 @@ paths:
       x-access: ADMIN
       parameters:
         - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/EnrollmentStatusFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1037,7 +1045,12 @@ paths:
       operationId: listCertificatesAdmin
       summary: List all certificates for administration
       x-access: ADMIN
-      description: Admin/certificate-management permission required.
+      description: Admin/certificate-management permission required. Returns a bounded keyset page.
+      parameters:
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/CertificateStatusFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1325,7 +1338,7 @@ components:
       name: certificateCode
       in: path
       required: true
-      schema: { type: string }
+      schema: { type: string, minLength: 20, maxLength: 64 }
       example: "{{certificateCode}}"
     ProjectId:
       name: projectId
@@ -1397,10 +1410,27 @@ components:
       schema:
         $ref: "#/components/schemas/BatchStatus"
       example: ACTIVE
+    EnrollmentStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/EnrollmentStatus"
+      example: ACTIVE
+    CertificateStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/CertificateStatus"
+      example: ISSUED
     Limit:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.
+      schema: { type: string, maxLength: 1024 }
     EligibleLimit:
       name: limit
       in: query

@@ -3,13 +3,18 @@ import * as certificateController from "../../../controllers/v1/enrollments/cert
 import { authenticate } from "../../../middlewares/authenticate.js";
 import { requirePermission } from "../../../middlewares/requirePermission.js";
 import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
+import { certificateVerificationLimiter } from "../../../middlewares/rateLimiters.js";
 
 const router = express.Router();
 
 /**
  * Public Route
  */
-router.get("/verify/:code", certificateController.verifyCertificate);
+router.get(
+  "/verify/:code",
+  certificateVerificationLimiter,
+  certificateController.verifyCertificate,
+);
 
 /**
  * Protected Routes

@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConflictError } from "../../../utils/Errors.js";
 
 vi.mock("../../../repositories/v1/enrollments/certificate.repository.js", () => ({
-  create: vi.fn(),
+  createIssued: vi.fn(),
   findAllAdmin: vi.fn(),
   findByCode: vi.fn(),
-  findByEnrollmentId: vi.fn(),
+  findCurrentByEnrollmentId: vi.fn(),
   findById: vi.fn(),
   findUserCertificates: vi.fn(),
   revokeIssued: vi.fn(),
@@ -32,6 +32,7 @@ import {
 
 const enrollmentId = "90000000-0000-4000-8000-000000000001";
 const actorId = "90000000-0000-4000-8000-000000000002";
+process.env.CLIENT_URL ||= "http://localhost:3000";
 
 function enrollmentFixture() {
   return {
@@ -66,11 +67,11 @@ describe("certificate service reliability", () => {
 
   it("retries a random certificate-code collision and preserves the winning code in the snapshot", async () => {
     enrollmentRepo.findById.mockResolvedValue(enrollmentFixture());
-    certificateRepo.findByEnrollmentId.mockResolvedValue(null);
+    certificateRepo.findCurrentByEnrollmentId.mockResolvedValue(null);
     generateCertificateCode
       .mockReturnValueOnce("FND-20260813-COLLIDE")
       .mockReturnValueOnce("FND-20260813-UNIQUE");
-    certificateRepo.create
+    certificateRepo.createIssued
       .mockRejectedValueOnce(new ConflictError("Unique constraint"))
       .mockResolvedValueOnce(certificateFixture("FND-20260813-UNIQUE"));
     certificateRepo.findByCode.mockResolvedValueOnce(
@@ -83,8 +84,8 @@ describe("certificate service reliability", () => {
       actorId,
     );
 
-    expect(certificateRepo.create).toHaveBeenCalledTimes(2);
-    expect(certificateRepo.create).toHaveBeenLastCalledWith(
+    expect(certificateRepo.createIssued).toHaveBeenCalledTimes(2);
+    expect(certificateRepo.createIssued).toHaveBeenLastCalledWith(
       expect.objectContaining({
         certificateCode: "FND-20260813-UNIQUE",
         snapshotUrl: expect.stringContaining("FND-20260813-UNIQUE"),
@@ -95,22 +96,22 @@ describe("certificate service reliability", () => {
 
   it("does not retry an enrollment uniqueness conflict disguised as a generic conflict", async () => {
     enrollmentRepo.findById.mockResolvedValue(enrollmentFixture());
-    certificateRepo.findByEnrollmentId.mockResolvedValue(null);
+    certificateRepo.findCurrentByEnrollmentId.mockResolvedValue(null);
     generateCertificateCode.mockReturnValue("FND-20260813-UNIQUE");
-    certificateRepo.create.mockRejectedValue(new ConflictError("Unique constraint"));
+    certificateRepo.createIssued.mockRejectedValue(new ConflictError("Unique constraint"));
     certificateRepo.findByCode.mockResolvedValue(null);
 
     await expect(
       issueCertificateService(enrollmentId, {}, actorId),
     ).rejects.toThrow("Unique constraint");
-    expect(certificateRepo.create).toHaveBeenCalledTimes(1);
+    expect(certificateRepo.createIssued).toHaveBeenCalledTimes(1);
   });
 
   it("stops after the bounded number of genuine code collisions", async () => {
     enrollmentRepo.findById.mockResolvedValue(enrollmentFixture());
-    certificateRepo.findByEnrollmentId.mockResolvedValue(null);
+    certificateRepo.findCurrentByEnrollmentId.mockResolvedValue(null);
     generateCertificateCode.mockReturnValue("FND-20260813-COLLIDE");
-    certificateRepo.create.mockRejectedValue(new ConflictError("Unique constraint"));
+    certificateRepo.createIssued.mockRejectedValue(new ConflictError("Unique constraint"));
     certificateRepo.findByCode.mockResolvedValue(
       certificateFixture("FND-20260813-COLLIDE"),
     );
@@ -121,8 +122,22 @@ describe("certificate service reliability", () => {
       code: "CERTIFICATE_CODE_GENERATION_FAILED",
       statusCode: 409,
     });
-    expect(certificateRepo.create).toHaveBeenCalledTimes(5);
+    expect(certificateRepo.createIssued).toHaveBeenCalledTimes(5);
     expect(certificateRepo.findByCode).toHaveBeenCalledTimes(5);
+  });
+
+  it("allows a replacement after the previous credential was revoked", async () => {
+    enrollmentRepo.findById.mockResolvedValue(enrollmentFixture());
+    certificateRepo.findCurrentByEnrollmentId.mockResolvedValue(null);
+    generateCertificateCode.mockReturnValue("FND-20260814-REPLACE");
+    certificateRepo.createIssued.mockResolvedValue(
+      certificateFixture("FND-20260814-REPLACE"),
+    );
+
+    const result = await issueCertificateService(enrollmentId, {}, actorId);
+
+    expect(result.certificateCode).toBe("FND-20260814-REPLACE");
+    expect(certificateRepo.createIssued).toHaveBeenCalledTimes(1);
   });
 
   it("revokes against one transactionally captured lifecycle context", async () => {

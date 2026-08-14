@@ -125,6 +125,9 @@ model User {
   emailOtps           EmailOtp[]
 
   @@index([role, emailVerified, email, id])
+  @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_first_name_trgm_idx")
+  @@index([lastName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_last_name_trgm_idx")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_email_trgm_idx")
   @@map("users")
 }
 
@@ -235,7 +238,7 @@ model Enrollment {
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
   batch              Batch?              @relation(fields: [batchId, courseId], references: [id, courseId], onDelete: Restrict)
   sessionCompletions SessionCompletion[]
-  certificate        Certificate?
+  certificates       Certificate[]
   studentProjects    StudentProject[]
 
   @@unique([id, courseId])
@@ -243,6 +246,8 @@ model Enrollment {
   @@index([userId, status])
   @@index([courseId, status])
   @@index([batchId, status])
+  @@index([courseId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([batchId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([enrolledByUserId])
   @@map("enrollments")
 }
@@ -353,7 +358,7 @@ model SessionCompletion {
 
 model Certificate {
   id               String            @id @default(uuid())
-  enrollmentId     String            @unique @map("enrollment_id")
+  enrollmentId     String            @map("enrollment_id")
   certificateCode  String            @unique @map("certificate_code")
   studentName      String            @map("student_name")
   courseName       String            @map("course_name")
@@ -370,7 +375,12 @@ model Certificate {
 
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
+  @@index([enrollmentId, status, issuedDate(sort: Desc)])
   @@index([status, issuedDate])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([certificateCode(ops: raw("gin_trgm_ops"))], type: Gin, map: "certificates_code_trgm_idx")
+  @@index([studentName(ops: raw("gin_trgm_ops"))], type: Gin, map: "certificates_student_name_trgm_idx")
+  @@index([courseName(ops: raw("gin_trgm_ops"))], type: Gin, map: "certificates_course_name_trgm_idx")
   @@map("certificates")
 }
 

@@ -10,10 +10,18 @@ vi.mock("../../../services/v1/catalog/learningServiceSummary.service.js", () => 
   }),
 }));
 
+vi.mock("../../../repositories/v1/users/user.repository.js", () => ({
+  findUserById: vi.fn(async (id) => ({
+    id,
+    role: id.replace("test-", ""),
+    emailVerified: true,
+  })),
+}));
+
 process.env.JWT_SECRET ||= "foundry-service-summary-route-test";
 
-function cookieFor(role) {
-  return `token=${generateToken({ id: "test-user", role })}`;
+function cookieFor(role, databaseRole = role) {
+  return `token=${generateToken({ id: `test-${databaseRole}`, role })}`;
 }
 
 describe("Learning-service summary route access", () => {
@@ -26,6 +34,14 @@ describe("Learning-service summary route access", () => {
     const response = await request(app)
       .get("/api/v1/services/summary")
       .set("Cookie", cookieFor("STUDENT"));
+    expect(response.status).toBe(403);
+  });
+
+  it("uses the current database role instead of a stale privileged token role", async () => {
+    const response = await request(app)
+      .get("/api/v1/services/summary")
+      .set("Cookie", cookieFor("ADMIN", "STUDENT"));
+
     expect(response.status).toBe(403);
   });
 

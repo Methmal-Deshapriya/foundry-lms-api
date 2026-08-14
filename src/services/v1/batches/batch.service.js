@@ -152,7 +152,7 @@ export async function updateBatchService(batchId, data, actorId) {
       "expectedEndDate",
     );
   }
-  const updated = await batchRepo.update(batchId, input);
+  const updated = await batchRepo.updateSetup(batchId, batch.status, input);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.BATCH_UPDATED,
@@ -175,10 +175,15 @@ export async function updateBatchStatusService(batchId, data, actorId) {
   }
   if (
     isCatalogArchived(batch) &&
-    !(batch.status === "ACTIVE" && ["COMPLETED", "CANCELLED", "ARCHIVED"].includes(status))
+    !(
+      (batch.status === "ACTIVE" &&
+        ["COMPLETED", "CANCELLED", "ARCHIVED"].includes(status)) ||
+      (["DRAFT", "ENROLLING"].includes(batch.status) &&
+        ["CANCELLED", "ARCHIVED"].includes(status))
+    )
   ) {
     throw new ConflictError(
-      "Archived catalog records allow an active batch only to finish, cancel, or archive.",
+      "Archived catalog records allow active batches to finish and non-terminal batches only to cancel or archive.",
     );
   }
   const { batch: updated, completionReadiness } =

@@ -162,6 +162,10 @@ export class DatabaseError extends CustomError {
  * @returns {CustomError} A mapped error or generic DatabaseError.
  */
 export function handlePrismaError(prismaError) {
+  // Repository catch blocks also receive deliberate application errors thrown
+  // from inside interactive transactions. Preserve their status/code instead
+  // of disguising them as generic database failures.
+  if (prismaError instanceof CustomError) return prismaError;
   if (prismaError?.code === "P2002") {
     return new ConflictError("A record with this value already exists");
   }

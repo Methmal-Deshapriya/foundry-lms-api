@@ -22,14 +22,28 @@ async function moveActiveLinksOutOfRange(transaction, courseId) {
 }
 
 async function assignContinuousOrder(transaction, orderedIds) {
-  await Promise.all(
-    orderedIds.map((id, orderIndex) =>
-      transaction.courseSession.update({
-        where: { id },
-        data: { orderIndex, retiredAt: null },
-      }),
-    ),
-  );
+  for (const [orderIndex, id] of orderedIds.entries()) {
+    await transaction.courseSession.update({
+      where: { id },
+      data: { orderIndex, retiredAt: null },
+    });
+  }
+}
+
+async function assertOperationalCourseInTransaction(transaction, courseId) {
+  const course = await transaction.course.findUnique({
+    where: { id: courseId },
+    select: {
+      status: true,
+      category: { select: { status: true } },
+    },
+  });
+  if (!course) throw new NotFoundError("Course not found.");
+  if (course.status === "ARCHIVED" || course.category.status === "ARCHIVED") {
+    throw new ConflictError(
+      "Archived courses are read-only. Session changes are not allowed.",
+    );
+  }
 }
 
 async function attachWithinTransaction(
@@ -39,6 +53,7 @@ async function attachWithinTransaction(
   requestedOrderIndex,
 ) {
   await acquireTransactionLock(transaction, `curriculum:${courseId}`);
+  await assertOperationalCourseInTransaction(transaction, courseId);
   await acquireTransactionLock(transaction, `session:${sessionId}`);
 
   const session = await transaction.session.findUnique({
@@ -206,13 +221,13 @@ export async function reorder(
   try {
     return await prisma.$transaction(async (transaction) => {
       await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-      const [activeLinks, liveBatches] = await Promise.all([
-        transaction.courseSession.findMany({
+      await assertOperationalCourseInTransaction(transaction, courseId);
+      const activeLinks = await transaction.courseSession.findMany({
           where: { courseId, retiredAt: null },
           orderBy: { orderIndex: "asc" },
           select: { id: true, session: { select: { title: true } } },
-        }),
-        transaction.batch.findMany({
+        });
+      const liveBatches = await transaction.batch.findMany({
           where: {
             courseId,
             status: { in: ["DRAFT", "ENROLLING", "ACTIVE"] },
@@ -229,8 +244,7 @@ export async function reorder(
               },
             },
           },
-        }),
-      ]);
+        });
       const expectedIds = new Set(activeLinks.map(({ id }) => id));
       const suppliedIds = new Set(orderedCourseSessions.map(({ id }) => id));
       if (
@@ -321,6 +335,7 @@ export async function removeOrRetire(id, serviceType) {
       if (!initial) throw new NotFoundError("Course session not found.");
 
       await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
+      await assertOperationalCourseInTransaction(transaction, initial.courseId);
       await acquireTransactionLock(transaction, `free-enrollment:${initial.courseId}`);
       await acquireTransactionLock(transaction, `course-session:${id}`);
 

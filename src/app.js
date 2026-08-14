@@ -23,6 +23,11 @@ import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
 
 const app = express();
 
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
+  app.set("trust proxy", trustProxyHops);
+}
+
 // 3. Base Middlewares
 app.use(express.json());
 app.use(cookieParser());

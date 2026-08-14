@@ -4,7 +4,9 @@ vi.mock("../../../repositories/v1/sessions/sessionLibrary.repository.js", () => 
   findAdmin: vi.fn(),
   findById: vi.fn(),
   create: vi.fn(),
-  update: vi.fn(),
+  updateSafely: vi.fn(),
+  archiveSafely: vi.fn(),
+  restoreSafely: vi.fn(),
   removePermanently: vi.fn(),
 }));
 
@@ -116,7 +118,9 @@ describe("Session Library service", () => {
   });
 
   it("blocks editing an archived session", async () => {
-    sessionRepo.findById.mockResolvedValue(sessionFixture({ status: "ARCHIVED" }));
+    sessionRepo.updateSafely.mockRejectedValue(
+      new Error("Archived sessions must be restored before editing."),
+    );
 
     await expect(
       updateSessionLibraryItemService(
@@ -125,17 +129,12 @@ describe("Session Library service", () => {
         "actor-1",
       ),
     ).rejects.toThrow(/restored before editing/i);
-    expect(sessionRepo.update).not.toHaveBeenCalled();
+    expect(sessionRepo.updateSafely).toHaveBeenCalledOnce();
   });
 
   it("blocks changing a multi-course reusable session to one-course", async () => {
-    sessionRepo.findById.mockResolvedValue(
-      sessionFixture({
-        courseSessions: [
-          { _count: { batchLinks: 0 } },
-          { _count: { batchLinks: 0 } },
-        ],
-      }),
+    sessionRepo.updateSafely.mockRejectedValue(
+      new Error("A session used by multiple courses cannot become a one-course session."),
     );
 
     await expect(
@@ -164,10 +163,14 @@ describe("Session Library service", () => {
     const current = sessionFixture({
       courseSessions: [{ _count: { batchLinks: 3 } }],
     });
-    sessionRepo.findById.mockResolvedValue(current);
-    sessionRepo.update.mockResolvedValue(
-      sessionFixture({ status: "ARCHIVED", courseSessions: current.courseSessions }),
-    );
+    sessionRepo.archiveSafely.mockResolvedValue({
+      previous: current,
+      session: sessionFixture({
+        status: "ARCHIVED",
+        courseSessions: current.courseSessions,
+      }),
+      changed: true,
+    });
 
     const result = await archiveSessionLibraryItemService(
       current.id,
@@ -176,9 +179,7 @@ describe("Session Library service", () => {
 
     expect(result.status).toBe("ARCHIVED");
     expect(result.usage).toMatchObject({ courseCount: 1, batchCount: 3 });
-    expect(sessionRepo.update).toHaveBeenCalledWith(current.id, {
-      status: "ARCHIVED",
-    });
+    expect(sessionRepo.archiveSafely).toHaveBeenCalledWith(current.id);
   });
 
   it("requires an archived, unused session for permanent deletion", async () => {

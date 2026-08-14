@@ -25,6 +25,7 @@ function toCertificateSummary(certificate) {
 }
 
 function commonFields(enrollment) {
+  const currentCertificate = enrollment.certificates?.[0] ?? null;
   return {
     id: enrollment.id,
     userId: enrollment.userId,
@@ -39,7 +40,7 @@ function commonFields(enrollment) {
     createdAt: enrollment.createdAt,
     updatedAt: enrollment.updatedAt,
     batch: toBatchSummary(enrollment.batch),
-    certificate: toCertificateSummary(enrollment.certificate),
+    certificate: toCertificateSummary(currentCertificate),
   };
 }
 

@@ -33,16 +33,43 @@ export async function findByCode(certificateCode) {
   });
 }
 
-export async function findByEnrollmentId(enrollmentId) {
-  return await prisma.certificate.findUnique({
-    where: { enrollmentId },
+export async function findCurrentByEnrollmentId(enrollmentId) {
+  return await prisma.certificate.findFirst({
+    where: { enrollmentId, status: "ISSUED" },
+    orderBy: { issuedDate: "desc" },
   });
 }
 
-export async function findAllAdmin() {
+export async function findAllAdmin({ q = "", status, limit = 50, cursor = null }) {
+  const where = {
+    ...(status ? { status } : {}),
+    ...(q
+      ? {
+          OR: [
+            { certificateCode: { contains: q, mode: "insensitive" } },
+            { studentName: { contains: q, mode: "insensitive" } },
+            { courseName: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    ...(cursor
+      ? {
+          AND: [
+            {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            },
+          ],
+        }
+      : {}),
+  };
   return await prisma.certificate.findMany({
+    where,
     include: certificateInclude,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 }
 
@@ -64,12 +91,59 @@ export async function findUserCertificates(userId) {
   });
 }
 
-export async function create(data) {
+export async function createIssued(data) {
   try {
-    return await prisma.certificate.create({
-      data,
+    return await prisma.$transaction(async (transaction) => {
+      const initialEnrollment = await transaction.enrollment.findUnique({
+        where: { id: data.enrollmentId },
+        select: { courseId: true, batchId: true },
+      });
+      if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
+      await acquireTransactionLock(
+        transaction,
+        `curriculum:${initialEnrollment.courseId}`,
+      );
+      if (initialEnrollment.batchId) {
+        await acquireTransactionLock(
+          transaction,
+          `batch:${initialEnrollment.batchId}`,
+        );
+      }
+      await acquireTransactionLock(transaction, `enrollment:${data.enrollmentId}`);
+      const enrollment = await transaction.enrollment.findUnique({
+        where: { id: data.enrollmentId },
+        select: {
+          status: true,
+          course: { select: { certificateEnabled: true } },
+        },
+      });
+      if (!enrollment) throw new NotFoundError("Enrollment not found.");
+      if (enrollment.status !== "COMPLETED") {
+        throw new ConflictError(
+          "Enrollment must remain completed while issuing a certificate.",
+          "CERTIFICATE_ISSUANCE_BLOCKED",
+        );
+      }
+      if (!enrollment.course.certificateEnabled) {
+        throw new ConflictError(
+          "Certificates are not enabled for this course.",
+          "CERTIFICATE_ISSUANCE_BLOCKED",
+        );
+      }
+      const current = await transaction.certificate.findFirst({
+        where: { enrollmentId: data.enrollmentId, status: "ISSUED" },
+        select: { id: true },
+      });
+      if (current) {
+        throw new ConflictError(
+          "A current certificate has already been issued for this enrollment.",
+          "CERTIFICATE_ALREADY_ISSUED",
+        );
+      }
+      return transaction.certificate.create({ data });
     });
   } catch (error) {
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
     throw handlePrismaError(error);
   }
 }
@@ -94,8 +168,23 @@ export async function revokeIssued(id, data) {
       });
       if (!initial) throw new NotFoundError("Certificate not found.");
 
-      // Serialize with enrollment completion/status operations so lifecycle
-      // context and revocation are captured from one authoritative state.
+      const initialEnrollment = await transaction.enrollment.findUnique({
+        where: { id: initial.enrollmentId },
+        select: { courseId: true, batchId: true },
+      });
+      if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
+      // Use the global curriculum -> batch -> enrollment order so revocation
+      // cannot race a batch completion readiness decision.
+      await acquireTransactionLock(
+        transaction,
+        `curriculum:${initialEnrollment.courseId}`,
+      );
+      if (initialEnrollment.batchId) {
+        await acquireTransactionLock(
+          transaction,
+          `batch:${initialEnrollment.batchId}`,
+        );
+      }
       await acquireTransactionLock(
         transaction,
         `enrollment:${initial.enrollmentId}`,

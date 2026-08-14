@@ -26,7 +26,6 @@ export const createCategorySchema = z.object(categoryFields);
 
 export const updateCategorySchema = z
   .object({
-    serviceType: categoryFields.serviceType.optional(),
     slug: categoryFields.slug.optional(),
     title: categoryFields.title.optional(),
     description: categoryFields.description.optional(),

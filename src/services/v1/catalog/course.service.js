@@ -102,6 +102,11 @@ export async function updateCourseService(id, data, actorId) {
       "Certificate policy is selected when the course is created and cannot be changed later.",
     );
   }
+  if (Object.hasOwn(data, "categoryId")) {
+    throw new ConflictError(
+      "A course's category is selected at creation and cannot be changed later.",
+    );
+  }
   const input = parseOrThrow(updateCourseSchema, data);
   const current = await courseRepo.findById(id);
   if (!current) throw new NotFoundError("Course not found.");
@@ -116,21 +121,13 @@ export async function updateCourseService(id, data, actorId) {
       "Published course slugs and categories are immutable. Unpublish it first.",
     );
   }
-  let targetCategory = current.category;
-  if (input.categoryId && input.categoryId !== current.categoryId) {
-    targetCategory = await categoryRepo.findById(input.categoryId);
-    if (!targetCategory) throw new NotFoundError("Category not found.");
-    if (targetCategory.status === CATALOG_STATUSES.ARCHIVED) {
-      throw new ConflictError("Course cannot move to an archived category.");
-    }
-  }
   validateMergedCourse(
     current,
     input,
-    targetCategory.serviceType,
+    current.category.serviceType,
     current.status === CATALOG_STATUSES.PUBLISHED,
   );
-  const course = await courseRepo.update(id, input);
+  const course = await courseRepo.updateOperational(id, input);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.COURSE_UPDATED,
@@ -198,8 +195,7 @@ export async function setCoursePublicationService(id, publish, actorId) {
     current.category.serviceType,
     publish,
   );
-  const status = publish ? CATALOG_STATUSES.PUBLISHED : CATALOG_STATUSES.DRAFT;
-  const course = await courseRepo.update(id, { status });
+  const course = await courseRepo.setPublication(id, publish);
   recordActionService({
     actorUserId: actorId,
     action: publish
@@ -217,7 +213,8 @@ export async function archiveCourseService(id, actorId) {
   const current = await courseRepo.findById(id);
   if (!current) throw new NotFoundError("Course not found.");
   if (current.status === CATALOG_STATUSES.ARCHIVED) return toAdminCourse(current);
-  const course = await courseRepo.update(id, { status: CATALOG_STATUSES.ARCHIVED });
+  const course = await courseRepo.archiveSafely(id);
+  if (!course) throw new NotFoundError("Course not found.");
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.COURSE_ARCHIVED,
@@ -241,9 +238,7 @@ export async function unarchiveCourseService(id, actorId) {
     throw new ConflictError("Restore the parent category before this course.");
   }
 
-  const course = await courseRepo.update(id, {
-    status: CATALOG_STATUSES.DRAFT,
-  });
+  const course = await courseRepo.restore(id);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.COURSE_UNARCHIVED,

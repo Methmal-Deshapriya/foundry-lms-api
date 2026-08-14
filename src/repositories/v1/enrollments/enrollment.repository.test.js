@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
     $queryRawUnsafe: vi.fn(),
     batch: { findUnique: vi.fn() },
     course: { findFirst: vi.fn() },
+    user: { findUnique: vi.fn() },
     enrollment: {
       count: vi.fn(),
       findFirst: vi.fn(),
@@ -162,6 +163,15 @@ describe("Free Learning enrollment repository", () => {
       id: "batch-1",
       courseId,
       capacity: 50,
+      status: "ENROLLING",
+      course: {
+        status: "PUBLISHED",
+        category: { status: "PUBLISHED", serviceType: "BOOTCAMPS" },
+      },
+    });
+    mocks.transaction.user.findUnique.mockResolvedValue({
+      role: "STUDENT",
+      emailVerified: true,
     });
     mocks.transaction.enrollment.findFirst.mockResolvedValue(null);
     mocks.transaction.enrollment.count.mockResolvedValue(50);
@@ -179,6 +189,33 @@ describe("Free Learning enrollment repository", () => {
       expect.stringContaining("pg_advisory_xact_lock"),
       "batch-enrollment:batch-1",
     );
+    expect(mocks.transaction.enrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects paid enrollment when the locked batch or catalog is no longer eligible", async () => {
+    mocks.transaction.batch.findUnique
+      .mockResolvedValueOnce({ courseId })
+      .mockResolvedValueOnce({
+        id: "batch-1",
+        courseId,
+        capacity: 50,
+        status: "ENROLLING",
+        course: {
+          status: "ARCHIVED",
+          category: { status: "PUBLISHED", serviceType: "BOOTCAMPS" },
+        },
+      });
+    mocks.transaction.user.findUnique.mockResolvedValue({
+      role: "STUDENT",
+      emailVerified: true,
+    });
+
+    await expect(
+      createPaid("batch-1", userId, "admin-1", {
+        paymentStatus: "COMPLETED",
+      }),
+    ).rejects.toMatchObject({ code: "BATCH_ENROLLMENT_CLOSED" });
+
     expect(mocks.transaction.enrollment.create).not.toHaveBeenCalled();
   });
 });

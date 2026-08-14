@@ -75,4 +75,26 @@ describe("batch certificate completion readiness", () => {
 
     expect(readiness.certificates.ready).toBe(true);
   });
+
+  it("does not consider an empty batch ready to complete", async () => {
+    mocks.findBatch.mockResolvedValue({
+      courseId,
+      status: "ACTIVE",
+      course: { certificateEnabled: false },
+    });
+    mocks.countCourseSessions
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(2);
+    mocks.countEnrollments
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const readiness = await findCompletionReadiness(batchId);
+
+    expect(readiness.enrollments).toEqual({
+      total: 0,
+      completed: 0,
+      ready: false,
+    });
+  });
 });

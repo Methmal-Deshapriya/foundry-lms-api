@@ -74,6 +74,7 @@ export async function getBatchEnrollmentsController(req, res, next) {
   try {
     const enrollments = await enrollmentService.getBatchEnrollmentsService(
       req.params.id,
+      req.query,
     );
     return ApiResponse.send(res, enrollments, "Batch roster fetched successfully");
   } catch (error) {
@@ -85,6 +86,7 @@ export async function getCourseStudentsController(req, res, next) {
   try {
     const students = await enrollmentService.getCourseStudentsService(
       req.params.courseId,
+      req.query,
     );
     return ApiResponse.send(res, students, "Course enrollment list fetched successfully");
   } catch (error) {

@@ -34,6 +34,7 @@ vi.mock("../../../utils/prisma.js", () => ({ default: mocks.root }));
 
 import {
   transitionStatus,
+  updateSetup,
   updateDelivery,
 } from "./batch.repository.js";
 
@@ -55,10 +56,11 @@ function arrangeDelivery({
   targetCourseId = courseId,
   deliveries = [],
   postTransactionDelivery = null,
+  batchStatus = "ACTIVE",
 } = {}) {
   mocks.transaction.batch.findUnique
     .mockResolvedValueOnce({ courseId })
-    .mockResolvedValueOnce({ id: batchId, courseId, status: "ACTIVE" });
+    .mockResolvedValueOnce({ id: batchId, courseId, status: batchStatus });
   mocks.transaction.courseSession.findUnique.mockResolvedValue({
     id: secondSessionId,
     courseId: targetCourseId,
@@ -159,6 +161,35 @@ describe("batch transactional repository contracts", () => {
     expect(mocks.transaction.batchSession.update).not.toHaveBeenCalled();
   });
 
+  it("rejects a delivery write when the locked batch has become terminal", async () => {
+    arrangeDelivery({ batchStatus: "COMPLETED" });
+
+    await expect(
+      updateDelivery(batchId, secondSessionId, {
+        mode: "RELEASED",
+        availableAt: null,
+        acknowledgeSequenceRisk: true,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(mocks.transaction.batchSession.create).not.toHaveBeenCalled();
+    expect(mocks.transaction.batchSession.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a scheduled timestamp that is no longer in the future", async () => {
+    arrangeDelivery();
+
+    await expect(
+      updateDelivery(batchId, secondSessionId, {
+        mode: "SCHEDULED",
+        availableAt: new Date("2020-01-01T00:00:00.000Z"),
+        acknowledgeSequenceRisk: true,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(mocks.transaction.batchSession.create).not.toHaveBeenCalled();
+  });
+
   it("applies an explicitly acknowledged sequence exception atomically", async () => {
     const delivery = {
       id: "delivery-2",
@@ -257,5 +288,28 @@ describe("batch transactional repository contracts", () => {
     expect(mocks.transaction.courseSession.count).not.toHaveBeenCalled();
     expect(mocks.transaction.batch.update).not.toHaveBeenCalled();
     expect(mocks.transaction.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("rejects a setup edit after a competing lifecycle transition wins", async () => {
+    mocks.transaction.batch.findUnique
+      .mockResolvedValueOnce({ courseId })
+      .mockResolvedValueOnce({
+        id: batchId,
+        courseId,
+        status: "ACTIVE",
+        startDate: new Date("2026-08-01T00:00:00.000Z"),
+        expectedEndDate: new Date("2026-12-01T00:00:00.000Z"),
+        course: {
+          status: "PUBLISHED",
+          category: { status: "PUBLISHED", serviceType: "BOOTCAMPS" },
+        },
+      });
+
+    await expect(
+      updateSetup(batchId, "DRAFT", { name: "Stale edit" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(lockKeys()).toEqual([`curriculum:${courseId}`, `batch:${batchId}`]);
+    expect(mocks.transaction.batch.update).not.toHaveBeenCalled();
   });
 });

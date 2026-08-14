@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
-    certificate: { findUnique: vi.fn(), update: vi.fn() },
+    certificate: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    enrollment: { findUnique: vi.fn() },
   };
   return {
     transaction,
@@ -16,15 +22,20 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("../../../utils/prisma.js", () => ({ default: mocks.prisma }));
 
-import { revokeIssued } from "./certificate.repository.js";
+import { createIssued, revokeIssued } from "./certificate.repository.js";
 
 const certificateId = "90000000-0000-4000-8000-000000000001";
 const enrollmentId = "90000000-0000-4000-8000-000000000002";
+const courseId = "90000000-0000-4000-8000-000000000003";
 
 describe("certificate revocation transaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    mocks.transaction.enrollment.findUnique.mockResolvedValue({
+      courseId,
+      batchId: "batch-1",
+    });
   });
 
   it("locks the enrollment, rechecks the issued credential, and captures lifecycle context", async () => {
@@ -59,6 +70,13 @@ describe("certificate revocation transaction", () => {
       expect.any(String),
       `enrollment:${enrollmentId}`,
     );
+    expect(
+      mocks.transaction.$queryRawUnsafe.mock.calls.map(([, key]) => key),
+    ).toEqual([
+      `curriculum:${courseId}`,
+      "batch:batch-1",
+      `enrollment:${enrollmentId}`,
+    ]);
     expect(result.lifecycleContext).toEqual({
       enrollmentStatus: "COMPLETED",
       batchId: "batch-1",
@@ -86,5 +104,47 @@ describe("certificate revocation transaction", () => {
       revokeIssued(certificateId, { status: "REVOKED" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(mocks.transaction.certificate.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("certificate issuance transaction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    mocks.transaction.enrollment.findUnique
+      .mockResolvedValueOnce({ courseId, batchId: null })
+      .mockResolvedValue({
+        status: "COMPLETED",
+        course: { certificateEnabled: true },
+      });
+    mocks.transaction.certificate.findFirst.mockResolvedValue(null);
+    mocks.transaction.certificate.create.mockResolvedValue({
+      id: certificateId,
+      enrollmentId,
+      status: "ISSUED",
+    });
+  });
+
+  it("allows issuance when only revoked history exists", async () => {
+    const result = await createIssued({
+      enrollmentId,
+      certificateCode: "FND-20260814-REPLACEMENT",
+    });
+
+    expect(mocks.transaction.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect.any(String),
+      `enrollment:${enrollmentId}`,
+    );
+    expect(result.status).toBe("ISSUED");
+    expect(mocks.transaction.certificate.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects issuance when another current certificate exists", async () => {
+    mocks.transaction.certificate.findFirst.mockResolvedValue({ id: certificateId });
+
+    await expect(
+      createIssued({ enrollmentId, certificateCode: "FND-20260814-DUPLICATE" }),
+    ).rejects.toMatchObject({ code: "CERTIFICATE_ALREADY_ISSUED" });
+    expect(mocks.transaction.certificate.create).not.toHaveBeenCalled();
   });
 });

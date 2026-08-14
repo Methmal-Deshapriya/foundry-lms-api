@@ -53,7 +53,7 @@ function validateCourseConsistency(data, context) {
 export const createCourseSchema = courseObject.superRefine(validateCourseConsistency);
 
 export const updateCourseSchema = courseObject
-  .omit({ certificateEnabled: true })
+  .omit({ certificateEnabled: true, categoryId: true })
   .partial()
   .refine((data) => Object.keys(data).length > 0, "At least one field is required.");
 

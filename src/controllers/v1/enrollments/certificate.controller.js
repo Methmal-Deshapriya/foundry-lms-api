@@ -50,7 +50,7 @@ export async function getMyCertificates(req, res, next) {
 
 export async function getAllCertificatesAdmin(req, res, next) {
   try {
-    const certificates = await certificateService.getAllCertificatesAdminService();
+    const certificates = await certificateService.getAllCertificatesAdminService(req.query);
     return ApiResponse.send(res, certificates, "All certificates fetched successfully");
   } catch (error) {
     next(error);

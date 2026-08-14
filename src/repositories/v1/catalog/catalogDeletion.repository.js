@@ -35,10 +35,41 @@ export async function runSerializableCatalogTransaction(database, operation) {
  */
 export async function buildDeletionImpact(
   database,
-  { resourceType, resourceId, resourceStatus, courseIds },
+  { resourceType, resourceId, resourceStatus, courseIds, sequential = false },
 ) {
   const uniqueCourseIds = [...new Set(courseIds)].sort();
   const courseWhere = { courseId: { in: uniqueCourseIds } };
+  const queries = [
+    () => database.course.count({
+      where: { id: { in: uniqueCourseIds }, status: { not: "ARCHIVED" } },
+    }),
+    () => database.batch.count({ where: courseWhere }),
+    () => database.batch.count({
+      where: {
+        ...courseWhere,
+        status: { in: OPERATIONAL_BATCH_STATUSES },
+      },
+    }),
+    () => database.enrollment.count({ where: courseWhere }),
+    () => database.sessionCompletion.count({ where: courseWhere }),
+    () => database.certificate.count({
+      where: { enrollment: { courseId: { in: uniqueCourseIds } } },
+    }),
+    () => database.studentProject.count({ where: courseWhere }),
+    () => database.courseSession.count({ where: courseWhere }),
+    () => database.courseSession.count({
+      where: { ...courseWhere, session: { reusePolicy: "SINGLE_COURSE" } },
+    }),
+    () => database.courseSession.count({
+      where: { ...courseWhere, session: { reusePolicy: "REUSABLE" } },
+    }),
+  ];
+  const counts = [];
+  if (sequential) {
+    for (const query of queries) counts.push(await query());
+  } else {
+    counts.push(...(await Promise.all(queries.map((query) => query()))));
+  }
   const [
     unarchivedCourses,
     batches,
@@ -50,31 +81,7 @@ export async function buildDeletionImpact(
     curriculumLinks,
     exclusiveSessions,
     reusableSessions,
-  ] = await Promise.all([
-    database.course.count({
-      where: { id: { in: uniqueCourseIds }, status: { not: "ARCHIVED" } },
-    }),
-    database.batch.count({ where: courseWhere }),
-    database.batch.count({
-      where: {
-        ...courseWhere,
-        status: { in: OPERATIONAL_BATCH_STATUSES },
-      },
-    }),
-    database.enrollment.count({ where: courseWhere }),
-    database.sessionCompletion.count({ where: courseWhere }),
-    database.certificate.count({
-      where: { enrollment: { courseId: { in: uniqueCourseIds } } },
-    }),
-    database.studentProject.count({ where: courseWhere }),
-    database.courseSession.count({ where: courseWhere }),
-    database.courseSession.count({
-      where: { ...courseWhere, session: { reusePolicy: "SINGLE_COURSE" } },
-    }),
-    database.courseSession.count({
-      where: { ...courseWhere, session: { reusePolicy: "REUSABLE" } },
-    }),
-  ]);
+  ] = counts;
 
   const summary = {
     courses: uniqueCourseIds.length,
@@ -196,10 +203,12 @@ export async function deleteCourseGraph(transaction, courseId) {
       .map(({ session }) => session.id),
   ).size;
 
-  const [deletedCertificates, deletedCompletions] = await Promise.all([
-    transaction.certificate.count({ where: { enrollment: { courseId } } }),
-    transaction.sessionCompletion.count({ where: { courseId } }),
-  ]);
+  const deletedCertificates = await transaction.certificate.count({
+    where: { enrollment: { courseId } },
+  });
+  const deletedCompletions = await transaction.sessionCompletion.count({
+    where: { courseId },
+  });
   const deletedProjects = (
     await transaction.studentProject.deleteMany({ where: { courseId } })
   ).count;

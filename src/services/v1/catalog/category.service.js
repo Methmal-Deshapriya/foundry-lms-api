@@ -60,6 +60,11 @@ export async function createCategoryService(data, actorId) {
 }
 
 export async function updateCategoryService(id, data, actorId) {
+  if (Object.hasOwn(data, "serviceType")) {
+    throw new ConflictError(
+      "A category's learning service is selected at creation and cannot be changed later.",
+    );
+  }
   const input = parseOrThrow(updateCategorySchema, data);
   const current = await categoryRepo.findById(id);
   if (!current) throw new NotFoundError("Category not found.");
@@ -74,7 +79,7 @@ export async function updateCategoryService(id, data, actorId) {
       "Published category slugs and services are immutable. Unpublish it first.",
     );
   }
-  const category = await categoryRepo.update(id, input);
+  const category = await categoryRepo.updateOperational(id, input);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.CATEGORY_UPDATED,
@@ -95,8 +100,7 @@ export async function setCategoryPublicationService(id, publish, actorId) {
   if (current.status === CATALOG_STATUSES.ARCHIVED) {
     throw new ConflictError("Archived categories cannot be published.");
   }
-  const status = publish ? CATALOG_STATUSES.PUBLISHED : CATALOG_STATUSES.DRAFT;
-  const category = await categoryRepo.update(id, { status });
+  const category = await categoryRepo.setPublication(id, publish);
   recordActionService({
     actorUserId: actorId,
     action: publish
@@ -114,13 +118,16 @@ export async function archiveCategoryService(id, actorId) {
   const current = await categoryRepo.findById(id);
   if (!current) throw new NotFoundError("Category not found.");
   if (current.status === CATALOG_STATUSES.ARCHIVED) return toAdminCategory(current);
-  const [, category] = await categoryRepo.archive(id);
+  const result = await categoryRepo.archiveSafely(id);
+  if (!result) throw new NotFoundError("Category not found.");
+  const { category, archivedCourseCount } = result;
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.CATEGORY_ARCHIVED,
     entityType: ENTITY_TYPES.CATEGORY,
     entityId: id,
     description: `Category "${category.title}" and its courses archived.`,
+    metadata: { archivedCourseCount },
   });
   if (current.status === CATALOG_STATUSES.PUBLISHED) {
     await revalidatePublicCatalogCache();
@@ -135,9 +142,7 @@ export async function unarchiveCategoryService(id, actorId) {
     throw new ConflictError("Only archived categories can be restored.");
   }
 
-  const category = await categoryRepo.update(id, {
-    status: CATALOG_STATUSES.DRAFT,
-  });
+  const category = await categoryRepo.restore(id);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.CATEGORY_UNARCHIVED,

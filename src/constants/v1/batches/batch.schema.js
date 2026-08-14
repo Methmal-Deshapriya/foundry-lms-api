@@ -66,6 +66,17 @@ export const updateBatchSessionDeliverySchema = z
         message: "A scheduled session requires an availability time.",
       });
     }
+    if (
+      data.mode === "SCHEDULED" &&
+      data.availableAt &&
+      data.availableAt.getTime() <= Date.now()
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["availableAt"],
+        message: "A scheduled session requires a future availability time.",
+      });
+    }
     if (data.mode !== "SCHEDULED" && data.availableAt) {
       context.addIssue({
         code: "custom",

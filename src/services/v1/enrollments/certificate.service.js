@@ -1,6 +1,11 @@
 import * as certificateRepo from "../../../repositories/v1/enrollments/certificate.repository.js";
 import * as enrollmentRepo from "../../../repositories/v1/enrollments/enrollment.repository.js";
-import { issueCertificateSchema, revokeCertificateSchema } from "../../../constants/v1/enrollments/certificate.schema.js";
+import {
+  certificateAdminCursorSchema,
+  certificateAdminFiltersSchema,
+  issueCertificateSchema,
+  revokeCertificateSchema,
+} from "../../../constants/v1/enrollments/certificate.schema.js";
 import { generateCertificateCode } from "../../../utils/certificateUtils.js";
 import { ValidationError, NotFoundError, ConflictError, ForbiddenError } from "../../../utils/Errors.js";
 import { transformCertificate } from "../../../utils/transformers.js";
@@ -10,12 +15,15 @@ import { recordActionService } from "../audit/audit.service.js";
 const CERTIFICATE_CODE_ATTEMPTS = 5;
 
 async function createCertificateWithUniqueCode(enrollment, certificateInput) {
-  const publicAppUrl = process.env.PUBLIC_APP_URL || "http://localhost:3000";
+  const publicAppUrl = process.env.CLIENT_URL?.replace(/\/$/, "");
+  if (!publicAppUrl) {
+    throw new Error("CLIENT_URL is required to issue publicly verifiable certificates.");
+  }
 
   for (let attempt = 1; attempt <= CERTIFICATE_CODE_ATTEMPTS; attempt += 1) {
     const certificateCode = generateCertificateCode();
     try {
-      const certificate = await certificateRepo.create({
+      const certificate = await certificateRepo.createIssued({
         enrollmentId: enrollment.id,
         certificateCode,
         studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
@@ -35,6 +43,8 @@ async function createCertificateWithUniqueCode(enrollment, certificateInput) {
       return { certificate, certificateCode };
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
+
+      if (error.code === "CERTIFICATE_ALREADY_ISSUED") throw error;
 
       // A create conflict may also mean another request issued a certificate
       // for this enrollment. Retry only when this exact random code exists.
@@ -84,9 +94,12 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   }
 
   // 3. Duplicate Check
-  const existing = await certificateRepo.findByEnrollmentId(enrollmentId);
+  const existing = await certificateRepo.findCurrentByEnrollmentId(enrollmentId);
   if (existing) {
-    throw new ConflictError("A certificate has already been issued for this enrollment.");
+    throw new ConflictError(
+      "A current certificate has already been issued for this enrollment.",
+      "CERTIFICATE_ALREADY_ISSUED",
+    );
   }
 
   // 4. Action: Prepare snapshot and create with bounded random-code retry.
@@ -175,9 +188,51 @@ export async function getMyCertificatesService(userId) {
 /**
  * Service: Get all certificates (Admin).
  */
-export async function getAllCertificatesAdminService() {
-  const certificates = await certificateRepo.findAllAdmin();
-  return certificates.map(transformCertificate);
+export async function getAllCertificatesAdminService(query = {}) {
+  const validation = certificateAdminFiltersSchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path[0]);
+  }
+  const filters = validation.data;
+  let cursor = null;
+  if (filters.cursor) {
+    try {
+      const parsed = certificateAdminCursorSchema.safeParse(
+        JSON.parse(Buffer.from(filters.cursor, "base64url").toString("utf8")),
+      );
+      if (!parsed.success) throw new Error("Invalid cursor payload.");
+      if (
+        parsed.data.q !== filters.q ||
+        parsed.data.status !== (filters.status ?? null)
+      ) {
+        throw new Error("Cursor does not match this certificate query.");
+      }
+      cursor = { ...parsed.data, createdAt: new Date(parsed.data.createdAt) };
+    } catch {
+      throw new ValidationError("Invalid certificate cursor.", "cursor");
+    }
+  }
+
+  const rows = await certificateRepo.findAllAdmin({ ...filters, cursor });
+  const hasMore = rows.length > filters.limit;
+  const certificates = rows.slice(0, filters.limit);
+  const last = certificates.at(-1);
+  return {
+    certificates: certificates.map(transformCertificate),
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore && last
+        ? Buffer.from(JSON.stringify({
+            q: filters.q,
+            status: filters.status ?? null,
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+          })).toString("base64url")
+        : null,
+    },
+  };
 }
 
 /**

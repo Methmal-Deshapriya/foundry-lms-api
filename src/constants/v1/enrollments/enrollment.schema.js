@@ -58,3 +58,19 @@ export const eligibleStudentCursorPayloadSchema = z.object({
   email: z.string().email().max(320),
   id: z.string().uuid(),
 });
+
+export const enrollmentRosterFiltersSchema = z.object({
+  q: z.string().trim().max(100).default(""),
+  status: z.enum(ALL_ENROLLMENT_STATUSES).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: z.string().trim().min(1).max(1024).optional(),
+});
+
+export const enrollmentRosterCursorSchema = z.object({
+  scopeType: z.enum(["BATCH", "COURSE"]),
+  scopeId: z.string().uuid(),
+  q: z.string().max(100),
+  status: z.enum(ALL_ENROLLMENT_STATUSES).nullable(),
+  createdAt: z.string().datetime(),
+  id: z.string().uuid(),
+});

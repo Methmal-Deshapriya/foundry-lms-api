@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "test": "vitest run --passWithNoTests",
+    "test:pipeline": "vitest run src/integration/learningDelivery.pipeline.integration.test.js",
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "studio": "prisma studio",
@@ -22,7 +23,8 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@prisma/client": "^7.7.0",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "@prisma/extension-accelerate": "^3.0.1",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
@@ -32,13 +34,14 @@
     "express-rate-limit": "^8.6.0",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.3",
+    "pg": "^8.23.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",
-    "prisma": "^7.7.0",
+    "prisma": "^7.9.1",
     "supertest": "^7.2.2",
     "vitest": "^4.1.7",
-    "yaml": "2.8.1"
+    "yaml": "^2.9.0"
   }
 }

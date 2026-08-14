@@ -81,7 +81,12 @@ export async function findCompletion(enrollmentId, courseSessionId) {
 export async function createCompletion(enrollmentId, courseSessionId, courseId) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await assertActiveEnrollment(transaction, enrollmentId, courseId);
+      await assertCompletionMutationAllowed(
+        transaction,
+        enrollmentId,
+        courseSessionId,
+        courseId,
+      );
       return transaction.sessionCompletion.create({
         data: { enrollmentId, courseSessionId, courseId },
       });
@@ -101,7 +106,12 @@ export async function createCompletion(enrollmentId, courseSessionId, courseId) 
 export async function removeCompletion(enrollmentId, courseSessionId, courseId) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await assertActiveEnrollment(transaction, enrollmentId, courseId);
+      await assertCompletionMutationAllowed(
+        transaction,
+        enrollmentId,
+        courseSessionId,
+        courseId,
+      );
       return transaction.sessionCompletion.deleteMany({
         where: { enrollmentId, courseSessionId },
       });
@@ -118,11 +128,35 @@ export async function removeCompletion(enrollmentId, courseSessionId, courseId) 
   }
 }
 
-async function assertActiveEnrollment(transaction, enrollmentId, courseId) {
+async function assertCompletionMutationAllowed(
+  transaction,
+  enrollmentId,
+  courseSessionId,
+  courseId,
+  now = new Date(),
+) {
+  const initial = await transaction.enrollment.findUnique({
+    where: { id: enrollmentId },
+    select: { courseId: true, batchId: true },
+  });
+  if (!initial || initial.courseId !== courseId) {
+    throw new NotFoundError("Enrollment not found.");
+  }
+  await acquireTransactionLock(transaction, `curriculum:${courseId}`);
+  if (initial.batchId) {
+    await acquireTransactionLock(transaction, `batch:${initial.batchId}`);
+  }
   await acquireTransactionLock(transaction, `enrollment:${enrollmentId}`);
   const enrollment = await transaction.enrollment.findUnique({
     where: { id: enrollmentId },
-    select: { courseId: true, status: true },
+    select: {
+      courseId: true,
+      batchId: true,
+      source: true,
+      status: true,
+      paymentStatus: true,
+      batch: { select: { status: true } },
+    },
   });
   if (!enrollment || enrollment.courseId !== courseId) {
     throw new NotFoundError("Enrollment not found.");
@@ -134,5 +168,57 @@ async function assertActiveEnrollment(transaction, enrollmentId, courseId) {
     throw new ConflictError(
       "Session completion can be changed only for an active enrollment.",
     );
+  }
+
+  const courseSession = await transaction.courseSession.findUnique({
+    where: { id: courseSessionId },
+    select: {
+      courseId: true,
+      retiredAt: true,
+      session: { select: { status: true } },
+    },
+  });
+  if (
+    !courseSession ||
+    courseSession.courseId !== courseId ||
+    !["READY", "ARCHIVED"].includes(courseSession.session.status)
+  ) {
+    throw new NotFoundError("This session is not available in the enrollment classroom.");
+  }
+
+  if (!enrollment.batchId) {
+    if (
+      enrollment.source !== "SELF" ||
+      enrollment.paymentStatus !== "NOT_REQUIRED" ||
+      courseSession.retiredAt
+    ) {
+      throw new NotFoundError("This session is not available in the enrollment classroom.");
+    }
+    return;
+  }
+
+  if (
+    enrollment.source !== "ADMIN" ||
+    enrollment.paymentStatus !== "COMPLETED" ||
+    !["ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.batch?.status)
+  ) {
+    throw new ConflictError("This enrollment does not currently allow learning updates.");
+  }
+  const delivery = await transaction.batchSession.findUnique({
+    where: {
+      batchId_courseSessionId: {
+        batchId: enrollment.batchId,
+        courseSessionId,
+      },
+    },
+    select: { courseId: true, isReleased: true, availableAt: true },
+  });
+  if (
+    !delivery ||
+    delivery.courseId !== courseId ||
+    !delivery.isReleased ||
+    (delivery.availableAt && delivery.availableAt > now)
+  ) {
+    throw new NotFoundError("This session is not available in the enrollment classroom.");
   }
 }
