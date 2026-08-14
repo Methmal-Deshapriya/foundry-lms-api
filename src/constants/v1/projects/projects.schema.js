@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { ALL_PROJECT_STATUSES } from "./projects.constants.js";
+import {
+  nullableSecureHttpUrlSchema,
+  projectThumbnailUrlSchema,
+} from "../shared/url.schema.js";
 
 /**
  * Student Project Schemas
@@ -8,28 +12,28 @@ import { ALL_PROJECT_STATUSES } from "./projects.constants.js";
 export const createProjectSchema = z.object({
   courseId: z.string().uuid("Invalid Course ID format"),
   enrollmentId: z.string().uuid("Invalid Enrollment ID format"),
-  title: z.string().min(3, "Title must be at least 3 characters long"),
-  description: z.string().optional().nullable(),
-  thumbnailUrl: z.string().url("Invalid URL format").optional().nullable(),
-  projectUrl: z.string().url("Invalid URL format").optional().nullable(),
-  githubUrl: z.string().url("Invalid URL format").optional().nullable(),
-  demoUrl: z.string().url("Invalid URL format").optional().nullable(),
-  technologies: z.array(z.string()).optional(),
+  title: z.string().trim().min(3, "Title must be at least 3 characters long").max(180),
+  description: z.string().trim().max(10000).optional().nullable(),
+  thumbnailUrl: projectThumbnailUrlSchema,
+  projectUrl: nullableSecureHttpUrlSchema,
+  githubUrl: nullableSecureHttpUrlSchema,
+  demoUrl: nullableSecureHttpUrlSchema,
+  technologies: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
   isPublic: z.boolean().optional(),
 });
 
 export const updateProjectSchema = z.object({
-  title: z.string().min(3, "Title must be at least 3 characters long").optional(),
-  description: z.string().optional().nullable(),
-  thumbnailUrl: z.string().url("Invalid URL format").optional().nullable(),
-  projectUrl: z.string().url("Invalid URL format").optional().nullable(),
-  githubUrl: z.string().url("Invalid URL format").optional().nullable(),
-  demoUrl: z.string().url("Invalid URL format").optional().nullable(),
-  technologies: z.array(z.string()).optional(),
+  title: z.string().trim().min(3, "Title must be at least 3 characters long").max(180).optional(),
+  description: z.string().trim().max(10000).optional().nullable(),
+  thumbnailUrl: projectThumbnailUrlSchema,
+  projectUrl: nullableSecureHttpUrlSchema,
+  githubUrl: nullableSecureHttpUrlSchema,
+  demoUrl: nullableSecureHttpUrlSchema,
+  technologies: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
   isPublic: z.boolean().optional(),
-});
+}).refine((data) => Object.keys(data).length > 0, "At least one field is required.");
 
 export const reviewProjectSchema = z.object({
   status: z.enum(ALL_PROJECT_STATUSES),
-  adminFeedback: z.string().optional().nullable(),
+  adminFeedback: z.string().trim().max(5000).optional().nullable(),
 });

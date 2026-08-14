@@ -14,7 +14,7 @@ vi.mock("../../../repositories/v1/users/user.repository.js", () => ({
 process.env.JWT_SECRET ||= "foundry-session-library-route-test";
 
 function cookieFor(role) {
-  return `token=${generateToken({ id: `test-${role}`, role })}`;
+  return `token=${generateToken({ id: `test-${role}`, role, mfa: true })}`;
 }
 
 describe("Session Library route access", () => {

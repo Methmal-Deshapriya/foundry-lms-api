@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import prisma from "./utils/prisma.js";
 
 // 1. Import Shared Foundations
 import { ApiResponse } from "./utils/responseHandler.js";
@@ -22,6 +24,7 @@ import auditRoutes from "./routes/v1/audit/audit.routes.js";
 import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
 
 const app = express();
+app.disable("x-powered-by");
 
 const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
 if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
@@ -31,6 +34,13 @@ if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
 // 3. Base Middlewares
 app.use(express.json());
 app.use(cookieParser());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    strictTransportSecurity:
+      process.env.NODE_ENV === "production" ? undefined : false,
+  }),
+);
 
 app.use(
   cors({
@@ -40,6 +50,10 @@ app.use(
 );
 
 // 4. Register Module Routes
+app.use("/api/v1/auth", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/catalog", catalogRoutes);
@@ -60,6 +74,23 @@ app.get("/api/health", (req, res) => {
     status: "UP",
     message: "Foundry LMS Server is running 🚀",
   });
+});
+
+app.get("/api/ready", async (req, res) => {
+  try {
+    await prisma.$transaction(
+      (transaction) => transaction.$queryRaw`SELECT 1`,
+      { maxWait: 1_000, timeout: 2_000 },
+    );
+    return ApiResponse.send(res, { status: "READY", database: "UP" });
+  } catch {
+    return ApiResponse.send(
+      res,
+      { status: "NOT_READY", database: "DOWN" },
+      "Database readiness check failed",
+      503,
+    );
+  }
 });
 
 // 6. Global Error Handler (CRITICAL: Must be at the very bottom)

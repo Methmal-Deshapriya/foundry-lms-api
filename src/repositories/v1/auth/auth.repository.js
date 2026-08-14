@@ -1,5 +1,11 @@
 import prisma from "../../../utils/prisma.js";
-import { handlePrismaError } from "../../../utils/Errors.js";
+import {
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+  handlePrismaError,
+} from "../../../utils/Errors.js";
+import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
 /**
  * Auth Repository - The "Librarian"
@@ -64,109 +70,221 @@ export async function createUser(data) {
  * @returns {Promise<object>} The created token record.
  */
 export async function createPasswordResetToken({ userId, tokenHash, expiresAt }) {
-  return await prisma.passwordResetToken.create({
-    data: { userId, tokenHash, expiresAt },
+  return prisma.$transaction(async (transaction) => {
+    await acquireTransactionLock(transaction, `password-reset-user:${userId}`);
+    await transaction.passwordResetToken.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    return transaction.passwordResetToken.create({
+      data: { userId, tokenHash, expiresAt },
+    });
   });
 }
 
-/**
- * Find a password reset token by its hash, but only if it is still
- * usable (not expired, not already used).
- * @param {string} tokenHash - SHA-256 hash of the raw token from the reset link.
- * @returns {Promise<object|null>} The token record (with its user) or null.
- */
-export async function findValidResetToken(tokenHash) {
-  return await prisma.passwordResetToken.findFirst({
-    where: {
-      tokenHash,
-      usedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    include: { user: true },
+export async function resetPasswordWithToken(tokenHash, hashedPassword) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const candidate = await transaction.passwordResetToken.findFirst({
+        where: {
+          tokenHash,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true, userId: true },
+      });
+      if (!candidate) {
+        throw new ValidationError(
+          "This reset link is invalid or has expired.",
+          "token",
+        );
+      }
+      await acquireTransactionLock(
+        transaction,
+        `password-reset-user:${candidate.userId}`,
+      );
+      const resetToken = await transaction.passwordResetToken.findFirst({
+        where: {
+          id: candidate.id,
+          tokenHash,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true, userId: true },
+      });
+      if (!resetToken) {
+        throw new ConflictError(
+          "This reset link has already been used or replaced.",
+          "RESET_TOKEN_ALREADY_USED",
+        );
+      }
+
+      const consumed = await transaction.passwordResetToken.updateMany({
+        where: { id: resetToken.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      if (consumed.count !== 1) {
+        throw new ConflictError(
+          "This reset link has already been used.",
+          "RESET_TOKEN_ALREADY_USED",
+        );
+      }
+      const user = await transaction.user.update({
+        where: { id: resetToken.userId },
+        data: {
+          password: hashedPassword,
+          securityVersion: { increment: 1 },
+        },
+        select: { id: true, email: true, securityVersion: true },
+      });
+      await transaction.passwordResetToken.updateMany({
+        where: { userId: resetToken.userId, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      return user;
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+export async function replaceEmailOtp({ userId, codeHash, expiresAt }) {
+  return prisma.$transaction(async (transaction) => {
+    await acquireTransactionLock(transaction, `email-verification:${userId}`);
+    await transaction.emailOtp.updateMany({
+      where: { userId, verifiedAt: null },
+      data: { verifiedAt: new Date() },
+    });
+    return transaction.emailOtp.create({
+      data: { userId, codeHash, expiresAt },
+    });
   });
 }
 
-/**
- * Mark a password reset token as used so it can't be replayed.
- * @param {string} id - The token record's ID.
- */
-export async function markResetTokenUsed(id) {
-  return await prisma.passwordResetToken.update({
-    where: { id },
-    data: { usedAt: new Date() },
+export async function verifyEmailWithOtp(email, codeHash, maxAttempts) {
+  const result = await prisma.$transaction(async (transaction) => {
+    const initialUser = await transaction.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (!initialUser) return { kind: "USER_NOT_FOUND" };
+    await acquireTransactionLock(
+      transaction,
+      `email-verification:${initialUser.id}`,
+    );
+    const user = await transaction.user.findUnique({
+      where: { id: initialUser.id },
+    });
+    if (!user) return { kind: "USER_NOT_FOUND" };
+    if (user.emailVerified) return { kind: "ALREADY_VERIFIED" };
+
+    const otp = await transaction.emailOtp.findFirst({
+      where: {
+        userId: user.id,
+        verifiedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!otp) return { kind: "EXPIRED" };
+    if (otp.attempts >= maxAttempts) return { kind: "LOCKED" };
+    if (otp.codeHash !== codeHash) {
+      await transaction.emailOtp.update({
+        where: { id: otp.id },
+        data: { attempts: { increment: 1 } },
+      });
+      return { kind: "INVALID" };
+    }
+
+    const now = new Date();
+    await transaction.emailOtp.updateMany({
+      where: { userId: user.id, verifiedAt: null },
+      data: { verifiedAt: now },
+    });
+    const verifiedUser = await transaction.user.update({
+      where: { id: user.id },
+      data: { emailVerified: true },
+    });
+    return { kind: "VERIFIED", user: verifiedUser };
+  });
+
+  if (result.kind === "USER_NOT_FOUND") {
+    throw new NotFoundError("This email isn't registered. Please sign up first.");
+  }
+  if (result.kind === "ALREADY_VERIFIED") {
+    throw new ConflictError("This email is already verified.");
+  }
+  if (result.kind === "EXPIRED") {
+    throw new ValidationError(
+      "This code has expired. Please request a new one.",
+      "code",
+    );
+  }
+  if (result.kind === "LOCKED") {
+    throw new ValidationError(
+      "Too many incorrect attempts. Please request a new code.",
+      "code",
+    );
+  }
+  if (result.kind === "INVALID") {
+    throw new ValidationError("Incorrect code. Please try again.", "code");
+  }
+  return result.user;
+}
+
+export async function createLoginChallenge({ userId, codeHash, expiresAt }) {
+  return prisma.$transaction(async (transaction) => {
+    await acquireTransactionLock(transaction, `login-mfa-user:${userId}`);
+    await transaction.loginChallenge.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    return transaction.loginChallenge.create({
+      data: { userId, codeHash, expiresAt },
+    });
   });
 }
 
-/**
- * Update a user's password hash.
- * @param {string} userId
- * @param {string} hashedPassword
- */
-export async function updateUserPassword(userId, hashedPassword) {
-  return await prisma.user.update({
-    where: { id: userId },
-    data: { password: hashedPassword },
+export async function verifyLoginChallenge(id, codeHash, maxAttempts) {
+  const result = await prisma.$transaction(async (transaction) => {
+    await acquireTransactionLock(transaction, `login-mfa:${id}`);
+    const challenge = await transaction.loginChallenge.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!challenge || challenge.usedAt || challenge.expiresAt <= new Date()) {
+      return { kind: "EXPIRED" };
+    }
+    if (challenge.attempts >= maxAttempts) return { kind: "LOCKED" };
+    if (challenge.codeHash !== codeHash) {
+      await transaction.loginChallenge.update({
+        where: { id },
+        data: { attempts: { increment: 1 } },
+      });
+      return { kind: "INVALID" };
+    }
+    const consumed = await transaction.loginChallenge.updateMany({
+      where: { id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count !== 1) return { kind: "EXPIRED" };
+    return { kind: "VERIFIED", user: challenge.user };
   });
-}
 
-/**
- * Store a new email-verification OTP for a user.
- * @param {object} data - { userId, codeHash, expiresAt }
- * @returns {Promise<object>} The created OTP record.
- */
-export async function createEmailOtp({ userId, codeHash, expiresAt }) {
-  return await prisma.emailOtp.create({
-    data: { userId, codeHash, expiresAt },
-  });
-}
-
-/**
- * Find the most recent still-usable OTP for a user (not expired, not
- * already verified). Callers compare its codeHash themselves so wrong
- * guesses can still be counted as attempts against this same record.
- * @param {string} userId
- * @returns {Promise<object|null>}
- */
-export async function findActiveOtpForUser(userId) {
-  return await prisma.emailOtp.findFirst({
-    where: {
-      userId,
-      verifiedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-}
-
-/**
- * Increment the failed-attempt counter on an OTP record.
- * @param {string} id - The OTP record's ID.
- */
-export async function incrementOtpAttempts(id) {
-  return await prisma.emailOtp.update({
-    where: { id },
-    data: { attempts: { increment: 1 } },
-  });
-}
-
-/**
- * Mark an OTP record as verified so it can't be reused.
- * @param {string} id - The OTP record's ID.
- */
-export async function markOtpVerified(id) {
-  return await prisma.emailOtp.update({
-    where: { id },
-    data: { verifiedAt: new Date() },
-  });
-}
-
-/**
- * Mark a user's email as verified.
- * @param {string} userId
- */
-export async function markUserEmailVerified(userId) {
-  return await prisma.user.update({
-    where: { id: userId },
-    data: { emailVerified: true },
-  });
+  if (result.kind === "EXPIRED") {
+    throw new ValidationError(
+      "This administrator login challenge is invalid or expired.",
+      "challengeId",
+    );
+  }
+  if (result.kind === "LOCKED") {
+    throw new ValidationError(
+      "Too many incorrect attempts. Sign in again for a new code.",
+      "code",
+    );
+  }
+  if (result.kind === "INVALID") {
+    throw new ValidationError("Incorrect code. Please try again.", "code");
+  }
+  return result.user;
 }

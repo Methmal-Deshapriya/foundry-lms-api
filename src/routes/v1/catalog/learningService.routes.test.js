@@ -21,7 +21,7 @@ vi.mock("../../../repositories/v1/users/user.repository.js", () => ({
 process.env.JWT_SECRET ||= "foundry-service-summary-route-test";
 
 function cookieFor(role, databaseRole = role) {
-  return `token=${generateToken({ id: `test-${databaseRole}`, role })}`;
+  return `token=${generateToken({ id: `test-${databaseRole}`, role, mfa: true })}`;
 }
 
 describe("Learning-service summary route access", () => {

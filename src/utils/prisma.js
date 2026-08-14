@@ -25,13 +25,22 @@ const clientOptions = {
 };
 
 const usesAccelerate = /^(prisma|prisma\+postgres):\/\//.test(databaseUrl);
+const statementTimeoutMs = Number(process.env.DB_STATEMENT_TIMEOUT_MS ?? 30_000);
+const idleTransactionTimeoutMs = Number(
+  process.env.DB_IDLE_TRANSACTION_TIMEOUT_MS ?? 15_000,
+);
 const prisma = usesAccelerate
   ? new PrismaClient({ ...clientOptions, accelerateUrl: databaseUrl }).$extends(
       withAccelerate(),
     )
   : new PrismaClient({
       ...clientOptions,
-      adapter: new PrismaPg({ connectionString: databaseUrl }),
+      adapter: new PrismaPg({
+        connectionString: databaseUrl,
+        statement_timeout: statementTimeoutMs,
+        query_timeout: statementTimeoutMs + 1_000,
+        idle_in_transaction_session_timeout: idleTransactionTimeoutMs,
+      }),
     });
 
 export default prisma;

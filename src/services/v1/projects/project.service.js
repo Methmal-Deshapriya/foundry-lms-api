@@ -1,11 +1,16 @@
 import * as projectRepo from "../../../repositories/v1/projects/project.repository.js";
 import { createProjectSchema, updateProjectSchema, reviewProjectSchema } from "../../../constants/v1/projects/projects.schema.js";
-import { assertProjectOwnership } from "../../../utils/accessHelpers.js";
 import { ValidationError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
-import { transformProject, transformProjectList } from "../../../utils/transformers.js";
+import {
+  transformProject,
+  transformProjectList,
+  transformPublicProject,
+  transformPublicProjectList,
+} from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 import { requireEnrollmentAccessService } from "../learning/classroom.service.js";
+import { z } from "zod";
 
 /**
  * Student Project Service
@@ -50,22 +55,19 @@ export async function submitProjectService(userId, data) {
  * Allowed only while status is PENDING.
  */
 export async function updateProjectService(projectId, userId, data) {
-  // 1. Ownership & Status Check
-  const project = await assertProjectOwnership(userId, projectId);
-  
-  if (project.status !== "PENDING") {
-    throw new ForbiddenError("Projects can only be edited while their status is PENDING.");
-  }
-
-  // 2. Validation
+  // Validation happens before the short transaction; ownership and status are
+  // rechecked under the same project lock used by administrative review.
   const validation = updateProjectSchema.safeParse(data);
   if (!validation.success) {
     const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  // 3. Action
-  const updated = await projectRepo.update(projectId, validation.data);
+  const updated = await projectRepo.updatePendingOwned(
+    projectId,
+    userId,
+    validation.data,
+  );
 
   return transformProject(updated);
 }
@@ -81,14 +83,9 @@ export async function reviewProjectService(projectId, data, actorId) {
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  // 2. Existence Check
-  const project = await projectRepo.findById(projectId);
-  if (!project) {
-    throw new NotFoundError("Project not found.");
-  }
-
-  // 3. Action
-  const updated = await projectRepo.update(projectId, {
+  // Review and student edits serialize on the same project lock. The admin
+  // therefore always reviews the content version that is actually published.
+  const { project: updated, previous } = await projectRepo.review(projectId, {
     ...validation.data,
     reviewedBy: actorId,
     reviewedAt: new Date(),
@@ -100,7 +97,7 @@ export async function reviewProjectService(projectId, data, actorId) {
     action: AUDIT_ACTIONS.PROJECT_REVIEWED,
     entityType: ENTITY_TYPES.STUDENT_PROJECT,
     entityId: projectId,
-    description: `Project "${project.title}" reviewed (Status: ${validation.data.status}) by Admin ${actorId}`,
+    description: `Project "${previous.title}" reviewed (Status: ${validation.data.status}) by Admin ${actorId}`,
     metadata: { status: validation.data.status }
   });
 
@@ -110,25 +107,48 @@ export async function reviewProjectService(projectId, data, actorId) {
 /**
  * Service: Get my projects (Student).
  */
-export async function getMyProjectsService(userId) {
-  const projects = await projectRepo.findByUserId(userId);
-  return transformProjectList(projects);
+const projectPageSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().uuid().optional(),
+});
+
+function parseProjectPage(query) {
+  const result = projectPageSchema.safeParse(query);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new ValidationError(issue.message, issue.path[0]);
+  }
+  return result.data;
+}
+
+export async function getMyProjectsService(userId, query = {}) {
+  const page = await projectRepo.findByUserId(userId, parseProjectPage(query));
+  return { projects: transformProjectList(page.items), nextCursor: page.nextCursor };
 }
 
 /**
  * Service: Get all projects (Admin).
  */
-export async function getAllProjectsAdminService() {
-  const projects = await projectRepo.findAllAdmin();
-  return transformProjectList(projects);
+export async function getAllProjectsAdminService(query = {}) {
+  const page = await projectRepo.findAllAdmin(parseProjectPage(query));
+  return { projects: transformProjectList(page.items), nextCursor: page.nextCursor };
 }
 
 /**
  * Service: Get public showcase.
  */
-export async function getPublicShowcaseService() {
-  const projects = await projectRepo.findPublicShowcase();
-  return transformProjectList(projects);
+export async function getPublicShowcaseService(query = {}) {
+  const page = await projectRepo.findPublicShowcase(parseProjectPage(query));
+  return {
+    projects: transformPublicProjectList(page.items),
+    nextCursor: page.nextCursor,
+  };
+}
+
+export async function getPublicProjectDetailsService(projectId) {
+  const project = await projectRepo.findPublicById(projectId);
+  if (!project) throw new NotFoundError("Public project not found.");
+  return transformPublicProject(project);
 }
 
 /**
@@ -140,12 +160,10 @@ export async function getProjectDetailsService(projectId, userId, isAdmin = fals
     throw new NotFoundError("Project not found.");
   }
 
-  // Privacy Rule: Students can see their own projects OR any approved public project.
-  // Admins can see everything.
+  // Protected detail is owner/admin only. Public reads use the separately
+  // projected getPublicProjectDetailsService response.
   const isOwner = project.userId === userId;
-  const isPublicApproved = project.isPublic && project.status === "APPROVED";
-
-  if (!isAdmin && !isOwner && !isPublicApproved) {
+  if (!isAdmin && !isOwner) {
     throw new ForbiddenError("Access denied.");
   }
 

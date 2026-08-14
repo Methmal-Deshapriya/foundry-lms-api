@@ -10,7 +10,7 @@ const router = express.Router();
  * Public Routes (Showcase)
  */
 router.get("/showcase", projectController.getPublicShowcase);
-router.get("/showcase/:id", projectController.getProjectDetails);
+router.get("/showcase/:id", projectController.getPublicProjectDetails);
 
 /**
  * Protected Routes

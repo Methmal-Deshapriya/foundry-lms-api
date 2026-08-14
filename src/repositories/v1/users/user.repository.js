@@ -119,7 +119,10 @@ export async function findUserById(id) {
  * @returns {Promise<object>} The updated user object.
  */
 export async function updateUserRole(id, role) {
-  return await updateUser(id, { role });
+  return await updateUser(id, {
+    role,
+    securityVersion: { increment: 1 },
+  });
 }
 
 /**

@@ -26,7 +26,7 @@ const ids = {
 process.env.JWT_SECRET ||= "foundry-pipeline-integration-test";
 
 function cookieFor(id, role) {
-  return `token=${generateToken({ id, role })}`;
+  return `token=${generateToken({ id, role, mfa: role !== "STUDENT" })}`;
 }
 
 const adminCookie = () => cookieFor(ids.admin, "SUPER_ADMIN");

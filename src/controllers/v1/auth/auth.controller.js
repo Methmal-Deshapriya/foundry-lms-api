@@ -41,12 +41,34 @@ export async function registerController(req, res, next) {
  */
 export async function loginController(req, res, next) {
   try {
-    const { user, token } = await authService.loginService(req.body);
+    const result = await authService.loginService(req.body);
+
+    if (result.requiresMfa) {
+      return ApiResponse.send(
+        res,
+        result,
+        "A verification code was sent to your administrator email.",
+      );
+    }
+
+    const { user, token } = result;
 
     // Set the secure cookie
     res.cookie("token", token, cookieOptions);
 
     return ApiResponse.send(res, user, "Login successful");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function verifyLoginChallengeController(req, res, next) {
+  try {
+    const { user, token } = await authService.verifyLoginChallengeService(
+      req.body,
+    );
+    res.cookie("token", token, cookieOptions);
+    return ApiResponse.send(res, user, "Administrator login successful.");
   } catch (error) {
     next(error);
   }
@@ -76,7 +98,8 @@ export async function forgotPasswordController(req, res, next) {
   try {
     await authService.forgotPasswordService(req.body);
 
-    const message = "A password reset link has been sent to your email.";
+    const message =
+      "If that email is registered, a password reset link has been sent.";
     return ApiResponse.send(res, { message }, message);
   } catch (error) {
     next(error);

@@ -1,6 +1,9 @@
 import { verifyToken } from "../utils/jwt.js";
 import { UnauthorizedError } from "../utils/Errors.js";
 import { findUserById } from "../repositories/v1/users/user.repository.js";
+import { ROLES } from "../constants/v1/users/users.constants.js";
+
+const PRIVILEGED_ROLES = new Set([ROLES.ADMIN, ROLES.SUPER_ADMIN]);
 
 /**
  * Authentication Middleware - The "Security Guard"
@@ -8,6 +11,7 @@ import { findUserById } from "../repositories/v1/users/user.repository.js";
  */
 export const authenticate = async (req, res, next) => {
   try {
+    res.set("Cache-Control", "no-store");
     // 1. Look for the JWT token in the HTTP-only cookies
     // Note: We'll name our cookie "token" when we build the login logic later.
     const token = req.cookies.token;
@@ -25,6 +29,16 @@ export const authenticate = async (req, res, next) => {
     const user = await findUserById(decoded.id);
     if (!user) {
       throw new UnauthorizedError("User session not found. Please log in again.");
+    }
+    if ((decoded.sv ?? 0) !== (user.securityVersion ?? 0)) {
+      throw new UnauthorizedError(
+        "This session was invalidated by a security change. Please log in again.",
+      );
+    }
+    if (PRIVILEGED_ROLES.has(user.role) && decoded.mfa !== true) {
+      throw new UnauthorizedError(
+        "Administrator verification is required. Please log in again.",
+      );
     }
 
     req.user = {

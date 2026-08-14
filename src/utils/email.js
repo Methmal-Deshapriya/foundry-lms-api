@@ -70,3 +70,30 @@ export const sendOtpEmail = async (to, code) => {
     `,
   });
 };
+
+export const sendLoginChallengeEmail = async (to, code) => {
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  await getTransporter().sendMail({
+    from,
+    to,
+    subject: "Your Foundry LMS administrator login code",
+    html: `
+      <p>A login was requested for your Foundry LMS administrator account.</p>
+      <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px;">${code}</p>
+      <p>This code expires in 10 minutes. If this was not you, reset your password immediately.</p>
+    `,
+  });
+};
+
+export const sendPasswordChangedEmail = async (to) => {
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  await getTransporter().sendMail({
+    from,
+    to,
+    subject: "Your Foundry LMS password was changed",
+    html: `
+      <p>Your Foundry LMS password was changed successfully.</p>
+      <p>All existing sessions have been invalidated. If you did not make this change, contact Foundry Academy immediately.</p>
+    `,
+  });
+};

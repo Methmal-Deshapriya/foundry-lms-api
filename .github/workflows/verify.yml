@@ -34,6 +34,9 @@ jobs:
       - name: Run automated tests
         run: npm test
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Check OpenAPI and generated Postman artifacts
         run: npm run api:artifacts:check
 

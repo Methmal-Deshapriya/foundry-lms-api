@@ -20,7 +20,12 @@ export const generateToken = (payload) => {
   }
 
   // Create the encrypted token string
-  return jwt.sign(payload, secret, { expiresIn });
+  return jwt.sign(payload, secret, {
+    expiresIn,
+    algorithm: "HS256",
+    issuer: process.env.JWT_ISSUER || "foundry-lms-api",
+    audience: process.env.JWT_AUDIENCE || "foundry-lms-client",
+  });
 };
 
 /**
@@ -38,7 +43,11 @@ export const verifyToken = (token) => {
 
   try {
     // Attempt to decode the token using our master key
-    return jwt.verify(token, secret);
+    return jwt.verify(token, secret, {
+      algorithms: ["HS256"],
+      issuer: process.env.JWT_ISSUER || "foundry-lms-api",
+      audience: process.env.JWT_AUDIENCE || "foundry-lms-client",
+    });
   } catch (error) {
     // If verification fails (expired, tampered, or wrong key),
     // we throw a standardized UnauthorizedError from our foundation.

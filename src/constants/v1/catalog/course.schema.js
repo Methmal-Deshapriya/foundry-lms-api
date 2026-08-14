@@ -7,6 +7,7 @@ import {
   DURATION_UNITS,
   LEARNING_SERVICE_TYPES,
 } from "./catalog.constants.js";
+import { nullableSecureHttpUrlSchema } from "../shared/url.schema.js";
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const optionalStringArray = z.array(z.string().trim().min(1).max(160)).max(30).optional();
@@ -28,7 +29,7 @@ const courseObject = z.object({
   highlights: optionalStringArray,
   skills: optionalStringArray,
   prerequisites: optionalStringArray,
-  thumbnailUrl: z.string().url().nullable().optional(),
+  thumbnailUrl: nullableSecureHttpUrlSchema,
   sortOrder: z.number().int().min(0).optional(),
 });
 

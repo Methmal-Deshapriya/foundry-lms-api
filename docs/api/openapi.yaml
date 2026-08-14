@@ -33,6 +33,19 @@ tags:
 security:
   - cookieAuth: []
 paths:
+  /api/ready:
+    get:
+      tags: [00 System]
+      operationId: readiness
+      summary: Check API database readiness
+      x-access: PUBLIC
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "503":
+          description: Database unavailable
+
   /api/health:
     get:
       tags: [00 System]
@@ -108,6 +121,20 @@ paths:
       security: []
       requestBody:
         $ref: "#/components/requestBodies/Login"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/verify-login-challenge:
+    post:
+      tags: [01 Authentication]
+      operationId: verifyAdministratorLogin
+      summary: Verify administrator login code
+      x-access: PUBLIC
+      description: Consumes a short-lived administrator email challenge and sets the HTTP-only authentication cookie.
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyLoginChallenge"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1095,6 +1122,9 @@ paths:
       summary: List public approved projects
       x-access: PUBLIC
       security: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1131,6 +1161,9 @@ paths:
       operationId: listOwnProjects
       summary: List own projects
       x-access: AUTHENTICATED
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1141,7 +1174,7 @@ paths:
       operationId: getProject
       summary: Get project detail
       x-access: AUTHENTICATED
-      description: Available to the owner, an admin, or anyone when the project is approved and public.
+      description: Available only to the project owner or an administrator. Public approved projects use the separately projected showcase endpoint.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
@@ -1168,6 +1201,9 @@ paths:
       summary: List all projects for review
       x-access: ADMIN
       description: Admin/project-review permission required.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1509,6 +1545,19 @@ components:
               code: { type: string, pattern: "^[0-9]{6}$" }
           example:
             email: "{{registrationEmail}}"
+            code: "{{otpCode}}"
+    VerifyLoginChallenge:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [challengeId, code]
+            properties:
+              challengeId: { type: string, format: uuid }
+              code: { type: string, pattern: "^[0-9]{6}$" }
+          example:
+            challengeId: "{{loginChallengeId}}"
             code: "{{otpCode}}"
     UpdateProfile:
       required: true

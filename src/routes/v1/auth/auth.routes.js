@@ -5,6 +5,7 @@ import {
   forgotPasswordLimiter,
   loginIpLimiter,
   loginLimiter,
+  loginMfaVerificationLimiter,
   otpVerificationLimiter,
   passwordResetLimiter,
   registrationLimiter,
@@ -40,6 +41,12 @@ router.post(
   loginIpLimiter,
   loginLimiter,
   authController.loginController,
+);
+
+router.post(
+  "/verify-login-challenge",
+  loginMfaVerificationLimiter,
+  authController.verifyLoginChallengeController,
 );
 
 /**

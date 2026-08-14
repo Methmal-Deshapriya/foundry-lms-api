@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nullableSecureHttpUrlSchema } from "../shared/url.schema.js";
 
 export const SESSION_REUSE_POLICIES = Object.freeze([
   "SINGLE_COURSE",
@@ -7,15 +8,13 @@ export const SESSION_REUSE_POLICIES = Object.freeze([
 
 export const SESSION_STATUSES = Object.freeze(["DRAFT", "READY", "ARCHIVED"]);
 
-const nullableUrl = z.string().url("Invalid URL format").nullable().optional();
-
 export const sessionContentSchema = z.object({
   title: z.string().trim().min(3).max(180),
   description: z.string().trim().max(5000).nullable().optional(),
-  recordingUrl: nullableUrl,
-  materialUrl: nullableUrl,
-  quizUrl: nullableUrl,
-  feedbackUrl: nullableUrl,
+  recordingUrl: nullableSecureHttpUrlSchema,
+  materialUrl: nullableSecureHttpUrlSchema,
+  quizUrl: nullableSecureHttpUrlSchema,
+  feedbackUrl: nullableSecureHttpUrlSchema,
   durationMinutes: z.number().int().min(1).max(10080).nullable().optional(),
   reusePolicy: z.enum(SESSION_REUSE_POLICIES),
 });
