@@ -2,6 +2,7 @@ import { verifyToken } from "../utils/jwt.js";
 import { UnauthorizedError } from "../utils/Errors.js";
 import { findUserById } from "../repositories/v1/users/user.repository.js";
 import { ROLES } from "../constants/v1/users/users.constants.js";
+import { clearAuthCookie } from "../config/authCookie.js";
 
 const PRIVILEGED_ROLES = new Set([ROLES.ADMIN, ROLES.SUPER_ADMIN]);
 
@@ -50,8 +51,7 @@ export const authenticate = async (req, res, next) => {
     // 4. Everything is good! Move to the next middleware or controller.
     next();
   } catch (error) {
-    // If any error occurs (missing token, invalid token, etc.), 
-    // we pass it to the global error handler.
+    if (error?.statusCode === 401) clearAuthCookie(res);
     next(error);
   }
 };

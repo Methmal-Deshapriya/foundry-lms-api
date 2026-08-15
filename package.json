@@ -11,6 +11,9 @@
     "studio": "prisma studio",
     "seed": "prisma db seed",
     "bootstrap:super-admin": "node prisma/bootstrap-super-admin.js",
+    "auth:cleanup": "node scripts/cleanup-auth-artifacts.js",
+    "db:configure-timeouts": "node scripts/configure-database-timeouts.js",
+    "test:database-timeout": "vitest run src/integration/databaseTimeout.integration.test.js",
     "api:postman": "node scripts/check-api-contract.js && node scripts/generate-postman.js",
     "api:contract:check": "node scripts/check-api-contract.js",
     "api:artifacts:check": "node scripts/check-api-contract.js && node scripts/generate-postman.js --check"

@@ -26,3 +26,27 @@ export const requirePermission = (permission) => {
     }
   };
 };
+
+export const requireAnyPermission = (...permissions) => {
+  if (permissions.length === 0 || permissions.some((permission) => !permission)) {
+    throw new Error("requireAnyPermission requires at least one permission.");
+  }
+
+  return (req, res, next) => {
+    try {
+      if (!req.user) {
+        throw new UnauthorizedError(
+          "requireAnyPermission middleware used without authentication!",
+        );
+      }
+      if (!permissions.some((permission) => hasPermission(req.user.role, permission))) {
+        throw new ForbiddenError(
+          "Access denied. You do not have permission for this action.",
+        );
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};

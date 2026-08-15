@@ -79,7 +79,7 @@ describe("auth repository transactional security", () => {
       emailVerified: true,
     });
 
-    const user = await verifyEmailWithOtp("student@example.com", "correct", 5);
+    const user = await verifyEmailWithOtp("student@example.com", ["correct"], 5);
     expect(user.emailVerified).toBe(true);
     expect(mocks.transaction.emailOtp.updateMany).toHaveBeenCalled();
     expect(mocks.transaction.user.update).toHaveBeenCalled();

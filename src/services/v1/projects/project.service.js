@@ -9,7 +9,6 @@ import {
 } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
-import { requireEnrollmentAccessService } from "../learning/classroom.service.js";
 import { z } from "zod";
 
 /**
@@ -19,7 +18,7 @@ import { z } from "zod";
 /**
  * Service: Submit a new project (Student).
  */
-export async function submitProjectService(userId, data) {
+export async function submitProjectService(requester, data) {
   // 1. Validation
   const validation = createProjectSchema.safeParse(data);
   if (!validation.success) {
@@ -27,23 +26,11 @@ export async function submitProjectService(userId, data) {
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
 
-  const { enrollmentId, courseId } = validation.data;
-
-  // 2. Access/Ownership Check
-  // Verify enrollment belongs to the user and matches the course.
-  const { enrollment } = await requireEnrollmentAccessService(
-    enrollmentId,
-    { id: userId, role: "STUDENT" },
-    { adminsAllowed: false },
-  );
-  if (enrollment.courseId !== courseId) {
-    throw new ForbiddenError("Invalid enrollment for this project submission.");
-  }
-
-  // 3. Action
-  const project = await projectRepo.create({
+  // Authorization, ownership, and enrollment eligibility are rechecked under
+  // the same enrollment lock used by lifecycle commands.
+  const project = await projectRepo.createForEnrollment(requester, {
     ...validation.data,
-    userId,
+    userId: requester.id,
     status: "PENDING",
   });
 

@@ -84,3 +84,8 @@ jobs:
 
       - name: Run populated learning pipeline
         run: npm run test:pipeline
+
+      - name: Prove PostgreSQL statement timeout upper bound
+        env:
+          DB_STATEMENT_TIMEOUT_MS: "1500"
+        run: npm run test:database-timeout

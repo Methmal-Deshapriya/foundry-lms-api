@@ -218,7 +218,7 @@ describe("batch service", () => {
         { status: "ACTIVE" },
         "actor-1",
       ),
-    ).rejects.toThrow(/only to cancel or archive/i);
+    ).rejects.toThrow(/only to cancel/i);
     expect(batchRepo.transitionStatus).not.toHaveBeenCalled();
   });
 });

@@ -12,6 +12,7 @@ import {
   manualEnrollmentSchema,
   updateEnrollmentSchema,
 } from "../../../constants/v1/enrollments/enrollment.schema.js";
+import { selfHistoryPageSchema } from "../../../constants/v1/shared/pagination.schema.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import {
   ENROLLMENT_STATUS,
@@ -376,10 +377,19 @@ export async function updateEnrollmentService(enrollmentId, data, actorId) {
   return enrollmentModel.toAdminEnrollmentResponse(updated);
 }
 
-export async function getMyEnrollmentsService(userId) {
-  return enrollmentModel.toMyEnrollmentListResponse(
-    await enrollmentRepo.findUserEnrollments(userId),
-  );
+export async function getMyEnrollmentsService(userId, query = {}) {
+  const filters = parse(selfHistoryPageSchema, query);
+  const rows = await enrollmentRepo.findUserEnrollments(userId, filters);
+  const hasMore = rows.length > filters.limit;
+  const pageRows = rows.slice(0, filters.limit);
+  return {
+    enrollments: enrollmentModel.toMyEnrollmentListResponse(pageRows),
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore ? pageRows.at(-1)?.id ?? null : null,
+    },
+  };
 }
 
 function decodeRosterCursor(filters, scopeType, scopeId) {

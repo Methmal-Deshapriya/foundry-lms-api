@@ -200,9 +200,11 @@ async function assertCompletionMutationAllowed(
   if (
     enrollment.source !== "ADMIN" ||
     enrollment.paymentStatus !== "COMPLETED" ||
-    !["ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.batch?.status)
+    enrollment.batch?.status !== "ACTIVE"
   ) {
-    throw new ConflictError("This enrollment does not currently allow learning updates.");
+    throw new ConflictError(
+      "Learning progress can be changed only while the batch is active.",
+    );
   }
   const delivery = await transaction.batchSession.findUnique({
     where: {

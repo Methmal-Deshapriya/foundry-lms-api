@@ -82,6 +82,14 @@ export async function createPasswordResetToken({ userId, tokenHash, expiresAt })
   });
 }
 
+export async function invalidateUserSessions(userId) {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { securityVersion: { increment: 1 } },
+    select: { id: true, securityVersion: true },
+  });
+}
+
 export async function resetPasswordWithToken(tokenHash, hashedPassword) {
   try {
     return await prisma.$transaction(async (transaction) => {
@@ -161,7 +169,7 @@ export async function replaceEmailOtp({ userId, codeHash, expiresAt }) {
   });
 }
 
-export async function verifyEmailWithOtp(email, codeHash, maxAttempts) {
+export async function verifyEmailWithOtp(email, codeHashes, maxAttempts) {
   const result = await prisma.$transaction(async (transaction) => {
     const initialUser = await transaction.user.findUnique({
       where: { email },
@@ -188,7 +196,7 @@ export async function verifyEmailWithOtp(email, codeHash, maxAttempts) {
     });
     if (!otp) return { kind: "EXPIRED" };
     if (otp.attempts >= maxAttempts) return { kind: "LOCKED" };
-    if (otp.codeHash !== codeHash) {
+    if (!codeHashes.includes(otp.codeHash)) {
       await transaction.emailOtp.update({
         where: { id: otp.id },
         data: { attempts: { increment: 1 } },
@@ -245,7 +253,7 @@ export async function createLoginChallenge({ userId, codeHash, expiresAt }) {
   });
 }
 
-export async function verifyLoginChallenge(id, codeHash, maxAttempts) {
+export async function verifyLoginChallenge(id, codeHashes, maxAttempts) {
   const result = await prisma.$transaction(async (transaction) => {
     await acquireTransactionLock(transaction, `login-mfa:${id}`);
     const challenge = await transaction.loginChallenge.findUnique({
@@ -256,7 +264,7 @@ export async function verifyLoginChallenge(id, codeHash, maxAttempts) {
       return { kind: "EXPIRED" };
     }
     if (challenge.attempts >= maxAttempts) return { kind: "LOCKED" };
-    if (challenge.codeHash !== codeHash) {
+    if (!codeHashes.includes(challenge.codeHash)) {
       await transaction.loginChallenge.update({
         where: { id },
         data: { attempts: { increment: 1 } },
@@ -287,4 +295,61 @@ export async function verifyLoginChallenge(id, codeHash, maxAttempts) {
     throw new ValidationError("Incorrect code. Please try again.", "code");
   }
   return result.user;
+}
+
+export async function cleanupExpiredAuthArtifacts(cutoff, batchSize) {
+  return prisma.$transaction(async (transaction) => {
+    // Interactive transactions use one database connection. Keep these operations
+    // explicitly sequential so the transaction remains short and predictable.
+    const emailOtps = await transaction.emailOtp.findMany({
+      where: {
+        OR: [
+          { expiresAt: { lte: cutoff } },
+          { verifiedAt: { not: null, lte: cutoff } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: batchSize,
+    });
+    const loginChallenges = await transaction.loginChallenge.findMany({
+      where: {
+        OR: [
+          { expiresAt: { lte: cutoff } },
+          { usedAt: { not: null, lte: cutoff } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: batchSize,
+    });
+    const resetTokens = await transaction.passwordResetToken.findMany({
+      where: {
+        OR: [
+          { expiresAt: { lte: cutoff } },
+          { usedAt: { not: null, lte: cutoff } },
+        ],
+      },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: batchSize,
+    });
+
+    const otpResult = await transaction.emailOtp.deleteMany({
+      where: { id: { in: emailOtps.map(({ id }) => id) } },
+    });
+    const challengeResult = await transaction.loginChallenge.deleteMany({
+      where: { id: { in: loginChallenges.map(({ id }) => id) } },
+    });
+    const resetResult = await transaction.passwordResetToken.deleteMany({
+      where: { id: { in: resetTokens.map(({ id }) => id) } },
+    });
+
+    return {
+      emailOtps: otpResult.count,
+      loginChallenges: challengeResult.count,
+      passwordResetTokens: resetResult.count,
+      total: otpResult.count + challengeResult.count + resetResult.count,
+    };
+  });
 }

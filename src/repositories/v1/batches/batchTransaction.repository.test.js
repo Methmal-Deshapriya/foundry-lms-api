@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => {
       findMany: vi.fn(),
       findUnique: vi.fn(),
     },
-    enrollment: { count: vi.fn() },
+    enrollment: { count: vi.fn(), updateMany: vi.fn() },
   };
   const root = {
     $transaction: vi.fn(async (callback) => callback(transaction)),
@@ -121,6 +121,7 @@ describe("batch transactional repository contracts", () => {
     mocks.transaction.batchSession.create.mockResolvedValue({});
     mocks.transaction.batchSession.update.mockResolvedValue({});
     mocks.transaction.batch.update.mockResolvedValue({});
+    mocks.transaction.enrollment.updateMany.mockResolvedValue({ count: 2 });
   });
 
   it("locks curriculum before batch and rejects a cross-course delivery without writing", async () => {
@@ -273,6 +274,28 @@ describe("batch transactional repository contracts", () => {
       where: { id: batchId },
       data: { status: "COMPLETED" },
     });
+    expect(lockKeys()).toEqual([`curriculum:${courseId}`, `batch:${batchId}`]);
+  });
+
+  it("atomically cancels remaining active enrollments when a batch is cancelled", async () => {
+    mocks.transaction.batch.findUnique
+      .mockResolvedValueOnce({ courseId })
+      .mockResolvedValueOnce({ status: "ACTIVE" });
+    mocks.root.batch.findUnique.mockResolvedValue({
+      id: batchId,
+      courseId,
+      status: "CANCELLED",
+      course: { category: { serviceType: "BOOTCAMPS" } },
+      _count: { enrollments: 2 },
+    });
+
+    const result = await transitionStatus(batchId, "ACTIVE", "CANCELLED");
+
+    expect(mocks.transaction.enrollment.updateMany).toHaveBeenCalledWith({
+      where: { batchId, status: "ACTIVE" },
+      data: { status: "CANCELLED", completedAt: null },
+    });
+    expect(result.cancelledEnrollmentCount).toBe(2);
     expect(lockKeys()).toEqual([`curriculum:${courseId}`, `batch:${batchId}`]);
   });
 

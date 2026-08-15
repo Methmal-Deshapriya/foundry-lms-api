@@ -13,7 +13,10 @@ import {
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import { generateToken } from "../../../utils/jwt.js";
 import { generateResetToken, hashResetToken } from "../../../utils/resetToken.js";
-import { generateOtp, hashOtp } from "../../../utils/otp.js";
+import {
+  generateOtp,
+  hashOtpCandidates,
+} from "../../../utils/otp.js";
 import {
   sendLoginChallengeEmail,
   sendPasswordChangedEmail,
@@ -101,10 +104,22 @@ export async function registerService(userData) {
   // 5. Generate an OTP, persist only its hash, email the raw code
   const { code, codeHash, expiresAt } = generateOtp();
   await authRepo.replaceEmailOtp({ userId: newUser.id, codeHash, expiresAt });
-  await sendOtpEmail(newUser.email, code);
+  let verificationEmailSent = true;
+  try {
+    await sendOtpEmail(newUser.email, code);
+  } catch (error) {
+    verificationEmailSent = false;
+    Logger.error("Registration verification email delivery failed", {
+      userId: newUser.id,
+      message: error?.message,
+    });
+  }
 
   // 6. Return the safe (unverified) user — no token, no cookie
-  return authModel.toUserResponse(newUser);
+  return {
+    ...authModel.toUserResponse(newUser),
+    verificationEmailSent,
+  };
 }
 
 /**
@@ -218,6 +233,10 @@ export async function forgotPasswordService(payload) {
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, 300 - (Date.now() - startedAt))));
 }
 
+export async function logoutService(userId) {
+  await authRepo.invalidateUserSessions(userId);
+}
+
 /**
  * Service: Reset a user's password using a valid reset token.
  * @param {object} payload - { token, newPassword }
@@ -263,7 +282,7 @@ export async function verifyOtpService(payload) {
   // 2. Look up the user and their currently-active OTP
   const verifiedUser = await authRepo.verifyEmailWithOtp(
     email,
-    hashOtp(code),
+    hashOtpCandidates(code),
     MAX_OTP_ATTEMPTS,
   );
 
@@ -313,7 +332,7 @@ export async function verifyLoginChallengeService(payload) {
   const { challengeId, code } = validation.data;
   const user = await authRepo.verifyLoginChallenge(
     challengeId,
-    hashOtp(code),
+    hashOtpCandidates(code),
     MAX_OTP_ATTEMPTS,
   );
   if (!PRIVILEGED_ROLES.has(user.role)) {

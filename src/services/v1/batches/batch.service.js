@@ -21,9 +21,9 @@ import { assertCourseAcceptsOperationalChanges } from "../catalog/courseLifecycl
 import { assertCohortService } from "../catalog/learningServicePolicy.service.js";
 
 const ALLOWED_STATUS_TRANSITIONS = Object.freeze({
-  DRAFT: ["ENROLLING", "CANCELLED", "ARCHIVED"],
-  ENROLLING: ["DRAFT", "ACTIVE", "CANCELLED", "ARCHIVED"],
-  ACTIVE: ["COMPLETED", "CANCELLED", "ARCHIVED"],
+  DRAFT: ["ENROLLING", "CANCELLED"],
+  ENROLLING: ["DRAFT", "ACTIVE", "CANCELLED"],
+  ACTIVE: ["COMPLETED", "CANCELLED"],
   COMPLETED: ["ARCHIVED"],
   CANCELLED: ["ARCHIVED"],
   ARCHIVED: [],
@@ -177,16 +177,16 @@ export async function updateBatchStatusService(batchId, data, actorId) {
     isCatalogArchived(batch) &&
     !(
       (batch.status === "ACTIVE" &&
-        ["COMPLETED", "CANCELLED", "ARCHIVED"].includes(status)) ||
+        ["COMPLETED", "CANCELLED"].includes(status)) ||
       (["DRAFT", "ENROLLING"].includes(batch.status) &&
-        ["CANCELLED", "ARCHIVED"].includes(status))
+        status === "CANCELLED")
     )
   ) {
     throw new ConflictError(
-      "Archived catalog records allow active batches to finish and non-terminal batches only to cancel or archive.",
+      "Archived catalog records allow active batches to finish and non-terminal batches only to cancel. A batch can be archived only after it is completed or cancelled.",
     );
   }
-  const { batch: updated, completionReadiness } =
+  const { batch: updated, completionReadiness, cancelledEnrollmentCount = 0 } =
     await batchRepo.transitionStatus(batchId, batch.status, status, {
       requireCompletionReadiness: status === "COMPLETED",
     });
@@ -201,6 +201,7 @@ export async function updateBatchStatusService(batchId, data, actorId) {
       newStatus: status,
       courseId: batch.courseId,
       completionReadiness,
+      cancelledEnrollmentCount,
     },
   });
   return { ...toBatchResponse(updated), completionReadiness };

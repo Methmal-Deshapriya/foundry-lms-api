@@ -8,8 +8,7 @@ import { ROLES } from "../../../constants/v1/users/users.constants.js";
 
 export async function submitProject(req, res, next) {
   try {
-    const userId = req.user.id;
-    const project = await projectService.submitProjectService(userId, req.body);
+    const project = await projectService.submitProjectService(req.user, req.body);
     return ApiResponse.send(res, project, "Project submitted successfully", 201);
   } catch (error) {
     next(error);

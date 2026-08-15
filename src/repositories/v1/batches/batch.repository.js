@@ -582,11 +582,19 @@ export async function transitionStatus(
       ) {
         await freezeDeliveryHistoryInTransaction(transaction, batchId);
       }
+      let cancelledEnrollmentCount = 0;
+      if (nextStatus === "CANCELLED") {
+        const cancellation = await transaction.enrollment.updateMany({
+          where: { batchId, status: "ACTIVE" },
+          data: { status: "CANCELLED", completedAt: null },
+        });
+        cancelledEnrollmentCount = cancellation.count;
+      }
       await transaction.batch.update({
         where: { id: batchId },
         data: { status: nextStatus },
       });
-      return { completionReadiness };
+      return { completionReadiness, cancelledEnrollmentCount };
     });
     return { batch: await findById(batchId), ...result };
   } catch (error) {

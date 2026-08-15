@@ -52,9 +52,9 @@ router.post(
 /**
  * @route   POST /v1/auth/logout
  * @desc    Log out a user
- * @access  Public
+ * @access  Private
  */
-router.post("/logout", authController.logoutController);
+router.post("/logout", authenticate, authController.logoutController);
 
 /**
  * @route   GET /v1/auth/me

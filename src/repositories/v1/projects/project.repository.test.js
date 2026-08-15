@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
-    studentProject: { findUnique: vi.fn(), update: vi.fn() },
+    studentProject: { findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
+    enrollment: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
   };
   return {
     transaction,
@@ -17,6 +19,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("../../../utils/prisma.js", () => ({ default: mocks.prisma }));
 
 import {
+  createForEnrollment,
   findPublicById,
   review,
   updatePendingOwned,
@@ -90,5 +93,80 @@ describe("project repository security boundaries", () => {
     );
     expect(result.previous.title).toBe("Reviewed content");
     expect(result.project.status).toBe("APPROVED");
+  });
+
+  it("locks and rechecks enrollment ownership before project submission", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockResolvedValueOnce({ courseId: "course-1", batchId: "batch-1" })
+      .mockResolvedValue({
+        id: "enrollment-1",
+        userId: "student-1",
+        courseId: "course-1",
+        batchId: "batch-1",
+        source: "ADMIN",
+        status: "ACTIVE",
+        paymentStatus: "COMPLETED",
+        batch: { status: "ACTIVE" },
+        course: { category: { serviceType: "BOOTCAMPS" } },
+      });
+    mocks.transaction.user.findUnique.mockResolvedValue({
+      id: "student-1",
+      role: "STUDENT",
+      emailVerified: true,
+    });
+    mocks.transaction.studentProject.create.mockResolvedValue({ id: "project-1" });
+
+    await createForEnrollment(
+      { id: "student-1", role: "STUDENT" },
+      {
+        enrollmentId: "enrollment-1",
+        courseId: "course-1",
+        userId: "student-1",
+        title: "Project",
+      },
+    );
+
+    const lockKeys = mocks.transaction.$queryRawUnsafe.mock.calls.map(
+      ([, key]) => key,
+    );
+    expect(lockKeys).toEqual([
+      "curriculum:course-1",
+      "batch:batch-1",
+      "enrollment:enrollment-1",
+    ]);
+    expect(mocks.transaction.studentProject.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects submission when cancellation won the enrollment lock", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockResolvedValueOnce({ courseId: "course-1", batchId: null })
+      .mockResolvedValue({
+        userId: "student-1",
+        courseId: "course-1",
+        batchId: null,
+        source: "SELF",
+        status: "CANCELLED",
+        paymentStatus: "NOT_REQUIRED",
+        batch: null,
+        course: { category: { serviceType: "FREE_LEARNING" } },
+      });
+    mocks.transaction.user.findUnique.mockResolvedValue({
+      id: "student-1",
+      role: "STUDENT",
+      emailVerified: true,
+    });
+
+    await expect(
+      createForEnrollment(
+        { id: "student-1", role: "STUDENT" },
+        {
+          enrollmentId: "enrollment-1",
+          courseId: "course-1",
+          userId: "student-1",
+          title: "Project",
+        },
+      ),
+    ).rejects.toThrow(/does not allow/i);
+    expect(mocks.transaction.studentProject.create).not.toHaveBeenCalled();
   });
 });

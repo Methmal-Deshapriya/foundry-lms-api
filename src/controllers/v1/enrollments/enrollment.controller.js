@@ -63,7 +63,10 @@ export async function updateEnrollmentController(req, res, next) {
 
 export async function getMyEnrollmentsController(req, res, next) {
   try {
-    const enrollments = await enrollmentService.getMyEnrollmentsService(req.user.id);
+    const enrollments = await enrollmentService.getMyEnrollmentsService(
+      req.user.id,
+      req.query,
+    );
     return ApiResponse.send(res, enrollments, "Your enrollments fetched successfully");
   } catch (error) {
     next(error);

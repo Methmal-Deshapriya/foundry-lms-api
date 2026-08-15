@@ -23,7 +23,7 @@ export async function create(data) {
  * @param {number} offset - Number of records to skip.
  * @returns {Promise<object>} { total, logs }
  */
-export async function findAndCount(filters, limit = 50, offset = 0) {
+export async function findAndCount(filters, limit = 50, cursor = null) {
   // 1. Build the dynamic 'where' object for Prisma
   const where = {};
 
@@ -35,8 +35,8 @@ export async function findAndCount(filters, limit = 50, offset = 0) {
   // Handle Date range filtering
   if (filters.from || filters.to) {
     where.createdAt = {};
-    if (filters.from) where.createdAt.gte = new Date(filters.from);
-    if (filters.to) where.createdAt.lte = new Date(filters.to);
+    if (filters.from) where.createdAt.gte = filters.from;
+    if (filters.to) where.createdAt.lte = filters.to;
   }
 
   // 2. Execute count and findMany in a single transaction for consistency
@@ -47,9 +47,9 @@ export async function findAndCount(filters, limit = 50, offset = 0) {
       include: {
         actor: true, // Fetch actor details (name, email) for human readability
       },
-      orderBy: { createdAt: "desc" }, // Most recent first
-      take: Number(limit),
-      skip: Number(offset),
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     }),
   ]);
 

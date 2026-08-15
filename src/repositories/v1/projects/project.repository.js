@@ -143,10 +143,72 @@ export async function review(id, data) {
   }
 }
 
-export async function create(data) {
+export async function createForEnrollment(requester, data) {
   try {
-    return await prisma.studentProject.create({
-      data,
+    return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.enrollment.findUnique({
+        where: { id: data.enrollmentId },
+        select: { courseId: true, batchId: true },
+      });
+      if (!initial) throw new NotFoundError("Enrollment not found.");
+      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
+      if (initial.batchId) {
+        await acquireTransactionLock(transaction, `batch:${initial.batchId}`);
+      }
+      await acquireTransactionLock(
+        transaction,
+        `enrollment:${data.enrollmentId}`,
+      );
+
+      const user = await transaction.user.findUnique({
+        where: { id: requester.id },
+        select: { id: true, role: true, emailVerified: true },
+      });
+      const enrollment = await transaction.enrollment.findUnique({
+        where: { id: data.enrollmentId },
+        include: {
+          course: { include: { category: true } },
+          batch: true,
+        },
+      });
+      if (!user || user.role !== "STUDENT" || !user.emailVerified) {
+        throw new ForbiddenError(
+          "Only a currently verified student can submit a project.",
+        );
+      }
+      if (
+        !enrollment ||
+        enrollment.userId !== requester.id ||
+        enrollment.courseId !== data.courseId ||
+        !["ACTIVE", "COMPLETED"].includes(enrollment.status)
+      ) {
+        throw new ForbiddenError(
+          "The selected enrollment does not allow this project submission.",
+        );
+      }
+      if (enrollment.batchId) {
+        if (
+          enrollment.source !== "ADMIN" ||
+          enrollment.paymentStatus !== "COMPLETED" ||
+          !["ACTIVE", "COMPLETED", "ARCHIVED"].includes(
+            enrollment.batch?.status,
+          )
+        ) {
+          throw new ForbiddenError(
+            "The selected paid enrollment does not currently allow project submission.",
+          );
+        }
+      } else if (
+        enrollment.source !== "SELF" ||
+        enrollment.paymentStatus !== "NOT_REQUIRED" ||
+        enrollment.course.category.serviceType !== "FREE_LEARNING"
+      ) {
+        throw new ForbiddenError(
+          "The selected self-paced enrollment is not valid.",
+        );
+      }
+
+      return transaction.studentProject.create({ data });
     });
   } catch (error) {
     throw handlePrismaError(error);

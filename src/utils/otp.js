@@ -21,6 +21,21 @@ export const generateOtp = () => {
   return { code, codeHash, expiresAt };
 };
 
+function otpHmacKeys() {
+  const configured = process.env.OTP_HMAC_KEYS?.trim();
+  const entries = configured
+    ? configured.split(",").map((entry) => entry.trim()).filter(Boolean)
+    : [`dev:${process.env.JWT_SECRET ?? "foundry-development-otp-key-change-me"}`];
+
+  return entries.map((entry) => {
+    const separator = entry.indexOf(":");
+    if (separator < 1 || separator === entry.length - 1) {
+      throw new Error("OTP_HMAC_KEYS contains an invalid version:secret entry.");
+    }
+    return { version: entry.slice(0, separator), secret: entry.slice(separator + 1) };
+  });
+}
+
 /**
  * Hash a raw OTP code so it can be looked up/stored without ever
  * persisting the value that was actually emailed to the user.
@@ -28,8 +43,16 @@ export const generateOtp = () => {
  * @returns {string}
  */
 export const hashOtp = (code) => {
-  return crypto.createHash("sha256").update(code).digest("hex");
+  const { version, secret } = otpHmacKeys()[0];
+  const digest = crypto.createHmac("sha256", secret).update(code).digest("hex");
+  return `${version}:${digest}`;
 };
+
+export const hashOtpCandidates = (code) =>
+  otpHmacKeys().map(({ version, secret }) => {
+    const digest = crypto.createHmac("sha256", secret).update(code).digest("hex");
+    return `${version}:${digest}`;
+  });
 
 /**
  * Check whether a domain has any mail servers configured.

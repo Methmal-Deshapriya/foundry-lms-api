@@ -2,7 +2,10 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import prisma from "./utils/prisma.js";
+import { checkDatabaseReadiness } from "./utils/prisma.js";
+import { checkEmailReadiness } from "./utils/email.js";
+import { checkRateLimitStoreReadiness } from "./config/rateLimitStore.js";
+import Logger from "./utils/logger.js";
 
 // 1. Import Shared Foundations
 import { ApiResponse } from "./utils/responseHandler.js";
@@ -22,6 +25,7 @@ import enrollmentRoutes from "./routes/v1/enrollments/enrollment.routes.js";
 import projectRoutes from "./routes/v1/projects/project.routes.js";
 import auditRoutes from "./routes/v1/audit/audit.routes.js";
 import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
+import { requestContext } from "./middlewares/requestContext.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -31,9 +35,9 @@ if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
   app.set("trust proxy", trustProxyHops);
 }
 
-// 3. Base Middlewares
-app.use(express.json());
-app.use(cookieParser());
+// 3. Base Middlewares. Security and CORS run before body parsing so malformed
+// requests receive the same protective headers as successful requests.
+app.use(requestContext);
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -48,6 +52,8 @@ app.use(
     credentials: true,
   }),
 );
+app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser());
 
 // 4. Register Module Routes
 app.use("/api/v1/auth", (req, res, next) => {
@@ -70,27 +76,56 @@ app.use("/api/postman", apiArtifactRoutes);
 
 // 5. Health Check
 app.get("/api/health", (req, res) => {
+  res.set("Cache-Control", "no-store");
   return ApiResponse.send(res, {
     status: "UP",
-    message: "Foundry LMS Server is running 🚀",
+    message: "Foundry LMS Server is running",
   });
 });
 
 app.get("/api/ready", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const checkSmtp =
+    process.env.NODE_ENV === "production" ||
+    process.env.READINESS_CHECK_SMTP === "true";
   try {
-    await prisma.$transaction(
-      (transaction) => transaction.$queryRaw`SELECT 1`,
-      { maxWait: 1_000, timeout: 2_000 },
-    );
-    return ApiResponse.send(res, { status: "READY", database: "UP" });
-  } catch {
+    const databaseCheck = checkDatabaseReadiness(2_000);
+    const emailCheck = checkSmtp ? checkEmailReadiness() : Promise.resolve();
+    const rateLimitStoreCheck = checkRateLimitStoreReadiness();
+    const [, , rateLimitStore] = await Promise.all([
+      databaseCheck,
+      emailCheck,
+      rateLimitStoreCheck,
+    ]);
+    return ApiResponse.send(res, {
+      status: "READY",
+      database: "UP",
+      smtp: checkSmtp ? "UP" : "NOT_CHECKED",
+      rateLimitStore,
+    });
+  } catch (error) {
+    Logger.error("Dependency readiness check failed", error);
     return ApiResponse.send(
       res,
-      { status: "NOT_READY", database: "DOWN" },
-      "Database readiness check failed",
+      {
+        status: "NOT_READY",
+        database: "UNKNOWN",
+        smtp: checkSmtp ? "UNKNOWN" : "NOT_CHECKED",
+        rateLimitStore: "UNKNOWN",
+      },
+      "Dependency readiness check failed",
       503,
     );
   }
+});
+
+app.use((req, res) => {
+  return res.status(404).json({
+    success: false,
+    error: "API route not found.",
+    code: "ROUTE_NOT_FOUND",
+    requestId: req.requestId,
+  });
 });
 
 // 6. Global Error Handler (CRITICAL: Must be at the very bottom)

@@ -246,6 +246,12 @@ describe.runIf(runDatabaseIntegration)("learning delivery populated API pipeline
     expect(enrollmentResponse.status).toBe(201);
     const enrollmentId = enrollmentResponse.body.data.id;
 
+    const directArchive = await request(app)
+      .patch(`/api/v1/batches/${ids.paidBatch}/status`)
+      .set("Cookie", adminCookie())
+      .send({ status: "ARCHIVED" });
+    expect(directArchive.status).toBe(409);
+
     const completion = await request(app)
       .post(
         `/api/v1/enrollments/${enrollmentId}/sessions/${ids.paidCourseSession}/complete`,
@@ -332,11 +338,36 @@ describe.runIf(runDatabaseIntegration)("learning delivery populated API pipeline
     expect(blocked.status).toBe(409);
     expect(blocked.body.code).toBe("CATALOG_ARCHIVE_BLOCKED");
 
-    const cancelled = await request(app)
-      .patch(`/api/v1/batches/${ids.archiveBatch}/status`)
+    const enrollmentResponse = await request(app)
+      .post(`/api/v1/batches/${ids.archiveBatch}/enrollments`)
+      .set("Cookie", adminCookie())
+      .send({ userId: ids.paidStudent, paymentStatus: "COMPLETED" });
+    expect(enrollmentResponse.status).toBe(201);
+    const enrollmentId = enrollmentResponse.body.data.id;
+
+    const cancelledEnrollment = await request(app)
+      .patch(`/api/v1/enrollments/${enrollmentId}`)
       .set("Cookie", adminCookie())
       .send({ status: "CANCELLED" });
-    expect(cancelled.status).toBe(200);
+    expect(cancelledEnrollment.status).toBe(200);
+
+    const [cancelledBatch, reactivation] = await Promise.all([
+      request(app)
+        .patch(`/api/v1/batches/${ids.archiveBatch}/status`)
+        .set("Cookie", adminCookie())
+        .send({ status: "CANCELLED" }),
+      request(app)
+        .patch(`/api/v1/enrollments/${enrollmentId}`)
+        .set("Cookie", adminCookie())
+        .send({ status: "ACTIVE" }),
+    ]);
+    expect(cancelledBatch.status).toBe(200);
+    expect([200, 409]).toContain(reactivation.status);
+    const finalEnrollment = await prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+      select: { status: true },
+    });
+    expect(finalEnrollment?.status).toBe("CANCELLED");
 
     const archived = await request(app)
       .patch(`/api/v1/courses/${ids.archiveCourse}/archive`)

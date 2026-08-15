@@ -176,10 +176,27 @@ export async function findById(id) {
 export async function update(id, expected, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.enrollment.findUnique({
+        where: { id },
+        select: { courseId: true, batchId: true },
+      });
+      if (!initial) throw new NotFoundError("Enrollment not found.");
+
+      // Match the lifecycle writers' global order so a batch transition and an
+      // enrollment command cannot validate mutually stale parent/child state.
+      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
+      if (initial.batchId) {
+        await acquireTransactionLock(transaction, `batch:${initial.batchId}`);
+      }
       await acquireTransactionLock(transaction, `enrollment:${id}`);
       const current = await transaction.enrollment.findUnique({
         where: { id },
-        select: { status: true, paymentStatus: true },
+        include: {
+          user: { select: { role: true, emailVerified: true } },
+          course: { include: { category: true } },
+          batch: true,
+          certificates: { where: { status: "ISSUED" }, select: { id: true } },
+        },
       });
       if (!current) throw new NotFoundError("Enrollment not found.");
       if (
@@ -190,6 +207,72 @@ export async function update(id, expected, data) {
           "The enrollment or payment status changed while this request was being processed. Refresh and try again.",
         );
       }
+
+      if (current.courseId !== initial.courseId || current.batchId !== initial.batchId) {
+        throw new ConflictError(
+          "The enrollment scope changed while this request was being processed. Refresh and try again.",
+        );
+      }
+
+      const nextStatus = data.status ?? current.status;
+      const nextPaymentStatus = data.paymentStatus ?? current.paymentStatus;
+      const changesPayment = [
+        "paymentStatus",
+        "externalPaymentReference",
+        "paymentNote",
+      ].some((field) => Object.hasOwn(data, field));
+
+      if (current.source === "ADMIN") {
+        const batch = current.batch;
+        if (!batch || batch.courseId !== current.courseId) {
+          throw new ConflictError("Paid enrollment has an invalid batch relationship.");
+        }
+        if (["COMPLETED", "ARCHIVED"].includes(batch.status)) {
+          throw new ConflictError(
+            "Enrollment history is frozen after its batch is completed or archived.",
+          );
+        }
+        if (batch.status === "CANCELLED") {
+          const isCancellationResolution =
+            current.status === "ACTIVE" &&
+            nextStatus === "CANCELLED" &&
+            !changesPayment;
+          if (!isCancellationResolution) {
+            throw new ConflictError(
+              "A cancelled batch allows only cancellation of a remaining active enrollment.",
+            );
+          }
+        }
+        if (batch.status === "DRAFT") {
+          throw new ConflictError("Draft batches cannot contain managed enrollments.");
+        }
+        if (nextStatus === "COMPLETED" && batch.status !== "ACTIVE") {
+          throw new ConflictError(
+            "A paid enrollment can be completed only while its batch is active.",
+          );
+        }
+        if (current.status === "CANCELLED" && nextStatus === "ACTIVE") {
+          const catalogAvailable =
+            current.course.status === "PUBLISHED" &&
+            current.course.category.status === "PUBLISHED";
+          if (
+            !["ENROLLING", "ACTIVE"].includes(batch.status) ||
+            !catalogAvailable ||
+            current.user.role !== "STUDENT" ||
+            !current.user.emailVerified
+          ) {
+            throw new ConflictError(
+              "This enrollment cannot be reactivated because its student, catalog, or batch is no longer eligible.",
+            );
+          }
+        }
+        if (nextStatus === "COMPLETED" && nextPaymentStatus !== "COMPLETED") {
+          throw new ConflictError(
+            "Paid enrollment cannot be completed before payment is completed.",
+          );
+        }
+      }
+
       return transaction.enrollment.update({
         where: { id },
         data,
@@ -202,11 +285,13 @@ export async function update(id, expected, data) {
   }
 }
 
-export async function findUserEnrollments(userId) {
+export async function findUserEnrollments(userId, { limit, cursor }) {
   return prisma.enrollment.findMany({
     where: { userId },
     include: enrollmentInclude,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 }
 

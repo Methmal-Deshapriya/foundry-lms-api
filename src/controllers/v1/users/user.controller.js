@@ -25,12 +25,7 @@ export async function updateProfileController(req, res, next) {
  */
 export async function getAllUsersController(req, res, next) {
   try {
-    const { role, limit = 10, offset = 0 } = req.query;
-    const result = await userService.getAllUsersService(
-      { role },
-      Number(limit),
-      Number(offset)
-    );
+    const result = await userService.getAllUsersService(req.query);
 
     return ApiResponse.send(res, result, "User list fetched successfully");
   } catch (error) {

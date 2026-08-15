@@ -73,7 +73,7 @@ export async function findAllAdmin({ q = "", status, limit = 50, cursor = null }
   });
 }
 
-export async function findUserCertificates(userId) {
+export async function findUserCertificates(userId, { limit, cursor }) {
   return await prisma.certificate.findMany({
     where: {
       enrollment: {
@@ -87,7 +87,9 @@ export async function findUserCertificates(userId) {
         },
       },
     },
-    orderBy: { issuedDate: "desc" },
+    orderBy: [{ issuedDate: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 }
 

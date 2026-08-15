@@ -11,6 +11,7 @@ import { ValidationError, NotFoundError, ConflictError, ForbiddenError } from ".
 import { transformCertificate } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
+import { selfHistoryPageSchema } from "../../../constants/v1/shared/pagination.schema.js";
 
 const CERTIFICATE_CODE_ATTEMPTS = 5;
 
@@ -180,9 +181,24 @@ export async function verifyCertificateService(certificateCode) {
 /**
  * Service: Get my certificates (Student).
  */
-export async function getMyCertificatesService(userId) {
-  const certificates = await certificateRepo.findUserCertificates(userId);
-  return certificates.map(transformCertificate);
+export async function getMyCertificatesService(userId, query = {}) {
+  const validation = selfHistoryPageSchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path[0]);
+  }
+  const filters = validation.data;
+  const rows = await certificateRepo.findUserCertificates(userId, filters);
+  const hasMore = rows.length > filters.limit;
+  const pageRows = rows.slice(0, filters.limit);
+  return {
+    certificates: pageRows.map(transformCertificate),
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore ? pageRows.at(-1)?.id ?? null : null,
+    },
+  };
 }
 
 /**
