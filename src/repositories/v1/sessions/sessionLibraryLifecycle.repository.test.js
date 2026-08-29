@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("../../../utils/prisma.js", () => ({ default: mocks.prisma }));
 
-import { restoreSafely, updateSafely } from "./sessionLibrary.repository.js";
+import { archiveMany, restoreSafely, updateSafely } from "./sessionLibrary.repository.js";
 
 const sessionId = "90000000-0000-4000-8000-000000000010";
 const courseId = "90000000-0000-4000-8000-000000000011";
@@ -84,5 +84,26 @@ describe("session library lifecycle transaction", () => {
       code: "CONFLICT",
     });
     expect(mocks.transaction.session.update).not.toHaveBeenCalled();
+  });
+
+  it("archives multiple sessions independently, isolating a failure to its own row", async () => {
+    const otherId = "90000000-0000-4000-8000-000000000099";
+    mocks.transaction.session.findUnique
+      // session 1: lock lookup, then full read
+      .mockResolvedValueOnce({ courseSessions: [] })
+      .mockResolvedValueOnce(sessionFixture({ id: sessionId, status: "READY" }))
+      // session 2: not found
+      .mockResolvedValueOnce(null);
+    mocks.transaction.session.update.mockResolvedValue(
+      sessionFixture({ id: sessionId, status: "ARCHIVED" }),
+    );
+
+    const results = await archiveMany([sessionId, otherId]);
+
+    expect(results).toEqual([
+      expect.objectContaining({ id: sessionId, status: "ARCHIVED", changed: true }),
+      expect.objectContaining({ id: otherId, status: "FAILED" }),
+    ]);
+    expect(mocks.transaction.session.update).toHaveBeenCalledOnce();
   });
 });

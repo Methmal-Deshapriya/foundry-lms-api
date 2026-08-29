@@ -16,7 +16,21 @@ const usageInclude = {
       orderIndex: true,
       deliveryStatus: true,
       retiredAt: true,
-      course: { select: { title: true, code: true, courseGroupId: true } },
+      course: {
+        select: {
+          title: true,
+          code: true,
+          courseGroupId: true,
+          categoryId: true,
+          courseGroup: { select: { title: true } },
+          category: {
+            select: {
+              title: true,
+              service: { select: { slug: true, title: true } },
+            },
+          },
+        },
+      },
     },
   },
 };
@@ -34,6 +48,19 @@ export async function findAdmin(filters, limit, offset) {
       ]
     : [];
 
+  // Postgres array columns have no "element contains substring" filter in
+  // Prisma's query builder (only exact has/hasSome/hasEvery), so a partial,
+  // as-you-type tag match is resolved with a small raw pre-query and folded
+  // back in as an `id IN (...)` condition alongside every other filter.
+  const tagMatchIds = filters.tag
+    ? (
+        await prisma.$queryRaw`
+          SELECT id FROM sessions
+          WHERE EXISTS (SELECT 1 FROM unnest(tags) AS tag WHERE tag ILIKE ${`%${filters.tag}%`})
+        `
+      ).map((row) => row.id)
+    : null;
+
   const where = {
     ...(filters.attachableCourseId
       ? { status: "READY" }
@@ -48,6 +75,7 @@ export async function findAdmin(filters, limit, offset) {
           ],
         }
       : {}),
+    ...(tagMatchIds ? { id: { in: tagMatchIds } } : {}),
     ...(attachabilityConditions.length > 0
       ? { AND: attachabilityConditions }
       : {}),
@@ -57,7 +85,7 @@ export async function findAdmin(filters, limit, offset) {
     prisma.session.count({ where }),
     prisma.session.findMany({
       where,
-      orderBy: [{ updatedAt: "desc" }, { title: "asc" }],
+      orderBy: [{ createdAt: "desc" }, { title: "asc" }],
       take: limit,
       skip: offset,
       include: usageInclude,
@@ -201,6 +229,50 @@ export async function restoreSafely(id) {
   } catch (error) {
     rethrowSessionMutationError(error);
   }
+}
+
+export async function duplicate(id) {
+  const source = await prisma.session.findUnique({ where: { id } });
+  if (!source) throw new NotFoundError("Session not found.");
+  try {
+    return await prisma.session.create({
+      data: {
+        title: `${source.title} (Copy)`,
+        description: source.description,
+        recordingUrl: source.recordingUrl,
+        materialUrl: source.materialUrl,
+        quizUrl: source.quizUrl,
+        feedbackUrl: source.feedbackUrl,
+        durationMinutes: source.durationMinutes,
+        tags: source.tags,
+        status: "DRAFT",
+      },
+      include: usageInclude,
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+export async function archiveMany(ids) {
+  const results = [];
+  for (const id of ids) {
+    try {
+      const { previous, session, changed } = await archiveSafely(id);
+      results.push({ id, status: "ARCHIVED", title: previous.title, changed, session });
+    } catch (error) {
+      if (
+        error instanceof ConflictError ||
+        error instanceof NotFoundError ||
+        error instanceof ValidationError
+      ) {
+        results.push({ id, status: "FAILED", error: error.message });
+        continue;
+      }
+      throw error;
+    }
+  }
+  return results;
 }
 
 export async function removePermanently(id) {

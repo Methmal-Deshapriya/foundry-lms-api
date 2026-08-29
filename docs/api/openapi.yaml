@@ -803,6 +803,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/SessionStatusFilter"
+        - $ref: "#/components/parameters/SessionTagFilter"
         - $ref: "#/components/parameters/AttachableCourseIdFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -820,6 +821,19 @@ paths:
       responses:
         "201":
           $ref: "#/components/responses/Created"
+
+  /api/v1/sessions/bulk-archive:
+    post:
+      tags: [07 Session Library]
+      operationId: bulkArchiveSessions
+      summary: Archive multiple Session Library resources
+      x-access: ADMIN
+      description: Archives up to 100 sessions in one request. Each session is archived independently; a failure on one does not block the others.
+      requestBody:
+        $ref: "#/components/requestBodies/BulkArchiveSessions"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
 
   /api/v1/sessions/{sessionId}:
     get:
@@ -880,6 +894,19 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+
+  /api/v1/sessions/{sessionId}/duplicate:
+    post:
+      tags: [07 Session Library]
+      operationId: duplicateSession
+      summary: Duplicate a session resource as a new draft
+      x-access: ADMIN
+      description: Copies content fields (title suffixed "(Copy)", description, URLs, duration, tags) into a brand-new session. Never copies course usage, delivery state, or completion history. The copy always starts DRAFT regardless of the source's status.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
 
   /api/v1/courses/{courseId}/curriculum:
     get:
@@ -1544,6 +1571,12 @@ components:
       description: Return Ready library sessions with no active or retired relationship to this course. Retired relationships are restored from curriculum history instead of the picker.
       schema: { type: string, format: uuid }
       example: "{{courseId}}"
+    SessionTagFilter:
+      name: tag
+      in: query
+      description: Return sessions with a tag containing this text (case-insensitive partial match).
+      schema: { type: string, maxLength: 40 }
+      example: jav
     EnrollmentStatusFilter:
       name: status
       in: query
@@ -1821,6 +1854,21 @@ components:
             title: Understanding HTTP Requests and Responses
             durationMinutes: 75
             status: READY
+    BulkArchiveSessions:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ids]
+            properties:
+              ids:
+                type: array
+                items: { type: string, format: uuid }
+                minItems: 1
+                maxItems: 100
+          example:
+            ids: ["{{sessionId}}"]
     AttachCourseSession:
       required: true
       content:
@@ -2257,6 +2305,10 @@ components:
         quizUrl: { type: string, format: uri, nullable: true }
         feedbackUrl: { type: string, format: uri, nullable: true }
         durationMinutes: { type: integer, minimum: 1, nullable: true }
+        tags:
+          type: array
+          items: { type: string, maxLength: 40 }
+          maxItems: 10
         status:
           type: string
           enum: [DRAFT, READY]
@@ -2272,6 +2324,10 @@ components:
         quizUrl: { type: string, format: uri, nullable: true }
         feedbackUrl: { type: string, format: uri, nullable: true }
         durationMinutes: { type: integer, minimum: 1, nullable: true }
+        tags:
+          type: array
+          items: { type: string, maxLength: 40 }
+          maxItems: 10
         status:
           type: string
           enum: [DRAFT, READY]

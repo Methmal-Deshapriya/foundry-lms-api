@@ -8,6 +8,8 @@ vi.mock("../../../repositories/v1/sessions/sessionLibrary.repository.js", () => 
   archiveSafely: vi.fn(),
   restoreSafely: vi.fn(),
   removePermanently: vi.fn(),
+  duplicate: vi.fn(),
+  archiveMany: vi.fn(),
 }));
 
 vi.mock("../audit/audit.service.js", () => ({
@@ -18,8 +20,10 @@ import * as sessionRepo from "../../../repositories/v1/sessions/sessionLibrary.r
 import { recordActionService } from "../audit/audit.service.js";
 import {
   archiveSessionLibraryItemService,
+  bulkArchiveSessionLibraryItemsService,
   createSessionLibraryItemService,
   deleteSessionLibraryItemPermanentlyService,
+  duplicateSessionLibraryItemService,
   listSessionLibraryService,
   updateSessionLibraryItemService,
 } from "./sessionLibrary.service.js";
@@ -179,5 +183,63 @@ describe("Session Library service", () => {
       ),
     ).rejects.toThrow(/curriculum or delivery history/i);
     expect(sessionRepo.removePermanently).not.toHaveBeenCalled();
+  });
+
+  it("duplicates a session as a new draft copy", async () => {
+    sessionRepo.findById.mockResolvedValue(sessionFixture({ title: "Original lesson" }));
+    sessionRepo.duplicate.mockResolvedValue(
+      sessionFixture({
+        id: "20000000-0000-4000-8000-000000000009",
+        title: "Original lesson (Copy)",
+        status: "DRAFT",
+      }),
+    );
+
+    const result = await duplicateSessionLibraryItemService(
+      sessionFixture().id,
+      "actor-1",
+    );
+
+    expect(result.title).toBe("Original lesson (Copy)");
+    expect(result.status).toBe("DRAFT");
+    expect(sessionRepo.duplicate).toHaveBeenCalledWith(sessionFixture().id);
+    expect(recordActionService).toHaveBeenCalledOnce();
+  });
+
+  it("rejects duplicating a session that no longer exists", async () => {
+    sessionRepo.findById.mockResolvedValue(null);
+
+    await expect(
+      duplicateSessionLibraryItemService("missing-id", "actor-1"),
+    ).rejects.toThrow(/not found/i);
+    expect(sessionRepo.duplicate).not.toHaveBeenCalled();
+  });
+
+  it("archives multiple sessions in bulk and reports per-item results", async () => {
+    const idOne = "30000000-0000-4000-8000-000000000001";
+    const idTwo = "30000000-0000-4000-8000-000000000002";
+    sessionRepo.archiveMany.mockResolvedValue([
+      {
+        id: idOne,
+        status: "ARCHIVED",
+        title: "Lesson one",
+        changed: true,
+        session: sessionFixture({ courseSessions: [] }),
+      },
+      { id: idTwo, status: "FAILED", error: "Session not found." },
+    ]);
+
+    const result = await bulkArchiveSessionLibraryItemsService(
+      { ids: [idOne, idTwo] },
+      "actor-1",
+    );
+
+    expect(result.summary).toEqual({ requested: 2, archived: 1, failed: 1 });
+    expect(result.results).toEqual([
+      { id: idOne, status: "ARCHIVED", error: undefined },
+      { id: idTwo, status: "FAILED", error: "Session not found." },
+    ]);
+    // one audit event per archived session, plus one bulk summary event
+    expect(recordActionService).toHaveBeenCalledTimes(2);
   });
 });

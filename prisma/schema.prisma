@@ -336,12 +336,14 @@ model Session {
   feedbackUrl     String?       @map("feedback_url")
   durationMinutes Int?          @map("duration_minutes")
   status          SessionStatus @default(DRAFT)
+  tags            String[]      @default([])
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
 
   courseSessions CourseSession[]
 
   @@index([status, updatedAt(sort: Desc)])
+  @@index([tags], type: Gin)
   @@map("sessions")
 }
 

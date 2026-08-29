@@ -17,6 +17,11 @@ router.post(
   requirePermission(PERMISSIONS.SESSIONS_MANAGE_LIBRARY),
   sessionController.createSession,
 );
+router.post(
+  "/bulk-archive",
+  requirePermission(PERMISSIONS.SESSIONS_MANAGE_LIBRARY),
+  sessionController.bulkArchiveSessions,
+);
 router.get(
   "/:id",
   requirePermission(PERMISSIONS.SESSIONS_VIEW_LIBRARY),
@@ -36,6 +41,11 @@ router.patch(
   "/:id/unarchive",
   requirePermission(PERMISSIONS.SESSIONS_MANAGE_LIBRARY),
   sessionController.unarchiveSession,
+);
+router.post(
+  "/:id/duplicate",
+  requirePermission(PERMISSIONS.SESSIONS_MANAGE_LIBRARY),
+  sessionController.duplicateSession,
 );
 router.delete(
   "/:id",

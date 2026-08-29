@@ -1688,6 +1688,12 @@
                   "disabled": true
                 },
                 {
+                  "key": "tag",
+                  "value": "jav",
+                  "description": "Return sessions with a tag containing this text (case-insensitive partial match).",
+                  "disabled": true
+                },
+                {
                   "key": "attachableCourseId",
                   "value": "{{courseId}}",
                   "description": "Return Ready library sessions with no active or retired relationship to this course. Retired relationships are restored from curriculum history instead of the picker.",
@@ -1760,6 +1766,44 @@
               }
             }
           ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Archive multiple Session Library resources",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{sessionId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/bulk-archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "bulk-archive"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nArchives up to 100 sessions in one request. Each session is archived independently; a failure on one does not block the others.\n\nOperation ID: bulkArchiveSessions"
+          }
         },
         {
           "name": "[ADMIN + SUPER ADMIN] Get Session Library detail and usage impact",
@@ -1912,6 +1956,32 @@
               ]
             },
             "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: unarchiveSession"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Duplicate a session resource as a new draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/duplicate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}",
+                "duplicate"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCopies content fields (title suffixed \"(Copy)\", description, URLs, duration, tags) into a brand-new session. Never copies course usage, delivery state, or completion history. The copy always starts DRAFT regardless of the source's status.\n\nOperation ID: duplicateSession"
           }
         }
       ]

@@ -9,10 +9,13 @@ import { CustomError } from "../utils/Errors.js";
  * NOTE: Express knows this is an error handler because it has 4 arguments.
  */
 const errorHandler = (err, req, res, next) => {
-  // 1. Log the error for the developer to see in the terminal
-  Logger.error(`${req.method} ${req.url} - Error: ${err.message}`, {
+  // 1. Log the error for the developer to see in the terminal. `originalError`
+  // (set by handlePrismaError) carries the real, unsanitized failure detail
+  // for errors whose public-facing message is deliberately generic.
+  const diagnosticError = err.originalError || err;
+  Logger.error(`${req.method} ${req.url} - Error: ${diagnosticError.message}`, {
     requestId: req.requestId,
-    stack: err.stack, // The "map" to where the error happened in code
+    stack: diagnosticError.stack, // The "map" to where the error happened in code
     details: err.details || null,
   });
 

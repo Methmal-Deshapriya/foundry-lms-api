@@ -172,8 +172,11 @@ export function handlePrismaError(prismaError) {
   if (prismaError?.code === "P2025") {
     return new NotFoundError("Record not found");
   }
+  // The raw Prisma message (query dumps, schema field names, internal
+  // argument shape) must never reach the client. Keep it only on
+  // `originalError` for server-side logging; the public message stays generic.
   return new DatabaseError(
-    prismaError?.message || "Database operation failed",
+    "A database error occurred. Please try again.",
     prismaError
   );
 }

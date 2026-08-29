@@ -1,5 +1,6 @@
 import * as sessionRepo from "../../../repositories/v1/sessions/sessionLibrary.repository.js";
 import {
+  bulkArchiveSessionsSchema,
   createSessionLibrarySchema,
   sessionLibraryFiltersSchema,
   updateSessionLibrarySchema,
@@ -36,6 +37,11 @@ function toSessionLibraryResponse(session) {
       courseTitle: courseSession.course?.title,
       courseCode: courseSession.course?.code,
       courseGroupId: courseSession.course?.courseGroupId,
+      courseGroupTitle: courseSession.course?.courseGroup?.title,
+      categoryId: courseSession.course?.categoryId,
+      categoryTitle: courseSession.course?.category?.title,
+      serviceSlug: courseSession.course?.category?.service?.slug,
+      serviceTitle: courseSession.course?.category?.service?.title,
       orderIndex: courseSession.orderIndex,
       retiredAt: courseSession.retiredAt,
       deliveryStatus: courseSession.deliveryStatus,
@@ -137,6 +143,59 @@ export async function unarchiveSessionLibraryItemService(id, actorId) {
     },
   });
   return toSessionLibraryResponse(session);
+}
+
+export async function duplicateSessionLibraryItemService(id, actorId) {
+  const source = await sessionRepo.findById(id);
+  if (!source) throw new NotFoundError("Session not found.");
+  const session = await sessionRepo.duplicate(id);
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.SESSION_DUPLICATED,
+    entityType: ENTITY_TYPES.SESSION,
+    entityId: session.id,
+    description: `Session "${source.title}" duplicated as "${session.title}".`,
+    metadata: { sourceSessionId: id },
+  });
+  return toSessionLibraryResponse(session);
+}
+
+export async function bulkArchiveSessionLibraryItemsService(data, actorId) {
+  const { ids } = parse(bulkArchiveSessionsSchema, data);
+  const results = await sessionRepo.archiveMany(ids);
+
+  for (const result of results) {
+    if (result.status !== "ARCHIVED" || !result.changed) continue;
+    recordActionService({
+      actorUserId: actorId,
+      action: AUDIT_ACTIONS.SESSION_ARCHIVED,
+      entityType: ENTITY_TYPES.SESSION,
+      entityId: result.id,
+      description: `Session "${result.title}" archived. Existing delivery access is preserved.`,
+      metadata: {
+        affectedCourses: result.session.courseSessions?.length ?? 0,
+      },
+    });
+  }
+
+  const archivedCount = results.filter(({ status }) => status === "ARCHIVED").length;
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.SESSION_BULK_ARCHIVED,
+    entityType: ENTITY_TYPES.SESSION,
+    entityId: null,
+    description: `${archivedCount} of ${ids.length} library session(s) archived in bulk.`,
+    metadata: { requestedCount: ids.length, archivedCount, failedCount: ids.length - archivedCount },
+  });
+
+  return {
+    results: results.map(({ id, status, error }) => ({ id, status, error })),
+    summary: {
+      requested: ids.length,
+      archived: archivedCount,
+      failed: ids.length - archivedCount,
+    },
+  };
 }
 
 export async function deleteSessionLibraryItemPermanentlyService(id, actorId) {
