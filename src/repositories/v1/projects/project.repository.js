@@ -148,13 +148,17 @@ export async function createForEnrollment(requester, data) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
-        select: { courseId: true, batchId: true },
+        select: {
+          courseId: true,
+          course: { select: { category: { select: { serviceId: true } } } },
+        },
       });
       if (!initial) throw new NotFoundError("Enrollment not found.");
-      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
-      if (initial.batchId) {
-        await acquireTransactionLock(transaction, `batch:${initial.batchId}`);
-      }
+      await acquireTransactionLock(
+        transaction,
+        `learning-service:${initial.course.category.serviceId}`,
+      );
+      await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(
         transaction,
         `enrollment:${data.enrollmentId}`,
@@ -167,8 +171,7 @@ export async function createForEnrollment(requester, data) {
       const enrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         include: {
-          course: { include: { category: true } },
-          batch: true,
+          course: { include: { category: { include: { service: true } } } },
         },
       });
       if (!user || user.role !== "STUDENT" || !user.emailVerified) {
@@ -186,25 +189,22 @@ export async function createForEnrollment(requester, data) {
           "The selected enrollment does not allow this project submission.",
         );
       }
-      if (enrollment.batchId) {
-        if (
-          enrollment.source !== "ADMIN" ||
-          enrollment.paymentStatus !== "COMPLETED" ||
-          !["ACTIVE", "COMPLETED", "ARCHIVED"].includes(
-            enrollment.batch?.status,
-          )
-        ) {
-          throw new ForbiddenError(
-            "The selected paid enrollment does not currently allow project submission.",
-          );
-        }
-      } else if (
-        enrollment.source !== "SELF" ||
-        enrollment.paymentStatus !== "NOT_REQUIRED" ||
-        enrollment.course.category.serviceType !== "FREE_LEARNING"
-      ) {
+      if (!["OPEN_ACTIVE", "CLOSED_ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.course.status)) {
+        throw new ForbiddenError("The selected course does not currently allow project submission.");
+      }
+      const policy = enrollment.course.category.service;
+      const validAccess = policy.accessType === "FREE"
+        ? policy.enrollmentMode === "SELF" &&
+          policy.paymentRequirement === "NOT_REQUIRED" &&
+          enrollment.source === "SELF" &&
+          enrollment.paymentStatus === "NOT_REQUIRED"
+        : policy.enrollmentMode === "ADMIN" &&
+          policy.paymentRequirement === "REQUIRED" &&
+          enrollment.source === "ADMIN" &&
+          enrollment.paymentStatus === "COMPLETED";
+      if (!validAccess) {
         throw new ForbiddenError(
-          "The selected self-paced enrollment is not valid.",
+          "The selected enrollment does not have valid learning access.",
         );
       }
 

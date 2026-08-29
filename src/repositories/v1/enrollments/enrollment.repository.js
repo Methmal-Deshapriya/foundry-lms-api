@@ -1,350 +1,123 @@
 import prisma from "../../../utils/prisma.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
-import {
-  BatchCapacityReachedError,
-  ConflictError,
-  NotFoundError,
-  handlePrismaError,
-} from "../../../utils/Errors.js";
+import { CourseCapacityReachedError, ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 
-const courseInclude = { category: true };
 const enrollmentInclude = {
   user: true,
   enrolledBy: true,
-  course: { include: courseInclude },
-  batch: true,
-  certificates: {
-    where: { status: "ISSUED" },
-    orderBy: { issuedDate: "desc" },
-    take: 1,
-  },
+  course: { include: { category: { include: { service: true } }, courseGroup: true } },
+  certificates: { where: { status: "ISSUED" }, orderBy: { issuedDate: "desc" }, take: 1 },
 };
 
-export async function createPaid(batchId, userId, actorId, payment) {
+export function findById(id) { return prisma.enrollment.findUnique({ where: { id }, include: enrollmentInclude }); }
+
+export async function createPaid(courseId, userId, actorId, payment) {
   try {
-    const enrollmentId = await prisma.$transaction(async (transaction) => {
-      const initialBatch = await transaction.batch.findUnique({
-        where: { id: batchId },
-        select: { courseId: true },
-      });
-      if (!initialBatch) throw new NotFoundError("Batch not found.");
-      await acquireTransactionLock(
-        transaction,
-        `curriculum:${initialBatch.courseId}`,
-      );
-      await acquireTransactionLock(transaction, `batch-enrollment:${batchId}`);
-      const batch = await transaction.batch.findUnique({
-        where: { id: batchId },
-        include: { course: { include: { category: true } } },
-      });
-      const student = await transaction.user.findUnique({
-        where: { id: userId },
-        select: { role: true, emailVerified: true },
-      });
-      if (!batch) throw new NotFoundError("Batch not found.");
-      if (!student || student.role !== "STUDENT" || !student.emailVerified) {
-        throw new ConflictError(
-          "The account must remain a verified student while enrollment is created.",
-          "INELIGIBLE_STUDENT",
-        );
+    const id = await prisma.$transaction(async (transaction) => {
+      const initialCourse = await transaction.course.findUnique({ where: { id: courseId }, select: { category: { select: { serviceId: true } } } });
+      if (!initialCourse) throw new NotFoundError("Course not found.");
+      await acquireTransactionLock(transaction, `learning-service:${initialCourse.category.serviceId}`);
+      await acquireTransactionLock(transaction, `course:${courseId}`);
+      await acquireTransactionLock(transaction, `course-enrollment:${courseId}`);
+      const course = await transaction.course.findUnique({ where: { id: courseId }, include: { category: { include: { service: true } }, courseGroup: true } });
+      const student = await transaction.user.findUnique({ where: { id: userId }, select: { role: true, emailVerified: true } });
+      if (!course) throw new NotFoundError("Course not found.");
+      if (!student || student.role !== "STUDENT" || !student.emailVerified) throw new ConflictError("The account must be a verified student.", "INELIGIBLE_STUDENT");
+      if (course.status !== "OPEN_ACTIVE" || course.courseGroup.archivedAt || course.category.status !== "PUBLISHED" || course.category.service.status !== "ACTIVE" || course.category.service.accessType !== "PAID" || course.category.service.courseMode !== "SEASONAL" || course.category.service.enrollmentMode !== "ADMIN" || course.category.service.paymentRequirement !== "REQUIRED") {
+        throw new ConflictError("This course is not accepting enrollment.", "COURSE_ENROLLMENT_CLOSED");
       }
-      if (
-        !["ENROLLING", "ACTIVE"].includes(batch.status) ||
-        batch.course.status !== "PUBLISHED" ||
-        batch.course.category.status !== "PUBLISHED" ||
-        !["BOOTCAMPS", "PRETECH"].includes(batch.course.category.serviceType)
-      ) {
-        throw new ConflictError(
-          "This batch is no longer accepting enrollment.",
-          "BATCH_ENROLLMENT_CLOSED",
-        );
+      if (await transaction.enrollment.findUnique({ where: { userId_courseId: { userId, courseId } } })) throw new ConflictError("Student is already enrolled in this course.");
+      if (course.capacity != null) {
+        const occupied = await transaction.enrollment.count({ where: { courseId, status: { not: "CANCELLED" } } });
+        if (occupied >= course.capacity) throw new CourseCapacityReachedError();
       }
-
-      const existing = await transaction.enrollment.findFirst({
-        where: { userId, batchId },
-        select: { id: true },
-      });
-      if (existing) {
-        throw new ConflictError("Student is already enrolled in this batch.");
-      }
-
-      if (batch.capacity != null) {
-        const occupied = await transaction.enrollment.count({
-          where: { batchId, status: { not: "CANCELLED" } },
-        });
-        if (occupied >= batch.capacity) {
-          throw new BatchCapacityReachedError();
-        }
-      }
-
-      const enrollment = await transaction.enrollment.create({
-        data: {
-          userId,
-          courseId: batch.courseId,
-          batchId,
-          source: "ADMIN",
-          enrolledByUserId: actorId,
-          status: "ACTIVE",
-          ...payment,
-        },
-        select: { id: true },
-      });
+      const enrollment = await transaction.enrollment.create({ data: { userId, courseId, source: "ADMIN", enrolledByUserId: actorId, status: "ACTIVE", ...payment }, select: { id: true } });
       return enrollment.id;
     });
-    return await findById(enrollmentId);
-  } catch (error) {
-    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
-    throw handlePrismaError(error);
-  }
+    return findById(id);
+  } catch (error) { if (error instanceof ConflictError || error instanceof NotFoundError) throw error; throw handlePrismaError(error); }
 }
 
 export async function enrollFree(userId, courseId) {
   try {
     const result = await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-      await acquireTransactionLock(transaction, `free-enrollment:${courseId}`);
+      const initialCourse = await transaction.course.findUnique({ where: { id: courseId }, select: { category: { select: { serviceId: true } } } });
+      if (!initialCourse) throw new ConflictError("This Free Learning course is not open for enrollment.");
+      await acquireTransactionLock(transaction, `learning-service:${initialCourse.category.serviceId}`);
+      await acquireTransactionLock(transaction, `course:${courseId}`);
+      await acquireTransactionLock(transaction, `course-enrollment:${courseId}`);
       const course = await transaction.course.findFirst({
         where: {
           id: courseId,
-          status: "PUBLISHED",
-          accessType: "FREE",
-          enrollmentStatus: "OPEN",
-          category: { status: "PUBLISHED", serviceType: "FREE_LEARNING" },
-          courseSessions: { some: { retiredAt: null } },
+          status: "OPEN_ACTIVE",
+          courseGroup: { archivedAt: null },
+          category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
+          courseSessions: {
+            some: {
+              retiredAt: null,
+              OR: [
+                { deliveryStatus: "RELEASED" },
+                { deliveryStatus: "SCHEDULED", availableAt: { lte: new Date() } },
+              ],
+            },
+          },
         },
         select: { id: true },
       });
-      if (!course) {
-        throw new ConflictError("This Free Learning course is not open for enrollment.");
-      }
-
-      const existing = await transaction.enrollment.findFirst({
-        where: {
-          userId,
-          courseId,
-          batchId: null,
-          source: "SELF",
-        },
-        select: { id: true, status: true },
-      });
+      if (!course) throw new ConflictError("This Free Learning course is not open for enrollment.");
+      const existing = await transaction.enrollment.findUnique({ where: { userId_courseId: { userId, courseId } }, select: { id: true, status: true, source: true } });
       if (existing) {
-        await acquireTransactionLock(transaction, `enrollment:${existing.id}`);
-        const current = await transaction.enrollment.findUnique({
-          where: { id: existing.id },
-          select: { id: true, status: true },
-        });
-        if (!current) throw new NotFoundError("Enrollment not found.");
-        if (current.status !== "CANCELLED") {
-          return { enrollmentId: current.id, outcome: "EXISTING" };
-        }
-
-        await transaction.enrollment.update({
-          where: { id: current.id },
-          data: { status: "ACTIVE", completedAt: null },
-        });
-        return { enrollmentId: current.id, outcome: "REACTIVATED" };
+        if (existing.source !== "SELF") throw new ConflictError("Existing enrollment has an incompatible source.");
+        if (existing.status !== "CANCELLED") return { enrollmentId: existing.id, outcome: "EXISTING" };
+        await transaction.enrollment.update({ where: { id: existing.id }, data: { status: "ACTIVE", completedAt: null } });
+        return { enrollmentId: existing.id, outcome: "REACTIVATED" };
       }
-
-      const enrollment = await transaction.enrollment.create({
-        data: {
-          userId,
-          courseId,
-          batchId: null,
-          source: "SELF",
-          enrolledByUserId: null,
-          status: "ACTIVE",
-          paymentStatus: "NOT_REQUIRED",
-        },
-        select: { id: true },
-      });
+      const enrollment = await transaction.enrollment.create({ data: { userId, courseId, source: "SELF", status: "ACTIVE", paymentStatus: "NOT_REQUIRED" }, select: { id: true } });
       return { enrollmentId: enrollment.id, outcome: "CREATED" };
     });
-    return {
-      enrollment: await findById(result.enrollmentId),
-      outcome: result.outcome,
-    };
-  } catch (error) {
-    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
-    throw handlePrismaError(error);
-  }
-}
-
-export async function findById(id) {
-  return prisma.enrollment.findUnique({ where: { id }, include: enrollmentInclude });
+    return { enrollment: await findById(result.enrollmentId), outcome: result.outcome };
+  } catch (error) { if (error instanceof ConflictError || error instanceof NotFoundError) throw error; throw handlePrismaError(error); }
 }
 
 export async function update(id, expected, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.enrollment.findUnique({
-        where: { id },
-        select: { courseId: true, batchId: true },
-      });
+      const initial = await transaction.enrollment.findUnique({ where: { id }, select: { courseId: true, course: { select: { category: { select: { serviceId: true } } } } } });
       if (!initial) throw new NotFoundError("Enrollment not found.");
-
-      // Match the lifecycle writers' global order so a batch transition and an
-      // enrollment command cannot validate mutually stale parent/child state.
-      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
-      if (initial.batchId) {
-        await acquireTransactionLock(transaction, `batch:${initial.batchId}`);
-      }
+      await acquireTransactionLock(transaction, `learning-service:${initial.course.category.serviceId}`);
+      await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `enrollment:${id}`);
-      const current = await transaction.enrollment.findUnique({
-        where: { id },
-        include: {
-          user: { select: { role: true, emailVerified: true } },
-          course: { include: { category: true } },
-          batch: true,
-          certificates: { where: { status: "ISSUED" }, select: { id: true } },
-        },
-      });
+      const current = await transaction.enrollment.findUnique({ where: { id }, include: { user: true, course: { include: { category: { include: { service: true } } } } } });
       if (!current) throw new NotFoundError("Enrollment not found.");
-      if (
-        current.status !== expected.status ||
-        current.paymentStatus !== expected.paymentStatus
-      ) {
-        throw new ConflictError(
-          "The enrollment or payment status changed while this request was being processed. Refresh and try again.",
-        );
-      }
-
-      if (current.courseId !== initial.courseId || current.batchId !== initial.batchId) {
-        throw new ConflictError(
-          "The enrollment scope changed while this request was being processed. Refresh and try again.",
-        );
-      }
-
+      if (current.status !== expected.status || current.paymentStatus !== expected.paymentStatus) throw new ConflictError("Enrollment state changed. Refresh and try again.");
       const nextStatus = data.status ?? current.status;
-      const nextPaymentStatus = data.paymentStatus ?? current.paymentStatus;
-      const changesPayment = [
-        "paymentStatus",
-        "externalPaymentReference",
-        "paymentNote",
-      ].some((field) => Object.hasOwn(data, field));
-
-      if (current.source === "ADMIN") {
-        const batch = current.batch;
-        if (!batch || batch.courseId !== current.courseId) {
-          throw new ConflictError("Paid enrollment has an invalid batch relationship.");
-        }
-        if (["COMPLETED", "ARCHIVED"].includes(batch.status)) {
-          throw new ConflictError(
-            "Enrollment history is frozen after its batch is completed or archived.",
-          );
-        }
-        if (batch.status === "CANCELLED") {
-          const isCancellationResolution =
-            current.status === "ACTIVE" &&
-            nextStatus === "CANCELLED" &&
-            !changesPayment;
-          if (!isCancellationResolution) {
-            throw new ConflictError(
-              "A cancelled batch allows only cancellation of a remaining active enrollment.",
-            );
-          }
-        }
-        if (batch.status === "DRAFT") {
-          throw new ConflictError("Draft batches cannot contain managed enrollments.");
-        }
-        if (nextStatus === "COMPLETED" && batch.status !== "ACTIVE") {
-          throw new ConflictError(
-            "A paid enrollment can be completed only while its batch is active.",
-          );
-        }
-        if (current.status === "CANCELLED" && nextStatus === "ACTIVE") {
-          const catalogAvailable =
-            current.course.status === "PUBLISHED" &&
-            current.course.category.status === "PUBLISHED";
-          if (
-            !["ENROLLING", "ACTIVE"].includes(batch.status) ||
-            !catalogAvailable ||
-            current.user.role !== "STUDENT" ||
-            !current.user.emailVerified
-          ) {
-            throw new ConflictError(
-              "This enrollment cannot be reactivated because its student, catalog, or batch is no longer eligible.",
-            );
-          }
-        }
-        if (nextStatus === "COMPLETED" && nextPaymentStatus !== "COMPLETED") {
-          throw new ConflictError(
-            "Paid enrollment cannot be completed before payment is completed.",
-          );
-        }
-      }
-
-      return transaction.enrollment.update({
-        where: { id },
-        data,
-        include: enrollmentInclude,
-      });
+      const nextPayment = data.paymentStatus ?? current.paymentStatus;
+      if (["COMPLETED", "ARCHIVED"].includes(current.course.status)) throw new ConflictError("Course history is frozen.");
+      if (nextStatus === "COMPLETED" && !["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(current.course.status)) throw new ConflictError("Enrollment can be completed only while learning is active.");
+      if (current.source === "ADMIN" && nextStatus === "COMPLETED" && nextPayment !== "COMPLETED") throw new ConflictError("Paid enrollment requires completed payment.");
+      if (current.status === "CANCELLED" && nextStatus === "ACTIVE" && (current.course.status !== "OPEN_ACTIVE" || !current.user.emailVerified || current.user.role !== "STUDENT")) throw new ConflictError("Enrollment is no longer eligible for reactivation.");
+      return transaction.enrollment.update({ where: { id }, data, include: enrollmentInclude });
     });
-  } catch (error) {
-    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
-    throw handlePrismaError(error);
-  }
+  } catch (error) { if (error instanceof ConflictError || error instanceof NotFoundError) throw error; throw handlePrismaError(error); }
 }
 
-export async function findUserEnrollments(userId, { limit, cursor }) {
-  return prisma.enrollment.findMany({
-    where: { userId },
-    include: enrollmentInclude,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+export function findUserEnrollments(userId, { limit, cursor }) {
+  return prisma.enrollment.findMany({ where: { userId }, include: enrollmentInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+}
+
+function rosterWhere(courseId, q, status, cursor) {
+  return { courseId, ...(status ? { status } : {}), ...(q ? { user: { OR: [{ email: { contains: q, mode: "insensitive" } }, { firstName: { contains: q, mode: "insensitive" } }, { lastName: { contains: q, mode: "insensitive" } }] } } : {}), ...(cursor ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] } : {}) };
+}
+
+export function findCourseEnrollments(courseId, { q = "", status, limit = 50, cursor = null }) {
+  return prisma.enrollment.findMany({ where: rosterWhere(courseId, q, status, cursor), include: enrollmentInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1 });
+}
+
+export function searchEligibleStudents(courseId, q, limit, cursor) {
+  return prisma.user.findMany({
+    where: { role: "STUDENT", emailVerified: true, enrollments: { none: { courseId } }, ...(q ? { OR: [{ email: { contains: q, mode: "insensitive" } }, { firstName: { contains: q, mode: "insensitive" } }, { lastName: { contains: q, mode: "insensitive" } }] } : {}), ...(cursor ? { OR: [{ email: { gt: cursor.email } }, { email: cursor.email, id: { gt: cursor.id } }] } : {}) },
+    orderBy: [{ email: "asc" }, { id: "asc" }],
     take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
-}
-
-function rosterWhere(scope, q, status, cursor) {
-  return {
-    ...scope,
-    ...(status ? { status } : {}),
-    ...(q
-      ? {
-          user: {
-            OR: [
-              { email: { contains: q, mode: "insensitive" } },
-              { firstName: { contains: q, mode: "insensitive" } },
-              { lastName: { contains: q, mode: "insensitive" } },
-            ],
-          },
-        }
-      : {}),
-    ...(cursor
-      ? {
-          AND: [
-            {
-              OR: [
-                { createdAt: { lt: cursor.createdAt } },
-                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
-              ],
-            },
-          ],
-        }
-      : {}),
-  };
-}
-
-export async function findBatchEnrollments(
-  batchId,
-  { q = "", status, limit = 50, cursor = null },
-) {
-  return prisma.enrollment.findMany({
-    where: rosterWhere({ batchId }, q, status, cursor),
-    include: enrollmentInclude,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
-  });
-}
-
-export async function findCourseEnrollments(
-  courseId,
-  { q = "", status, limit = 50, cursor = null },
-) {
-  return prisma.enrollment.findMany({
-    where: rosterWhere({ courseId }, q, status, cursor),
-    include: enrollmentInclude,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
+    select: { id: true, firstName: true, lastName: true, email: true },
   });
 }

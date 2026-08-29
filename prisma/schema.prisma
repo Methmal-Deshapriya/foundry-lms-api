@@ -14,10 +14,30 @@ enum Role {
   SUPER_ADMIN
 }
 
-enum LearningServiceType {
-  BOOTCAMPS
-  PRETECH
-  FREE_LEARNING
+enum LearningAccessType {
+  FREE
+  PAID
+}
+
+enum LearningCourseMode {
+  SEASONAL
+  EVERGREEN
+}
+
+enum LearningEnrollmentMode {
+  ADMIN
+  SELF
+}
+
+enum LearningPaymentRequirement {
+  REQUIRED
+  NOT_REQUIRED
+}
+
+enum LearningServiceStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
 }
 
 enum CatalogStatus {
@@ -41,35 +61,26 @@ enum DurationUnit {
   MONTH
 }
 
-enum CourseAccessType {
-  FREE
-  PAID
-}
-
-enum CourseEnrollmentStatus {
-  COMING_SOON
-  OPEN
-  CLOSED
-}
-
-enum SessionReusePolicy {
-  SINGLE_COURSE
-  REUSABLE
-}
-
 enum SessionStatus {
   DRAFT
   READY
   ARCHIVED
 }
 
-enum BatchStatus {
+enum CourseStatus {
   DRAFT
-  ENROLLING
-  ACTIVE
+  OPEN_ACTIVE
+  CLOSED_ACTIVE
   COMPLETED
   CANCELLED
   ARCHIVED
+}
+
+enum CourseSessionDeliveryStatus {
+  UNRELEASED
+  SCHEDULED
+  RELEASED
+  WITHDRAWN
 }
 
 enum EnrollmentSource {
@@ -102,21 +113,21 @@ enum ProjectStatus {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  firstName     String    @default("") @map("first_name")
-  lastName      String    @default("") @map("last_name")
-  email         String    @unique
-  phone         String?
-  address       String?
-  district      String?
-  dateOfBirth   DateTime? @map("date_of_birth")
-  alStream      String?   @map("al_stream")
-  password      String
-  role          Role      @default(STUDENT)
-  emailVerified Boolean   @default(false) @map("email_verified")
-  securityVersion Int     @default(0) @map("security_version")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  id              String    @id @default(uuid())
+  firstName       String    @default("") @map("first_name")
+  lastName        String    @default("") @map("last_name")
+  email           String    @unique
+  phone           String?
+  address         String?
+  district        String?
+  dateOfBirth     DateTime? @map("date_of_birth")
+  alStream        String?   @map("al_stream")
+  password        String
+  role            Role      @default(STUDENT)
+  emailVerified   Boolean   @default(false) @map("email_verified")
+  securityVersion Int       @default(0) @map("security_version")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
   enrollments         Enrollment[]         @relation("StudentEnrollments")
   managedEnrollments  Enrollment[]         @relation("EnrollmentManager")
@@ -179,59 +190,108 @@ model EmailOtp {
   @@map("email_otps")
 }
 
+model LearningService {
+  id                 String                     @id @default(uuid())
+  key                String                     @unique
+  slug               String                     @unique
+  title              String
+  description        String
+  accessType         LearningAccessType         @map("access_type")
+  courseMode         LearningCourseMode         @map("course_mode")
+  enrollmentMode     LearningEnrollmentMode     @map("enrollment_mode")
+  paymentRequirement LearningPaymentRequirement @map("payment_requirement")
+  status             LearningServiceStatus      @default(DRAFT)
+  sortOrder          Int                        @default(0) @map("sort_order")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at")
+
+  categories Category[]
+
+  @@index([status, sortOrder, title])
+  @@map("learning_services")
+}
+
 model Category {
-  id            String              @id @default(uuid())
-  serviceType   LearningServiceType @map("service_type")
+  id            String        @id @default(uuid())
+  serviceId     String        @map("service_id")
   slug          String
   title         String
   description   String
-  audienceLabel String?             @map("audience_label")
-  visualKey     String              @map("visual_key")
-  badgeLabel    String?             @map("badge_label")
-  status        CatalogStatus       @default(DRAFT)
-  sortOrder     Int                 @default(0) @map("sort_order")
-  createdAt     DateTime            @default(now()) @map("created_at")
-  updatedAt     DateTime            @default(now()) @updatedAt @map("updated_at")
+  audienceLabel String?       @map("audience_label")
+  visualKey     String        @map("visual_key")
+  badgeLabel    String?       @map("badge_label")
+  status        CatalogStatus @default(DRAFT)
+  sortOrder     Int           @default(0) @map("sort_order")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  courses Course[]
+  courseGroups CourseGroup[]
+  courses      Course[]
+  service      LearningService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
-  @@unique([serviceType, slug])
-  @@index([serviceType, status, sortOrder])
+  @@unique([serviceId, slug])
+  @@index([serviceId, status, sortOrder])
   @@map("categories")
 }
 
-model Course {
-  id                 String                 @id @default(uuid())
-  categoryId         String                 @map("category_id")
+model CourseGroup {
+  id                 String    @id @default(uuid())
+  categoryId         String    @map("category_id")
   slug               String
   title              String
-  summary            String
-  description        String
-  level              CourseLevel
-  durationValue      Int?                   @map("duration_value")
-  durationUnit       DurationUnit?          @map("duration_unit")
-  accessType         CourseAccessType       @map("access_type")
-  price              Decimal                @default(0) @db.Decimal(12, 2)
-  currency           String                 @default("LKR")
-  enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status")
-  certificateEnabled Boolean                @map("certificate_enabled")
-  highlights         String[]               @default([])
-  skills             String[]               @default([])
-  prerequisites      String[]               @default([])
-  thumbnailUrl       String?                @map("thumbnail_url")
-  status             CatalogStatus          @default(DRAFT)
-  sortOrder          Int                    @default(0) @map("sort_order")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
+  batchCodePrefix    String    @unique @map("batch_code_prefix")
+  certificateEnabled Boolean   @map("certificate_enabled")
+  archivedAt         DateTime? @map("archived_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
 
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  courses  Course[]
+
+  @@unique([id, categoryId])
+  @@unique([categoryId, slug])
+  @@index([categoryId, archivedAt, title])
+  @@map("course_groups")
+}
+
+model Course {
+  id              String        @id @default(uuid())
+  courseGroupId   String        @map("course_group_id")
+  categoryId      String        @map("category_id")
+  slug            String
+  title           String
+  summary         String
+  description     String
+  level           CourseLevel
+  durationValue   Int?          @map("duration_value")
+  durationUnit    DurationUnit? @map("duration_unit")
+  highlights      String[]      @default([])
+  skills          String[]      @default([])
+  prerequisites   String[]      @default([])
+  thumbnailUrl    String?       @map("thumbnail_url")
+  sortOrder       Int           @default(0) @map("sort_order")
+  intakeKey       String        @map("intake_key")
+  code            String        @unique
+  startDate       DateTime?     @map("start_date") @db.Date
+  expectedEndDate DateTime?     @map("expected_end_date") @db.Date
+  timezone        String        @default("Asia/Colombo")
+  capacity        Int?
+  price           Decimal       @default(0) @db.Decimal(12, 2)
+  currency        String        @default("LKR")
+  status          CourseStatus  @default(DRAFT)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  courseGroup     CourseGroup      @relation(fields: [courseGroupId, categoryId], references: [id, categoryId], onDelete: Restrict)
   category        Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   enrollments     Enrollment[]
   courseSessions  CourseSession[]
-  batches         Batch[]
   studentProjects StudentProject[]
 
-  @@unique([categoryId, slug])
+  @@unique([courseGroupId, intakeKey])
+  @@index([courseGroupId, status, startDate])
   @@index([categoryId, status, sortOrder])
+  @@index([categoryId, status, slug])
   @@map("courses")
 }
 
@@ -239,7 +299,6 @@ model Enrollment {
   id                       String           @id @default(uuid())
   userId                   String           @map("user_id")
   courseId                 String           @map("course_id")
-  batchId                  String?          @map("batch_id")
   source                   EnrollmentSource
   enrolledByUserId         String?          @map("enrolled_by_user_id")
   status                   EnrollmentStatus @default(ACTIVE)
@@ -254,55 +313,53 @@ model Enrollment {
   user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Cascade)
   enrolledBy         User?               @relation("EnrollmentManager", fields: [enrolledByUserId], references: [id], onDelete: SetNull)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  batch              Batch?              @relation(fields: [batchId, courseId], references: [id, courseId], onDelete: Restrict)
   sessionCompletions SessionCompletion[]
   certificates       Certificate[]
   studentProjects    StudentProject[]
 
   @@unique([id, courseId])
-  @@unique([userId, batchId])
+  @@unique([userId, courseId])
   @@index([userId, status])
   @@index([courseId, status])
-  @@index([batchId, status])
   @@index([courseId, createdAt(sort: Desc), id(sort: Desc)])
-  @@index([batchId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([enrolledByUserId])
   @@map("enrollments")
 }
 
 model Session {
-  id              String             @id @default(uuid())
+  id              String        @id @default(uuid())
   title           String
   description     String?
-  recordingUrl    String?            @map("recording_url")
-  materialUrl     String?            @map("material_url")
-  quizUrl         String?            @map("quiz_url")
-  feedbackUrl     String?            @map("feedback_url")
-  durationMinutes Int?               @map("duration_minutes")
-  reusePolicy     SessionReusePolicy @map("reuse_policy")
-  status          SessionStatus      @default(DRAFT)
-  createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at")
+  recordingUrl    String?       @map("recording_url")
+  materialUrl     String?       @map("material_url")
+  quizUrl         String?       @map("quiz_url")
+  feedbackUrl     String?       @map("feedback_url")
+  durationMinutes Int?          @map("duration_minutes")
+  status          SessionStatus @default(DRAFT)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
 
   courseSessions CourseSession[]
 
   @@index([status, updatedAt(sort: Desc)])
-  @@index([reusePolicy, status])
   @@map("sessions")
 }
 
 model CourseSession {
-  id         String    @id @default(uuid())
-  courseId   String    @map("course_id")
-  sessionId  String    @map("session_id")
-  orderIndex Int?      @map("order_index")
-  retiredAt  DateTime? @map("retired_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
+  id                   String                      @id @default(uuid())
+  courseId             String                      @map("course_id")
+  sessionId            String                      @map("session_id")
+  orderIndex           Int?                        @map("order_index")
+  deliveryStatus       CourseSessionDeliveryStatus @default(UNRELEASED) @map("delivery_status")
+  availableAt          DateTime?                   @map("available_at")
+  firstReleasedAt      DateTime?                   @map("first_released_at")
+  retiredAt            DateTime?                   @map("retired_at")
+  historicalOrderIndex Int?                        @map("historical_order_index")
+  createdAt            DateTime                    @default(now()) @map("created_at")
+  updatedAt            DateTime                    @default(now()) @updatedAt @map("updated_at")
 
   course      Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
   session     Session             @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-  batchLinks  BatchSession[]
   completions SessionCompletion[]
 
   @@unique([id, courseId])
@@ -310,50 +367,8 @@ model CourseSession {
   @@unique([courseId, orderIndex])
   @@index([sessionId])
   @@index([courseId, retiredAt, orderIndex])
+  @@index([courseId, deliveryStatus, availableAt])
   @@map("course_sessions")
-}
-
-model Batch {
-  id              String      @id @default(uuid())
-  courseId        String      @map("course_id")
-  name            String
-  code            String      @unique
-  startDate       DateTime    @map("start_date") @db.Date
-  expectedEndDate DateTime    @map("expected_end_date") @db.Date
-  timezone        String      @default("Asia/Colombo")
-  capacity        Int?
-  status          BatchStatus @default(DRAFT)
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at")
-
-  course      Course         @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  sessions    BatchSession[]
-  enrollments Enrollment[]
-
-  @@unique([id, courseId])
-  @@index([courseId, status, startDate])
-  @@map("batches")
-}
-
-model BatchSession {
-  id                   String    @id @default(uuid())
-  batchId              String    @map("batch_id")
-  courseSessionId      String    @map("course_session_id")
-  courseId             String    @map("course_id")
-  historicalOrderIndex Int?      @map("historical_order_index")
-  isReleased           Boolean   @default(false) @map("is_released")
-  availableAt          DateTime? @map("available_at")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
-
-  batch         Batch         @relation(fields: [batchId, courseId], references: [id, courseId], onDelete: Cascade)
-  courseSession CourseSession @relation(fields: [courseSessionId, courseId], references: [id, courseId], onDelete: Restrict)
-
-  @@unique([batchId, courseSessionId])
-  @@index([courseSessionId])
-  @@index([batchId, isReleased, availableAt])
-  @@index([courseId, batchId])
-  @@map("batch_sessions")
 }
 
 model SessionCompletion {

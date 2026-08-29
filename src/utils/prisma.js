@@ -17,6 +17,41 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is missing in environment variables.");
 }
 
+const statementTimeoutMs = Number(process.env.DB_STATEMENT_TIMEOUT_MS ?? 30_000);
+const idleTransactionTimeoutMs = Number(
+  process.env.DB_IDLE_TRANSACTION_TIMEOUT_MS ?? 30_000,
+);
+const interactiveTransactionTimeoutMs = Number(
+  process.env.DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS ?? 15_000,
+);
+const interactiveTransactionMaxWaitMs = Number(
+  process.env.DB_INTERACTIVE_TRANSACTION_MAX_WAIT_MS ?? 5_000,
+);
+const connectionTimeoutMs = Number(
+  process.env.DB_CONNECTION_TIMEOUT_MS ?? 2_000,
+);
+
+if (
+  !Number.isFinite(interactiveTransactionTimeoutMs) ||
+  interactiveTransactionTimeoutMs <= 0 ||
+  interactiveTransactionTimeoutMs >= idleTransactionTimeoutMs
+) {
+  throw new Error(
+    "DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS must be positive and lower than DB_IDLE_TRANSACTION_TIMEOUT_MS.",
+  );
+}
+
+if (
+  !Number.isFinite(interactiveTransactionMaxWaitMs) ||
+  interactiveTransactionMaxWaitMs <= 0
+) {
+  throw new Error("DB_INTERACTIVE_TRANSACTION_MAX_WAIT_MS must be positive.");
+}
+
+if (!Number.isFinite(connectionTimeoutMs) || connectionTimeoutMs <= 0) {
+  throw new Error("DB_CONNECTION_TIMEOUT_MS must be positive.");
+}
+
 const clientOptions = {
   // Global Omit API (Prisma 7.0+ GA) ensures password hashes are never
   // returned unless an authentication query explicitly opts back in.
@@ -25,14 +60,18 @@ const clientOptions = {
       password: true,
     },
   },
+  // Remote development databases can need more than Prisma's five-second
+  // default for a lock-protected workflow. Keep the application deadline
+  // below PostgreSQL's idle-transaction deadline so the client fails first.
+  transactionOptions: {
+    maxWait: interactiveTransactionMaxWaitMs,
+    timeout: interactiveTransactionTimeoutMs,
+  },
 };
 
 const usesAccelerate = /^(prisma|prisma\+postgres):\/\//.test(databaseUrl);
-const statementTimeoutMs = Number(process.env.DB_STATEMENT_TIMEOUT_MS ?? 30_000);
-const idleTransactionTimeoutMs = Number(
-  process.env.DB_IDLE_TRANSACTION_TIMEOUT_MS ?? 15_000,
-);
 const directDatabaseUrl = process.env.DIRECT_DATABASE_URL;
+const databaseSchema = process.env.DATABASE_SCHEMA;
 const poolConfig = (connectionString) => ({
   connectionString,
   statement_timeout: statementTimeoutMs,
@@ -40,7 +79,7 @@ const poolConfig = (connectionString) => ({
   idle_in_transaction_session_timeout: idleTransactionTimeoutMs,
   // Readiness promises a two-second dependency boundary, so connection
   // acquisition must never outlive that contract either.
-  connectionTimeoutMillis: Math.min(statementTimeoutMs, 2_000),
+  connectionTimeoutMillis: Math.min(statementTimeoutMs, connectionTimeoutMs),
   application_name: "foundry-lms-api",
 });
 
@@ -54,7 +93,10 @@ const prisma = usesAccelerate
     )
   : new PrismaClient({
       ...clientOptions,
-      adapter: new PrismaPg(applicationPool, { disposeExternalPool: false }),
+      adapter: new PrismaPg(applicationPool, {
+        disposeExternalPool: false,
+        ...(databaseSchema ? { schema: databaseSchema } : {}),
+      }),
     });
 
 export async function checkDatabaseReadiness(deadlineMs = 2_000) {

@@ -13,6 +13,7 @@
     "bootstrap:super-admin": "node prisma/bootstrap-super-admin.js",
     "auth:cleanup": "node scripts/cleanup-auth-artifacts.js",
     "db:configure-timeouts": "node scripts/configure-database-timeouts.js",
+    "db:verify:learning-services": "node scripts/verify-learning-service-data.js",
     "test:database-timeout": "vitest run src/integration/databaseTimeout.integration.test.js",
     "api:postman": "node scripts/check-api-contract.js && node scripts/generate-postman.js",
     "api:contract:check": "node scripts/check-api-contract.js",
@@ -49,5 +50,8 @@
     "supertest": "^7.2.2",
     "vitest": "^4.1.7",
     "yaml": "^2.9.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2"
   }
 }

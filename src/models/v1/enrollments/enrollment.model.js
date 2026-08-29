@@ -1,19 +1,6 @@
 import { toPublicCourseCard } from "../catalog/catalog.model.js";
 import { toAdminUserResponse } from "../users/user.model.js";
 
-function toBatchSummary(batch) {
-  if (!batch) return null;
-  return {
-    id: batch.id,
-    name: batch.name,
-    code: batch.code,
-    startDate: batch.startDate,
-    expectedEndDate: batch.expectedEndDate,
-    timezone: batch.timezone,
-    status: batch.status,
-  };
-}
-
 function toCertificateSummary(certificate) {
   if (!certificate) return null;
   return {
@@ -30,7 +17,6 @@ function commonFields(enrollment) {
     id: enrollment.id,
     userId: enrollment.userId,
     courseId: enrollment.courseId,
-    batchId: enrollment.batchId,
     source: enrollment.source,
     status: enrollment.status,
     paymentStatus: enrollment.paymentStatus,
@@ -39,16 +25,27 @@ function commonFields(enrollment) {
     enrolledAt: enrollment.createdAt,
     createdAt: enrollment.createdAt,
     updatedAt: enrollment.updatedAt,
-    batch: toBatchSummary(enrollment.batch),
     certificate: toCertificateSummary(currentCertificate),
   };
 }
 
 export function toMyEnrollmentResponse(enrollment) {
   if (!enrollment) return null;
+  const publicCourse = enrollment.course ? toPublicCourseCard(enrollment.course) : null;
   return {
     ...commonFields(enrollment),
-    course: enrollment.course ? toPublicCourseCard(enrollment.course) : null,
+    course: publicCourse
+      ? {
+          ...publicCourse,
+          intakeKey: enrollment.course.intakeKey,
+          code: enrollment.course.code,
+          instanceKind: publicCourse.instanceKind,
+          startDate: enrollment.course.startDate,
+          expectedEndDate: enrollment.course.expectedEndDate,
+          timezone: enrollment.course.timezone,
+          courseStatus: enrollment.course.status,
+        }
+      : null,
   };
 }
 
@@ -63,7 +60,18 @@ export function toAdminEnrollmentResponse(enrollment) {
     enrolledBy: enrollment.enrolledBy
       ? toAdminUserResponse(enrollment.enrolledBy)
       : null,
-    course: enrollment.course ? toPublicCourseCard(enrollment.course) : null,
+    course: enrollment.course
+      ? {
+          ...toPublicCourseCard(enrollment.course),
+          intakeKey: enrollment.course.intakeKey,
+          code: enrollment.course.code,
+          instanceKind: enrollment.course.category?.service?.courseMode,
+          startDate: enrollment.course.startDate,
+          expectedEndDate: enrollment.course.expectedEndDate,
+          timezone: enrollment.course.timezone,
+          courseStatus: enrollment.course.status,
+        }
+      : null,
   };
 }
 

@@ -1,476 +1,266 @@
 import prisma from "../../../utils/prisma.js";
-import {
-  ConflictError,
-  NotFoundError,
-  ValidationError,
-  handlePrismaError,
-} from "../../../utils/Errors.js";
-import {
-  assertDeletionAllowed,
-  buildDeletionImpact,
-  deleteCourseGraph,
-  lockArchivedCourses,
-  runSerializableCatalogTransaction,
-} from "./catalogDeletion.repository.js";
+import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
-import { getLearningServicePolicy } from "../../../constants/v1/catalog/learningServicePolicy.constants.js";
 
-const courseInclude = {
-  category: true,
+export const courseInclude = {
+  category: { include: { service: true } },
+  courseGroup: true,
   _count: {
     select: {
       courseSessions: { where: { retiredAt: null } },
-      batches: true,
       enrollments: true,
+      studentProjects: true,
     },
   },
 };
 
-function assertCourseConfiguration(current, data, { publishing = false } = {}) {
-  const durationValue = data.durationValue !== undefined
-    ? data.durationValue
-    : current.durationValue;
-  const durationUnit = data.durationUnit !== undefined
-    ? data.durationUnit
-    : current.durationUnit;
-  if ((durationValue == null) !== (durationUnit == null)) {
-    throw new ValidationError(
-      "Duration value and unit must be provided together.",
-      "durationValue",
-    );
-  }
-
-  const accessType = data.accessType ?? current.accessType;
-  const price = Number(data.price ?? current.price);
-  const policy = getLearningServicePolicy(current.category.serviceType);
-  if (!policy || accessType !== policy.accessType) {
-    throw new ValidationError(
-      `${current.category.serviceType} courses must use ${policy?.accessType ?? "the configured"} access.`,
-      "accessType",
-    );
-  }
-  if (policy.accessType === "FREE" && price !== 0) {
-    throw new ValidationError("Free Learning courses must have a zero price.", "price");
-  }
-  if (policy.accessType === "PAID" && publishing && price <= 0) {
-    throw new ValidationError(
-      "Published Bootcamp and PreTech courses must have a price greater than zero.",
-      "price",
-    );
-  }
+export function findById(id) {
+  return prisma.course.findUnique({ where: { id }, include: courseInclude });
 }
 
-export async function findPublicDetail(serviceType, categorySlug, courseSlug) {
+export function findPublicDetail(serviceId, categorySlug, courseSlug) {
   return prisma.course.findFirst({
     where: {
       slug: courseSlug,
-      status: "PUBLISHED",
-      category: {
-        serviceType,
-        slug: categorySlug,
-        status: "PUBLISHED",
-      },
+      status: "OPEN_ACTIVE",
+      courseGroup: { archivedAt: null },
+      category: { serviceId, slug: categorySlug, status: "PUBLISHED", service: { status: "ACTIVE" } },
     },
     include: {
+      courseGroup: true,
       category: {
         include: {
-          courses: {
-            where: { status: "PUBLISHED" },
-            select: { level: true },
-          },
-          _count: {
-            select: { courses: { where: { status: "PUBLISHED" } } },
-          },
+          service: true,
+          courses: { where: { status: "OPEN_ACTIVE", courseGroup: { archivedAt: null } }, select: { level: true } },
+          _count: { select: { courses: { where: { status: "OPEN_ACTIVE", courseGroup: { archivedAt: null } } } } },
         },
       },
     },
   });
 }
 
-export async function findById(id) {
-  return prisma.course.findUnique({
-    where: { id },
-    include: courseInclude,
-  });
-}
-
-export async function findPublishedFreeById(id) {
+export function findPublishedFreeById(id) {
   return prisma.course.findFirst({
     where: {
       id,
-      status: "PUBLISHED",
-      accessType: "FREE",
-      category: { status: "PUBLISHED", serviceType: "FREE_LEARNING" },
+      status: "OPEN_ACTIVE",
+      courseGroup: { archivedAt: null },
+      category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
     },
-    include: {
-      category: true,
-      _count: {
-        select: { courseSessions: { where: { retiredAt: null } } },
-      },
-    },
+    include: courseInclude,
   });
-}
-
-export async function updateEnrollmentStatus(id, status) {
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      // Curriculum changes use the same first lock. This makes opening
-      // enrollment and removing the final session mutually exclusive.
-      await acquireTransactionLock(transaction, `curriculum:${id}`);
-      await acquireTransactionLock(transaction, `free-enrollment:${id}`);
-
-      const current = await transaction.course.findUnique({
-        where: { id },
-        include: {
-          category: true,
-          _count: {
-            select: {
-              courseSessions: { where: { retiredAt: null } },
-              batches: true,
-              enrollments: true,
-            },
-          },
-        },
-      });
-      if (!current) return null;
-      if (
-        current.status === "ARCHIVED" ||
-        current.category.status === "ARCHIVED"
-      ) {
-        throw new ConflictError(
-          "Archived courses cannot change enrollment availability.",
-        );
-      }
-      if (
-        current.category.serviceType !== "FREE_LEARNING" ||
-        current.accessType !== "FREE"
-      ) {
-        throw new ConflictError(
-          "Enrollment availability is managed here only for Free Learning courses.",
-        );
-      }
-      if (status === "OPEN" && current._count.courseSessions === 0) {
-        throw new ConflictError(
-          "Attach at least one session before opening Free Learning enrollment.",
-        );
-      }
-
-      return transaction.course.update({
-        where: { id },
-        data: { enrollmentStatus: status },
-        include: {
-          category: true,
-          _count: {
-            select: {
-              courseSessions: { where: { retiredAt: null } },
-              batches: true,
-              enrollments: true,
-            },
-          },
-        },
-      });
-    });
-  } catch (error) {
-    if (error instanceof ConflictError) throw error;
-    throw handlePrismaError(error);
-  }
 }
 
 export async function findAdmin(filters, limit, offset) {
   const where = {
     ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+    ...(filters.courseGroupId ? { courseGroupId: filters.courseGroupId } : {}),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.level ? { level: filters.level } : {}),
-    ...(filters.accessType ? { accessType: filters.accessType } : {}),
-    ...(filters.serviceType
-      ? { category: { serviceType: filters.serviceType } }
-      : {}),
-    ...(filters.q
-      ? {
-          OR: [
-            { title: { contains: filters.q, mode: "insensitive" } },
-            { slug: { contains: filters.q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
+    ...(filters.serviceId ? { category: { serviceId: filters.serviceId } } : {}),
+    ...(filters.q ? { OR: [
+      { title: { contains: filters.q, mode: "insensitive" } },
+      { slug: { contains: filters.q, mode: "insensitive" } },
+      { code: { contains: filters.q, mode: "insensitive" } },
+      { intakeKey: { contains: filters.q, mode: "insensitive" } },
+    ] } : {}),
   };
-
   const [total, courses] = await Promise.all([
     prisma.course.count({ where }),
     prisma.course.findMany({
       where,
-      orderBy: [
-        { category: { serviceType: "asc" } },
-        { category: { sortOrder: "asc" } },
-        { sortOrder: "asc" },
-        { title: "asc" },
-      ],
       take: limit,
       skip: offset,
-      include: {
-        category: true,
-        _count: {
-          select: {
-            courseSessions: { where: { retiredAt: null } },
-            batches: true,
-            enrollments: true,
-          },
-        },
-      },
+      orderBy: [{ category: { sortOrder: "asc" } }, { courseGroup: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
+      include: courseInclude,
     }),
   ]);
-
   return { total, courses };
 }
 
-export async function create(data) {
+export async function create(data, sourceCourseId = null) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(
-        transaction,
-        `catalog-category:${data.categoryId}`,
-      );
-      const category = await transaction.category.findUnique({
-        where: { id: data.categoryId },
-        select: { status: true },
+      const initialGroup = await transaction.courseGroup.findUnique({ where: { id: data.courseGroupId }, select: { category: { select: { serviceId: true } } } });
+      if (!initialGroup) throw new NotFoundError("Course group not found.");
+      await acquireTransactionLock(transaction, `learning-service:${initialGroup.category.serviceId}`);
+      await acquireTransactionLock(transaction, `catalog-category:${data.categoryId}`);
+      await acquireTransactionLock(transaction, `course-group:${data.courseGroupId}`);
+      const group = await transaction.courseGroup.findUnique({
+        where: { id: data.courseGroupId },
+        include: { category: { include: { service: true } }, courses: { select: { id: true } } },
       });
-      if (!category) throw new ConflictError("Category no longer exists.");
-      if (category.status === "ARCHIVED") {
-        throw new ConflictError("Courses cannot be created under an archived category.");
+      if (!group) throw new NotFoundError("Course group not found.");
+      if (group.archivedAt || group.category.status === "ARCHIVED" || group.category.service.status === "ARCHIVED") throw new ConflictError("Archived catalog setup cannot create courses.");
+      if (data.categoryId !== group.categoryId) throw new ConflictError("Course and course group must belong to the same category.");
+      if (!sourceCourseId && group.courses.length > 0) {
+        throw new ConflictError(
+          "Create later course intakes by copying an existing course in this group.",
+          "COURSE_SOURCE_REQUIRED",
+        );
       }
-      return transaction.course.create({
-        data,
-        include: {
-          category: true,
-          _count: {
-            select: {
-              courseSessions: { where: { retiredAt: null } },
-              batches: true,
-              enrollments: true,
-            },
+      if (group.category.service.courseMode === "EVERGREEN" && group.courses.length > 0) {
+        throw new ConflictError("A Free Learning course group can have only one evergreen course.");
+      }
+      if (sourceCourseId) {
+        const sourceCourse = await transaction.course.findFirst({
+          where: { id: sourceCourseId, courseGroupId: data.courseGroupId },
+          select: { id: true },
+        });
+        if (!sourceCourse) throw new ConflictError("Source course must belong to this course group.");
+        await acquireTransactionLock(transaction, `course:${sourceCourseId}`);
+      }
+      const course = await transaction.course.create({ data, include: courseInclude });
+      if (sourceCourseId) {
+        const source = await transaction.courseSession.findMany({
+          where: {
+            courseId: sourceCourseId,
+            retiredAt: null,
+            session: { status: "READY" },
           },
-        },
-      });
+          orderBy: { orderIndex: "asc" },
+          select: { sessionId: true, orderIndex: true },
+        });
+        if (source.length > 0) {
+          await transaction.courseSession.createMany({
+            data: source.map((item) => ({
+              courseId: course.id,
+              sessionId: item.sessionId,
+              orderIndex: item.orderIndex,
+              deliveryStatus: "UNRELEASED",
+            })),
+          });
+        }
+      }
+      return course;
     });
-  } catch (error) {
-    if (error instanceof ConflictError) throw error;
-    throw handlePrismaError(error);
-  }
+  } catch (error) { throw handlePrismaError(error); }
 }
 
-export async function archiveSafely(id) {
+export async function updateSetup(id, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${id}`);
-      const current = await transaction.course.findUnique({
+      const initial = await transaction.course.findUnique({
         where: { id },
-        include: {
-          category: true,
-          _count: {
-            select: {
-              courseSessions: { where: { retiredAt: null } },
-              batches: true,
-              enrollments: true,
-            },
-          },
-        },
+        select: { categoryId: true, courseGroupId: true, category: { select: { serviceId: true } } },
       });
+      if (!initial) return null;
+      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+      await acquireTransactionLock(transaction, `course-group:${initial.courseGroupId}`);
+      await acquireTransactionLock(transaction, `course:${id}`);
+      const current = await transaction.course.findUnique({ where: { id } });
       if (!current) return null;
-      if (current.status === "ARCHIVED") return current;
-
-      const enrollingBatchCount = await transaction.batch.count({
-        where: { courseId: id, status: "ENROLLING" },
-      });
-      if (enrollingBatchCount > 0) {
-        throw new ConflictError(
-          "Cancel enrolling batches before archiving this course.",
-          "CATALOG_ARCHIVE_BLOCKED",
-        );
+      if (["COMPLETED", "CANCELLED", "ARCHIVED"].includes(current.status)) throw new ConflictError("Terminal courses are read-only.");
+      if (data.capacity !== undefined && data.capacity !== null) {
+        const learnerCount = await transaction.enrollment.count({
+          where: { courseId: id, status: { not: "CANCELLED" } },
+        });
+        if (data.capacity < learnerCount) {
+          throw new ConflictError(
+            `Capacity cannot be lower than the ${learnerCount} current learner(s).`,
+            "COURSE_CAPACITY_BELOW_ENROLLMENT_COUNT",
+          );
+        }
       }
-      return transaction.course.update({
+      return transaction.course.update({ where: { id }, data, include: courseInclude });
+    });
+  } catch (error) { throw handlePrismaError(error); }
+}
+
+async function assertCompletionReady(transaction, course) {
+  const sessions = await transaction.courseSession.findMany({
+    where: { courseId: course.id, retiredAt: null },
+    select: { deliveryStatus: true, availableAt: true },
+  });
+  const now = new Date();
+  if (
+    sessions.length === 0 ||
+    sessions.some(
+      ({ deliveryStatus, availableAt }) =>
+        deliveryStatus !== "RELEASED" &&
+        !(deliveryStatus === "SCHEDULED" && availableAt && availableAt <= now),
+    )
+  ) {
+    throw new ConflictError("Release every current session before completing this course.", "COURSE_COMPLETION_NOT_READY");
+  }
+  const enrollments = await transaction.enrollment.findMany({
+    where: { courseId: course.id, status: { not: "CANCELLED" } },
+    select: { status: true, certificates: { where: { status: "ISSUED" }, select: { id: true }, take: 1 } },
+  });
+  if (enrollments.some(({ status }) => status !== "COMPLETED")) throw new ConflictError("Complete every non-cancelled enrollment first.", "COURSE_COMPLETION_NOT_READY");
+  if (course.courseGroup.certificateEnabled && enrollments.some(({ certificates }) => certificates.length === 0)) {
+    throw new ConflictError("Issue certificates to every completed learner first.", "COURSE_COMPLETION_NOT_READY");
+  }
+}
+
+export async function transitionStatus(id, expectedStatus, targetStatus) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.course.findUnique({
         where: { id },
-        data: { status: "ARCHIVED" },
-        include: {
-          category: true,
-          _count: {
-            select: {
-              courseSessions: { where: { retiredAt: null } },
-              batches: true,
-              enrollments: true,
+        select: { categoryId: true, courseGroupId: true, category: { select: { serviceId: true } } },
+      });
+      if (!initial) return null;
+      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+      await acquireTransactionLock(transaction, `course-group:${initial.courseGroupId}`);
+      await acquireTransactionLock(transaction, `course:${id}`);
+      const course = await transaction.course.findUnique({ where: { id }, include: { category: { include: { service: true } }, courseGroup: true } });
+      if (!course) return null;
+      if (course.status !== expectedStatus) throw new ConflictError("Course status changed. Refresh and try again.", "STALE_COURSE_STATUS");
+      if (targetStatus === "OPEN_ACTIVE") {
+        if (course.category.service.status !== "ACTIVE" || course.category.status !== "PUBLISHED" || course.courseGroup.archivedAt) throw new ConflictError("Only a course under an active service/group and published category can be opened.");
+        if (course.category.service.courseMode === "EVERGREEN") {
+          const visible = await transaction.courseSession.count({
+            where: {
+              courseId: id,
+              retiredAt: null,
+              OR: [
+                { deliveryStatus: "RELEASED" },
+                { deliveryStatus: "SCHEDULED", availableAt: { lte: new Date() } },
+              ],
             },
-          },
-        },
-      });
+          });
+          if (visible === 0) throw new ConflictError("Release at least one session before opening free enrollment.");
+        }
+        await transaction.course.updateMany({
+          where: { courseGroupId: course.courseGroupId, status: "OPEN_ACTIVE", id: { not: id } },
+          data: { status: "CLOSED_ACTIVE" },
+        });
+      }
+      if (targetStatus === "COMPLETED") await assertCompletionReady(transaction, course);
+      if (targetStatus === "CANCELLED") {
+        await transaction.enrollment.updateMany({ where: { courseId: id, status: "ACTIVE" }, data: { status: "CANCELLED" } });
+      }
+      return transaction.course.update({ where: { id }, data: { status: targetStatus }, include: courseInclude });
     });
-  } catch (error) {
-    if (error instanceof ConflictError) throw error;
-    throw handlePrismaError(error);
-  }
-}
-
-export async function update(id, data) {
-  try {
-    return await prisma.course.update({
-      where: { id },
-      data,
-      include: {
-        category: true,
-        _count: {
-          select: {
-            courseSessions: { where: { retiredAt: null } },
-            batches: true,
-            enrollments: true,
-          },
-        },
-      },
-    });
-  } catch (error) {
-    throw handlePrismaError(error);
-  }
-}
-
-export async function updateOperational(id, data) {
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${id}`);
-      const current = await transaction.course.findUnique({
-        where: { id },
-        include: courseInclude,
-      });
-      if (!current) throw new NotFoundError("Course not found.");
-      if (Object.hasOwn(data, "categoryId")) {
-        throw new ConflictError(
-          "A course's category is selected at creation and cannot be changed later.",
-        );
-      }
-      if (Object.hasOwn(data, "certificateEnabled")) {
-        throw new ConflictError(
-          "Certificate support is selected at course creation and cannot be changed later.",
-        );
-      }
-      if (
-        current.status === "ARCHIVED" ||
-        current.category.status === "ARCHIVED"
-      ) {
-        throw new ConflictError("Archived courses cannot be edited.");
-      }
-      assertCourseConfiguration(current, data, {
-        publishing: current.status === "PUBLISHED",
-      });
-      return transaction.course.update({
-        where: { id },
-        data,
-        include: courseInclude,
-      });
-    });
-  } catch (error) {
-    if (
-      error instanceof ConflictError ||
-      error instanceof NotFoundError ||
-      error instanceof ValidationError
-    ) {
-      throw error;
-    }
-    throw handlePrismaError(error);
-  }
-}
-
-export async function setPublication(id, publish) {
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${id}`);
-      const current = await transaction.course.findUnique({
-        where: { id },
-        include: courseInclude,
-      });
-      if (!current) throw new NotFoundError("Course not found.");
-      if (current.status === "ARCHIVED") {
-        throw new ConflictError("Archived courses cannot be published.");
-      }
-      if (publish && current.category.status !== "PUBLISHED") {
-        throw new ConflictError(
-          "Publish the parent category before publishing this course.",
-        );
-      }
-      assertCourseConfiguration(current, {}, { publishing: publish });
-      return transaction.course.update({
-        where: { id },
-        data: { status: publish ? "PUBLISHED" : "DRAFT" },
-        include: courseInclude,
-      });
-    });
-  } catch (error) {
-    if (
-      error instanceof ConflictError ||
-      error instanceof NotFoundError ||
-      error instanceof ValidationError
-    ) {
-      throw error;
-    }
-    throw handlePrismaError(error);
-  }
-}
-
-export async function restore(id) {
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${id}`);
-      const current = await transaction.course.findUnique({
-        where: { id },
-        include: courseInclude,
-      });
-      if (!current) throw new NotFoundError("Course not found.");
-      if (current.status !== "ARCHIVED") {
-        throw new ConflictError("Only archived courses can be restored.");
-      }
-      if (current.category.status === "ARCHIVED") {
-        throw new ConflictError("Restore the parent category before this course.");
-      }
-      return transaction.course.update({
-        where: { id },
-        data: { status: "DRAFT" },
-        include: courseInclude,
-      });
-    });
-  } catch (error) {
-    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
-    throw handlePrismaError(error);
-  }
-}
-
-export async function findDeletionImpact(id) {
-  const course = await prisma.course.findUnique({
-    where: { id },
-    select: { id: true, status: true },
-  });
-  if (!course) return null;
-  return buildDeletionImpact(prisma, {
-    resourceType: "COURSE",
-    resourceId: course.id,
-    resourceStatus: course.status,
-    courseIds: [course.id],
-  });
+  } catch (error) { throw handlePrismaError(error); }
 }
 
 export async function removePermanently(id) {
   try {
-    return await runSerializableCatalogTransaction(prisma, async (transaction) => {
-      await lockArchivedCourses(transaction, [id]);
-      const impact = await buildDeletionImpact(transaction, {
-        resourceType: "COURSE",
-        resourceId: id,
-        resourceStatus: "ARCHIVED",
-        courseIds: [id],
-        sequential: true,
+    return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.course.findUnique({
+        where: { id },
+        select: { categoryId: true, courseGroupId: true, category: { select: { serviceId: true } } },
       });
-      assertDeletionAllowed(impact);
-      const result = await deleteCourseGraph(transaction, id);
-      return { id, ...result };
+      if (!initial) return null;
+      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+      await acquireTransactionLock(transaction, `course-group:${initial.courseGroupId}`);
+      await acquireTransactionLock(transaction, `course:${id}`);
+      const course = await transaction.course.findUnique({
+        where: { id },
+        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true } } },
+      });
+      if (!course) return null;
+      if (course.status !== "ARCHIVED") throw new ConflictError("Archive the course first.");
+      if (course._count.enrollments || course._count.courseSessions || course._count.studentProjects) {
+        throw new ConflictError("A course with curriculum or learner history cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
+      }
+      await transaction.course.delete({ where: { id } });
+      return { id };
     });
-  } catch (error) {
-    if (error instanceof ConflictError || error?.code === "CATALOG_DELETION_BLOCKED") {
-      throw error;
-    }
-    throw handlePrismaError(error);
-  }
+  } catch (error) { throw handlePrismaError(error); }
 }

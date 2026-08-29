@@ -95,12 +95,34 @@ export function validateRuntimeConfig() {
   }
   for (const [name, fallback] of [
     ["DB_STATEMENT_TIMEOUT_MS", 30_000],
-    ["DB_IDLE_TRANSACTION_TIMEOUT_MS", 15_000],
+    ["DB_CONNECTION_TIMEOUT_MS", 2_000],
+    ["DB_IDLE_TRANSACTION_TIMEOUT_MS", 30_000],
+    ["DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS", 15_000],
+    ["DB_INTERACTIVE_TRANSACTION_MAX_WAIT_MS", 5_000],
   ]) {
     const value = Number(process.env[name] ?? fallback);
     if (!Number.isInteger(value) || value < 1_000) {
       throw new Error(`${name} must be an integer of at least 1000ms.`);
     }
+  }
+  const idleTransactionTimeoutMs = Number(
+    process.env.DB_IDLE_TRANSACTION_TIMEOUT_MS ?? 30_000,
+  );
+  const interactiveTransactionTimeoutMs = Number(
+    process.env.DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS ?? 15_000,
+  );
+  if (
+    /^(prisma|prisma\+postgres):\/\//.test(process.env.DATABASE_URL ?? "") &&
+    interactiveTransactionTimeoutMs > 15_000
+  ) {
+    throw new Error(
+      "DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS cannot exceed Prisma Accelerate's 15000ms limit.",
+    );
+  }
+  if (interactiveTransactionTimeoutMs >= idleTransactionTimeoutMs) {
+    throw new Error(
+      "DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS must be lower than DB_IDLE_TRANSACTION_TIMEOUT_MS.",
+    );
   }
   for (const [name, fallback] of [
     ["SMTP_TIMEOUT_MS", 5_000],

@@ -35,61 +35,6 @@ export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
   return { total, users };
 }
 
-/**
- * Search verified students who are not already enrolled in a given batch.
- * @param {string} batchId - UUID of the batch.
- * @param {string} query - Partial name or email search text.
- * @param {number} limit - Page size. One extra row is fetched to detect another page.
- * @param {{email: string, id: string}|null} cursor - Last row from the previous page.
- * @returns {Promise<Array>} Eligible student rows, including at most one look-ahead row.
- */
-export async function searchEligibleStudentsForBatch(
-  batchId,
-  query = "",
-  limit = 25,
-  cursor = null,
-) {
-  const normalizedQuery = typeof query === "string" ? query.trim() : "";
-
-  return await prisma.user.findMany({
-    where: {
-      role: "STUDENT",
-      emailVerified: true,
-      AND: [
-        ...(normalizedQuery
-          ? [
-              {
-                OR: [
-                  { email: { contains: normalizedQuery, mode: "insensitive" } },
-                  { firstName: { contains: normalizedQuery, mode: "insensitive" } },
-                  { lastName: { contains: normalizedQuery, mode: "insensitive" } },
-                ],
-              },
-            ]
-          : []),
-        ...(cursor
-          ? [
-              {
-                OR: [
-                  { email: { gt: cursor.email } },
-                  { email: cursor.email, id: { gt: cursor.id } },
-                ],
-              },
-            ]
-          : []),
-      ],
-      enrollments: {
-        none: {
-          batchId,
-        },
-      },
-    },
-    orderBy: [{ email: "asc" }, { id: "asc" }],
-    take: Number(limit) + 1,
-    select: { id: true, firstName: true, lastName: true, email: true },
-  });
-}
-
 export async function findVerifiedStudentsByIds(ids) {
   if (!Array.isArray(ids) || ids.length === 0) return [];
   return prisma.user.findMany({

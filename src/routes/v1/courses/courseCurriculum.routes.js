@@ -22,6 +22,11 @@ router.patch(
   requirePermission(PERMISSIONS.COURSE_CURRICULUM_MANAGE),
   curriculumController.reorderCurriculum,
 );
+router.patch(
+  "/:courseSessionId/delivery",
+  requirePermission(PERMISSIONS.COURSE_SESSIONS_RELEASE),
+  curriculumController.updateDelivery,
+);
 router.delete(
   "/:courseSessionId",
   requirePermission(PERMISSIONS.COURSE_CURRICULUM_MANAGE),
@@ -29,4 +34,3 @@ router.delete(
 );
 
 export default router;
-

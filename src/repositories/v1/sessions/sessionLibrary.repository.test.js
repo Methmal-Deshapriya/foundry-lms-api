@@ -34,24 +34,7 @@ describe("Session Library repository", () => {
 
     const expectedWhere = {
       status: "READY",
-      AND: [
-        {
-          courseSessions: {
-            none: { courseId },
-          },
-        },
-        {
-          OR: [
-            { reusePolicy: "REUSABLE" },
-            {
-              reusePolicy: "SINGLE_COURSE",
-              courseSessions: {
-                none: { courseId: { not: courseId } },
-              },
-            },
-          ],
-        },
-      ],
+      AND: [{ courseSessions: { none: { courseId } } }],
     };
     expect(mocks.count).toHaveBeenCalledWith({ where: expectedWhere });
     expect(mocks.findMany).toHaveBeenCalledWith(

@@ -4,8 +4,7 @@ const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
     enrollment: { findUnique: vi.fn() },
-    courseSession: { findUnique: vi.fn() },
-    batchSession: { findUnique: vi.fn() },
+    courseSession: { findFirst: vi.fn() },
     sessionCompletion: {
       create: vi.fn(),
       deleteMany: vi.fn(),
@@ -31,20 +30,15 @@ describe("classroom completion repository", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ courseId, batchId: null })
+      .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
       .mockResolvedValue({
         courseId,
-        batchId: null,
         source: "SELF",
         status: "ACTIVE",
         paymentStatus: "NOT_REQUIRED",
-        batch: null,
+        course: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE" } } },
       });
-    mocks.transaction.courseSession.findUnique.mockResolvedValue({
-      courseId,
-      retiredAt: null,
-      session: { status: "READY" },
-    });
+    mocks.transaction.courseSession.findFirst.mockResolvedValue({ id: courseSessionId });
   });
 
   it("creates completion only after locking and rechecking active enrollment", async () => {
@@ -72,14 +66,13 @@ describe("classroom completion repository", () => {
     async (mutate) => {
       mocks.transaction.enrollment.findUnique
         .mockReset()
-        .mockResolvedValueOnce({ courseId, batchId: null })
+        .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
         .mockResolvedValue({
           courseId,
-          batchId: null,
           source: "SELF",
           status: "COMPLETED",
           paymentStatus: "NOT_REQUIRED",
-          batch: null,
+          course: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE" } } },
         });
 
       await expect(
@@ -108,24 +101,18 @@ describe("classroom completion repository", () => {
     expect(result).toEqual({ count: 1 });
   });
 
-  it("rejects completion after the locked paid delivery has been withdrawn", async () => {
-    const batchId = "a0000000-0000-4000-8000-000000000004";
+  it("rejects completion after the locked course delivery has been withdrawn", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ courseId, batchId })
+      .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
       .mockResolvedValue({
         courseId,
-        batchId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        batch: { status: "ACTIVE" },
+        course: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID" } } },
       });
-    mocks.transaction.batchSession.findUnique.mockResolvedValue({
-      courseId,
-      isReleased: false,
-      availableAt: null,
-    });
+    mocks.transaction.courseSession.findFirst.mockResolvedValue(null);
 
     await expect(
       createCompletion(enrollmentId, courseSessionId, courseId),
@@ -134,23 +121,21 @@ describe("classroom completion repository", () => {
     expect(mocks.transaction.sessionCompletion.create).not.toHaveBeenCalled();
   });
 
-  it("keeps an archived paid classroom readable but rejects progress changes", async () => {
-    const batchId = "a0000000-0000-4000-8000-000000000004";
+  it("keeps archived history readable but rejects progress changes", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ courseId, batchId })
+      .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
       .mockResolvedValue({
         courseId,
-        batchId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        batch: { status: "ARCHIVED" },
+        course: { status: "ARCHIVED", category: { service: { accessType: "PAID" } } },
       });
 
     await expect(
       createCompletion(enrollmentId, courseSessionId, courseId),
-    ).rejects.toThrow(/only while the batch is active/i);
+    ).rejects.toThrow(/while the course is active/i);
     expect(mocks.transaction.sessionCompletion.create).not.toHaveBeenCalled();
   });
 });

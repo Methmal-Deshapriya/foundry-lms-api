@@ -53,7 +53,7 @@ export const eligibleStudentFiltersSchema = z.object({
 });
 
 export const eligibleStudentCursorPayloadSchema = z.object({
-  batchId: z.string().uuid(),
+  courseId: z.string().uuid(),
   q: z.string().max(100),
   email: z.string().email().max(320),
   id: z.string().uuid(),
@@ -67,7 +67,7 @@ export const enrollmentRosterFiltersSchema = z.object({
 });
 
 export const enrollmentRosterCursorSchema = z.object({
-  scopeType: z.enum(["BATCH", "COURSE"]),
+  scopeType: z.literal("COURSE"),
   scopeId: z.string().uuid(),
   q: z.string().max(100),
   status: z.enum(ALL_ENROLLMENT_STATUSES).nullable(),

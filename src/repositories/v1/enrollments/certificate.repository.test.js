@@ -34,7 +34,6 @@ describe("certificate revocation transaction", () => {
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
     mocks.transaction.enrollment.findUnique.mockResolvedValue({
       courseId,
-      batchId: "batch-1",
     });
   });
 
@@ -45,10 +44,8 @@ describe("certificate revocation transaction", () => {
       status: "ISSUED",
       enrollment: {
         status: "COMPLETED",
-        batchId: "batch-1",
-        batch: { status: "ACTIVE" },
         course: {
-          status: "PUBLISHED",
+          status: "CLOSED_ACTIVE",
           category: { status: "PUBLISHED" },
         },
       },
@@ -73,15 +70,12 @@ describe("certificate revocation transaction", () => {
     expect(
       mocks.transaction.$queryRawUnsafe.mock.calls.map(([, key]) => key),
     ).toEqual([
-      `curriculum:${courseId}`,
-      "batch:batch-1",
+      `course:${courseId}`,
       `enrollment:${enrollmentId}`,
     ]);
     expect(result.lifecycleContext).toEqual({
       enrollmentStatus: "COMPLETED",
-      batchId: "batch-1",
-      batchStatus: "ACTIVE",
-      courseStatus: "PUBLISHED",
+      courseStatus: "CLOSED_ACTIVE",
       categoryStatus: "PUBLISHED",
     });
     expect(mocks.transaction.certificate.update).toHaveBeenCalledTimes(1);
@@ -94,9 +88,7 @@ describe("certificate revocation transaction", () => {
         status: "REVOKED",
         enrollment: {
           status: "COMPLETED",
-          batchId: null,
-          batch: null,
-          course: { status: "PUBLISHED", category: { status: "PUBLISHED" } },
+          course: { status: "CLOSED_ACTIVE", category: { status: "PUBLISHED" } },
         },
       });
 
@@ -112,10 +104,10 @@ describe("certificate issuance transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ courseId, batchId: null })
+      .mockResolvedValueOnce({ courseId })
       .mockResolvedValue({
         status: "COMPLETED",
-        course: { certificateEnabled: true },
+        course: { courseGroup: { certificateEnabled: true } },
       });
     mocks.transaction.certificate.findFirst.mockResolvedValue(null);
     mocks.transaction.certificate.create.mockResolvedValue({

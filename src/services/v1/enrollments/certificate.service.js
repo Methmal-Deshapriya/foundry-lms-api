@@ -90,7 +90,7 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   if (enrollment.status !== "COMPLETED") {
     throw new ValidationError("Enrollment must be marked as COMPLETED before issuing a certificate.");
   }
-  if (!enrollment.course.certificateEnabled) {
+  if (!enrollment.course.courseGroup.certificateEnabled) {
     throw new ValidationError("Certificates are not enabled for this course.");
   }
 

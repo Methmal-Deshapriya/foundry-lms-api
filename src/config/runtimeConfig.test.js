@@ -36,4 +36,16 @@ describe("runtime configuration", () => {
 
     expect(() => validateRuntimeConfig()).toThrow(/SMTP_HOST is required/i);
   });
+
+  it("keeps Prisma's transaction deadline below the database idle deadline", () => {
+    process.env.JWT_SECRET = "test-secret-with-at-least-32-bytes";
+    process.env.CLIENT_URL = "https://academy.example";
+    process.env.CORS_ORIGIN = "https://academy.example";
+    process.env.DB_IDLE_TRANSACTION_TIMEOUT_MS = "10000";
+    process.env.DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS = "10000";
+
+    expect(() => validateRuntimeConfig()).toThrow(
+      /DB_INTERACTIVE_TRANSACTION_TIMEOUT_MS.*lower/i,
+    );
+  });
 });

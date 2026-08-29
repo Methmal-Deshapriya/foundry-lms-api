@@ -29,7 +29,6 @@ function sessionFixture(overrides = {}) {
     title: "Session 1",
     status: "ARCHIVED",
     recordingUrl: "https://example.com/recording",
-    reusePolicy: "REUSABLE",
     courseSessions: [],
     ...overrides,
   };
@@ -42,7 +41,7 @@ describe("session library lifecycle transaction", () => {
   });
 
   it("restores an attached or historical session directly to Ready", async () => {
-    const usage = [{ courseId, retiredAt: new Date(), _count: { batchLinks: 1 } }];
+    const usage = [{ courseId, retiredAt: new Date() }];
     mocks.transaction.session.findUnique
       .mockResolvedValueOnce({ courseSessions: [{ courseId }] })
       .mockResolvedValueOnce(sessionFixture({ courseSessions: usage }));
@@ -77,7 +76,7 @@ describe("session library lifecycle transaction", () => {
       .mockResolvedValueOnce(
         sessionFixture({
           status: "READY",
-          courseSessions: [{ courseId, retiredAt: null, _count: { batchLinks: 0 } }],
+          courseSessions: [{ courseId, retiredAt: null }],
         }),
       );
 

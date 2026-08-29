@@ -1,153 +1,88 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../repositories/v1/catalog/category.repository.js", () => ({
-  findById: vi.fn(),
-}));
+vi.mock("../../../repositories/v1/catalog/courseGroup.repository.js", () => ({ findById: vi.fn() }));
 vi.mock("../../../repositories/v1/catalog/course.repository.js", () => ({
-  create: vi.fn(),
-  findById: vi.fn(),
-  update: vi.fn(),
-  updateEnrollmentStatus: vi.fn(),
+  create: vi.fn(), findById: vi.fn(), transitionStatus: vi.fn(), updateSetup: vi.fn(),
 }));
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
-vi.mock("./publicCatalogCache.service.js", () => ({
-  revalidatePublicCatalogCache: vi.fn(),
-}));
+vi.mock("./publicCatalogCache.service.js", () => ({ revalidatePublicCatalogCache: vi.fn() }));
 
-import * as categoryRepo from "../../../repositories/v1/catalog/category.repository.js";
-import * as courseRepo from "../../../repositories/v1/catalog/course.repository.js";
-import {
-  createCourseService,
-  setCourseEnrollmentStatusService,
-  updateCourseService,
-} from "./course.service.js";
+import * as groupRepository from "../../../repositories/v1/catalog/courseGroup.repository.js";
+import * as courseRepository from "../../../repositories/v1/catalog/course.repository.js";
+import { createCourseService, updateCourseService, updateCourseStatusService } from "./course.service.js";
 
 const actorId = "90000000-0000-4000-8000-000000000001";
-const categoryId = "90000000-0000-4000-8000-000000000002";
-const courseId = "90000000-0000-4000-8000-000000000003";
+const groupId = "90000000-0000-4000-8000-000000000002";
+const categoryId = "90000000-0000-4000-8000-000000000003";
+const courseId = "90000000-0000-4000-8000-000000000004";
+
+function groupFixture(overrides = {}) {
+  return { id: groupId, categoryId, slug: "ai-ml-ignition", title: "AI/ML Ignition Program", batchCodePrefix: "AI-ML-IGNITION", certificateEnabled: true, archivedAt: null, courses: [], category: { id: categoryId, status: "PUBLISHED", service: { id: "service-paid", key: "BOOTCAMPS", status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } }, ...overrides };
+}
 
 function courseFixture(overrides = {}) {
   return {
-    id: courseId,
-    categoryId,
-    slug: "free-foundations",
-    title: "Free Foundations",
-    summary: "A practical free learning course.",
-    description: "A practical free learning course for beginning students.",
-    level: "BEGINNER",
-    durationValue: null,
-    durationUnit: null,
-    accessType: "FREE",
-    price: 0,
-    currency: "LKR",
-    enrollmentStatus: "COMING_SOON",
-    certificateEnabled: false,
-    highlights: [],
-    skills: [],
-    prerequisites: [],
-    thumbnailUrl: null,
-    status: "PUBLISHED",
-    sortOrder: 0,
-    category: {
-      id: categoryId,
-      serviceType: "FREE_LEARNING",
-      status: "PUBLISHED",
-    },
-    _count: { courseSessions: 0, batches: 0, enrollments: 0 },
-    ...overrides,
+    id: courseId, courseGroupId: groupId, categoryId, slug: "ai-ml-ignition", title: "AI/ML Ignition Program",
+    intakeKey: "2026-B1", code: "AI-ML-IGNITION-2026-B1",
+    startDate: new Date("2026-09-01T00:00:00Z"), expectedEndDate: new Date("2026-12-01T00:00:00Z"),
+    timezone: "Asia/Colombo", capacity: 50, summary: "A practical AI and machine learning program.",
+    description: "A practical AI and machine learning program for beginning engineers.", level: "BEGINNER",
+    durationValue: 4, durationUnit: "MONTH", price: 1000, currency: "LKR",
+    highlights: [], skills: [], prerequisites: [], thumbnailUrl: null, sortOrder: 0,
+    status: "DRAFT", category: groupFixture().category, courseGroup: groupFixture(),
+    _count: { courseSessions: 0, enrollments: 0 }, ...overrides,
   };
 }
 
-describe("course enrollment availability", () => {
+const firstInput = {
+  courseGroupId: groupId, intakeKey: "2026-B1",
+  startDate: "2026-09-01T00:00:00Z", expectedEndDate: "2026-12-01T00:00:00Z", capacity: 50,
+  summary: "A practical AI and machine learning program.",
+  description: "A practical AI and machine learning program for beginning engineers.",
+  level: "BEGINNER", durationValue: 4, durationUnit: "MONTH", price: 1000,
+};
+
+describe("course intake service", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("stores LKR centrally when a course is created", async () => {
-    categoryRepo.findById.mockResolvedValue(courseFixture().category);
-    courseRepo.create.mockImplementation(async (data) => courseFixture({
-      ...data,
-      status: "DRAFT",
-    }));
-
-    await createCourseService({
-      categoryId,
-      slug: "free-foundations",
-      title: "Free Foundations",
-      summary: "A practical free learning course.",
-      description: "A practical free learning course for beginning students.",
-      level: "BEGINNER",
-      accessType: "FREE",
-      price: 0,
-      certificateEnabled: false,
-    }, actorId);
-
-    expect(courseRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ currency: "LKR", status: "DRAFT" }),
-    );
+  it("creates the first intake with group-owned identity and LKR", async () => {
+    groupRepository.findById.mockResolvedValue(groupFixture());
+    courseRepository.create.mockResolvedValue(courseFixture());
+    courseRepository.findById.mockResolvedValue(courseFixture());
+    const result = await createCourseService(firstInput, actorId);
+    expect(courseRepository.create).toHaveBeenCalledWith(expect.objectContaining({ categoryId, courseGroupId: groupId, slug: "ai-ml-ignition", title: "AI/ML Ignition Program", code: "AI-ML-IGNITION-2026-B1", currency: "LKR", status: "DRAFT" }), null);
+    expect(result.code).toBe("AI-ML-IGNITION-2026-B1");
   });
 
-  it("requires an explicit certificate policy when the course is created", async () => {
-    await expect(
-      createCourseService({
-        categoryId,
-        slug: "free-foundations",
-        title: "Free Foundations",
-        summary: "A practical free learning course.",
-        description: "A practical free learning course for beginning students.",
-        level: "BEGINNER",
-        accessType: "FREE",
-        price: 0,
-      }, actorId),
-    ).rejects.toMatchObject({ field: "certificateEnabled", statusCode: 400 });
-    expect(categoryRepo.findById).not.toHaveBeenCalled();
-    expect(courseRepo.create).not.toHaveBeenCalled();
+  it("copies immutable public content into later intakes", async () => {
+    const source = courseFixture();
+    groupRepository.findById.mockResolvedValue(groupFixture({ courses: [source] }));
+    courseRepository.findById.mockResolvedValueOnce(source).mockResolvedValueOnce(courseFixture({ id: "new-course", intakeKey: "2026-B2", code: "AI-ML-IGNITION-2026-B2" }));
+    courseRepository.create.mockResolvedValue({ id: "new-course" });
+    await createCourseService({ courseGroupId: groupId, sourceCourseId: courseId, intakeKey: "2026-B2", startDate: "2027-01-01T00:00:00Z", expectedEndDate: "2027-04-01T00:00:00Z", summary: "This override is ignored." }, actorId);
+    expect(courseRepository.create).toHaveBeenCalledWith(expect.objectContaining({ summary: source.summary, code: "AI-ML-IGNITION-2026-B2" }), courseId);
+    expect(courseRepository.create.mock.calls[0][0]).not.toHaveProperty("certificateEnabled");
   });
 
-  it("does not allow certificate policy to change after course creation", async () => {
-    await expect(
-      updateCourseService(
-        courseId,
-        { title: "Updated title", certificateEnabled: true },
-        actorId,
-      ),
-    ).rejects.toThrow(/selected when the course is created/i);
-    expect(courseRepo.findById).not.toHaveBeenCalled();
-    expect(courseRepo.update).not.toHaveBeenCalled();
+  it("rejects a second intake without a source course", async () => {
+    groupRepository.findById.mockResolvedValue(groupFixture({ courses: [courseFixture()] }));
+    await expect(createCourseService({ ...firstInput, intakeKey: "2026-B2" }, actorId)).rejects.toThrow(/copying an existing course/i);
   });
 
-  it("does not open an empty Free Learning course", async () => {
-    courseRepo.findById.mockResolvedValue(courseFixture());
-
-    await expect(
-      setCourseEnrollmentStatusService(courseId, { status: "OPEN" }, actorId),
-    ).rejects.toThrow(/attach at least one session/i);
-    expect(courseRepo.updateEnrollmentStatus).not.toHaveBeenCalled();
+  it("keeps fixed course fields immutable after creation", async () => {
+    await expect(updateCourseService(courseId, { certificateEnabled: false }, actorId)).rejects.toMatchObject({ statusCode: 400 });
+    expect(courseRepository.updateSetup).not.toHaveBeenCalled();
   });
 
-  it("opens a Free Learning course once curriculum exists", async () => {
-    const current = courseFixture({ _count: { courseSessions: 1, batches: 0, enrollments: 0 } });
-    courseRepo.findById.mockResolvedValue(current);
-    courseRepo.updateEnrollmentStatus.mockResolvedValue({
-      ...current,
-      enrollmentStatus: "OPEN",
-    });
-
-    const result = await setCourseEnrollmentStatusService(
-      courseId,
-      { status: "OPEN" },
-      actorId,
-    );
-
-    expect(result.enrollmentStatus).toBe("OPEN");
+  it("lets only super admins open an intake", async () => {
+    await expect(updateCourseStatusService(courseId, { expectedStatus: "DRAFT", status: "OPEN_ACTIVE" }, { id: actorId, role: "ADMIN" })).rejects.toMatchObject({ statusCode: 403 });
+    expect(courseRepository.transitionStatus).not.toHaveBeenCalled();
   });
 
-  it("does not expose this lifecycle for paid cohort courses", async () => {
-    courseRepo.findById.mockResolvedValue(courseFixture({
-      accessType: "PAID",
-      category: { serviceType: "BOOTCAMPS", status: "PUBLISHED" },
-    }));
-
-    await expect(
-      setCourseEnrollmentStatusService(courseId, { status: "OPEN" }, actorId),
-    ).rejects.toThrow(/only for Free Learning/i);
+  it("uses optimistic lifecycle transitions for super admins", async () => {
+    courseRepository.transitionStatus.mockResolvedValue(courseFixture({ status: "OPEN_ACTIVE" }));
+    const result = await updateCourseStatusService(courseId, { expectedStatus: "DRAFT", status: "OPEN_ACTIVE" }, { id: actorId, role: "SUPER_ADMIN" });
+    expect(courseRepository.transitionStatus).toHaveBeenCalledWith(courseId, "DRAFT", "OPEN_ACTIVE");
+    expect(result.status).toBe("OPEN_ACTIVE");
   });
 });

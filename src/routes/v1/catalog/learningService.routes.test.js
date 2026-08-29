@@ -2,12 +2,14 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import app from "../../../app.js";
 import { generateToken } from "../../../utils/jwt.js";
-import { getAdminLearningServiceSummariesService } from "../../../services/v1/catalog/learningServiceSummary.service.js";
+import { createLearningServiceService, listLearningServicesService } from "../../../services/v1/catalog/learningService.service.js";
 
-vi.mock("../../../services/v1/catalog/learningServiceSummary.service.js", () => ({
-  getAdminLearningServiceSummariesService: vi.fn().mockResolvedValue({
+vi.mock("../../../services/v1/catalog/learningService.service.js", () => ({
+  listLearningServicesService: vi.fn().mockResolvedValue({
     services: [],
+    pagination: { total: 0, limit: 50, offset: 0 },
   }),
+  createLearningServiceService: vi.fn().mockResolvedValue({ id: "service-1", status: "DRAFT" }),
 }));
 
 vi.mock("../../../repositories/v1/users/user.repository.js", () => ({
@@ -53,8 +55,40 @@ describe("Learning-service summary route access", () => {
         .set("Cookie", cookieFor(role));
 
       expect(response.status).toBe(200);
-      expect(response.body.data).toEqual({ services: [] });
-      expect(getAdminLearningServiceSummariesService).toHaveBeenCalled();
+      expect(response.body.data).toEqual({
+        services: [],
+        pagination: { total: 0, limit: 50, offset: 0 },
+      });
+      expect(listLearningServicesService).toHaveBeenCalled();
     },
   );
+
+  it("lets admins view but not create learning services", async () => {
+    const response = await request(app)
+      .post("/api/v1/services")
+      .set("Cookie", cookieFor("ADMIN"))
+      .send({});
+    expect(response.status).toBe(403);
+    expect(createLearningServiceService).not.toHaveBeenCalled();
+  });
+
+  it("allows super admins to create a learning service", async () => {
+    const body = {
+      key: "CAREER_LABS",
+      slug: "career-labs",
+      title: "Career Labs",
+      description: "Paid seasonal career labs for verified learners.",
+      accessType: "PAID",
+      courseMode: "SEASONAL",
+      enrollmentMode: "ADMIN",
+      paymentRequirement: "REQUIRED",
+      sortOrder: 4,
+    };
+    const response = await request(app)
+      .post("/api/v1/services")
+      .set("Cookie", cookieFor("SUPER_ADMIN"))
+      .send(body);
+    expect(response.status).toBe(201);
+    expect(createLearningServiceService).toHaveBeenCalledWith(body, "test-SUPER_ADMIN");
+  });
 });

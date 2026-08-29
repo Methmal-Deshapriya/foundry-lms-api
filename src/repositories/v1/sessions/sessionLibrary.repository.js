@@ -14,9 +14,9 @@ const usageInclude = {
       id: true,
       courseId: true,
       orderIndex: true,
+      deliveryStatus: true,
       retiredAt: true,
-      course: { select: { title: true } },
-      _count: { select: { batchLinks: true } },
+      course: { select: { title: true, code: true, courseGroupId: true } },
     },
   },
 };
@@ -31,23 +31,15 @@ export async function findAdmin(filters, limit, offset) {
             },
           },
         },
-        {
-          OR: [
-            { reusePolicy: "REUSABLE" },
-            {
-              reusePolicy: "SINGLE_COURSE",
-              courseSessions: {
-                none: { courseId: { not: filters.attachableCourseId } },
-              },
-            },
-          ],
-        },
       ]
     : [];
 
   const where = {
-    ...(filters.status ? { status: filters.status } : {}),
-    ...(filters.reusePolicy ? { reusePolicy: filters.reusePolicy } : {}),
+    ...(filters.attachableCourseId
+      ? { status: "READY" }
+      : filters.status
+        ? { status: filters.status }
+        : {}),
     ...(filters.q
       ? {
           OR: [
@@ -103,7 +95,7 @@ async function lockSessionContext(transaction, id) {
     ...new Set(initial.courseSessions.map(({ courseId }) => courseId)),
   ].sort();
   for (const courseId of courseIds) {
-    await acquireTransactionLock(transaction, `curriculum:${courseId}`);
+    await acquireTransactionLock(transaction, `course:${courseId}`);
   }
   await acquireTransactionLock(transaction, `session:${id}`);
 
@@ -132,15 +124,6 @@ export async function updateSafely(id, data) {
       const current = await lockSessionContext(transaction, id);
       if (current.status === "ARCHIVED") {
         throw new ConflictError("Archived sessions must be restored before editing.");
-      }
-      if (
-        data.reusePolicy === "SINGLE_COURSE" &&
-        current.reusePolicy !== "SINGLE_COURSE" &&
-        current.courseSessions.length > 1
-      ) {
-        throw new ConflictError(
-          "A session used by multiple courses cannot become a one-course session.",
-        );
       }
       if (data.status === "DRAFT" && current.courseSessions.length > 0) {
         throw new ConflictError(

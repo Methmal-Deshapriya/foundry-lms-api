@@ -1,4 +1,4 @@
-import { COURSE_LEVELS, SERVICE_TYPE_TO_SLUG } from "../../../constants/v1/catalog/catalog.constants.js";
+import { COURSE_LEVELS } from "../../../constants/v1/catalog/catalog.constants.js";
 
 const LEVEL_LABELS = {
   OPEN: "Open",
@@ -25,8 +25,10 @@ export function toPublicCategory(category) {
   const levels = category.courses?.map((course) => course.level) ?? [];
   return {
     id: category.id,
-    serviceType: category.serviceType,
-    serviceSlug: SERVICE_TYPE_TO_SLUG[category.serviceType],
+    serviceId: category.serviceId,
+    serviceType: category.service.key,
+    serviceSlug: category.service.slug,
+    serviceTitle: category.service.title,
     slug: category.slug,
     title: category.title,
     description: category.description,
@@ -40,6 +42,7 @@ export function toPublicCategory(category) {
 }
 
 export function toPublicCourseCard(course) {
+  const service = course.category?.service ?? course.courseGroup?.category?.service;
   return {
     id: course.id,
     slug: course.slug,
@@ -50,11 +53,11 @@ export function toPublicCourseCard(course) {
     durationValue: course.durationValue,
     durationUnit: course.durationUnit,
     durationLabel: formatDuration(course.durationValue, course.durationUnit),
-    accessType: course.accessType,
-    enrollmentStatus: course.enrollmentStatus,
+    accessType: service?.accessType,
+    instanceKind: service?.courseMode,
     price: Number(course.price),
     currency: course.currency,
-    certificateEnabled: course.certificateEnabled,
+    certificateEnabled: course.courseGroup?.certificateEnabled,
   };
 }
 
@@ -80,12 +83,27 @@ export function toAdminCategory(category) {
 }
 
 export function toAdminCourse(course) {
+  const service = course.category?.service ?? course.courseGroup?.category?.service;
   return {
     ...course,
+    accessType: service?.accessType,
+    instanceKind: service?.courseMode,
     price: Number(course.price),
+    certificateEnabled: course.courseGroup?.certificateEnabled,
     sessionCount: course._count?.courseSessions ?? 0,
-    batchCount: course._count?.batches ?? 0,
     enrollmentCount: course._count?.enrollments ?? 0,
+    projectCount: course._count?.studentProjects ?? 0,
+    _count: undefined,
+  };
+}
+
+export function toAdminCourseGroup(group) {
+  return {
+    ...group,
+    courses: Array.isArray(group.courses)
+      ? group.courses.map(toAdminCourse)
+      : [],
+    courseCount: group._count?.courses ?? group.courses?.length ?? 0,
     _count: undefined,
   };
 }

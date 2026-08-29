@@ -7,23 +7,27 @@ import { generateToken } from "../utils/jwt.js";
 const runDatabaseIntegration = process.env.RUN_DATABASE_INTEGRATION === "1";
 
 const ids = {
+  paidService: "20000000-0000-4000-8000-000000000001",
+  freeService: "20000000-0000-4000-8000-000000000003",
   admin: "f0000000-0000-4000-8000-000000000100",
   paidStudent: "f0000000-0000-4000-8000-000000000101",
   freeStudent: "f0000000-0000-4000-8000-000000000102",
   paidCategory: "f0000000-0000-4000-8000-000000000110",
   freeCategory: "f0000000-0000-4000-8000-000000000111",
-  paidCourse: "f0000000-0000-4000-8000-000000000120",
-  freeCourse: "f0000000-0000-4000-8000-000000000121",
-  archiveCourse: "f0000000-0000-4000-8000-000000000122",
-  paidSession: "f0000000-0000-4000-8000-000000000130",
-  freeSession: "f0000000-0000-4000-8000-000000000131",
-  paidCourseSession: "f0000000-0000-4000-8000-000000000140",
-  freeCourseSession: "f0000000-0000-4000-8000-000000000141",
-  paidBatch: "f0000000-0000-4000-8000-000000000150",
-  archiveBatch: "f0000000-0000-4000-8000-000000000151",
+  paidGroup: "f0000000-0000-4000-8000-000000000120",
+  freeGroup: "f0000000-0000-4000-8000-000000000121",
+  paidB1: "f0000000-0000-4000-8000-000000000130",
+  paidB2: "f0000000-0000-4000-8000-000000000131",
+  freeCourse: "f0000000-0000-4000-8000-000000000132",
+  paidSession: "f0000000-0000-4000-8000-000000000140",
+  freeSession: "f0000000-0000-4000-8000-000000000141",
+  spareSession: "f0000000-0000-4000-8000-000000000142",
+  paidB1Session: "f0000000-0000-4000-8000-000000000150",
+  paidB2Session: "f0000000-0000-4000-8000-000000000151",
+  freeCourseSession: "f0000000-0000-4000-8000-000000000152",
 };
 
-process.env.JWT_SECRET ||= "foundry-pipeline-integration-test";
+process.env.JWT_SECRET ||= "foundry-course-intake-integration-test";
 
 function cookieFor(id, role) {
   return `token=${generateToken({ id, role, mfa: role !== "STUDENT" })}`;
@@ -33,193 +37,84 @@ const adminCookie = () => cookieFor(ids.admin, "SUPER_ADMIN");
 const paidStudentCookie = () => cookieFor(ids.paidStudent, "STUDENT");
 const freeStudentCookie = () => cookieFor(ids.freeStudent, "STUDENT");
 
+const courseIds = [ids.paidB1, ids.paidB2, ids.freeCourse];
+const userIds = [ids.admin, ids.paidStudent, ids.freeStudent];
+
 async function cleanupFixture() {
-  const courseIds = [ids.paidCourse, ids.freeCourse, ids.archiveCourse];
-  const userIds = [ids.admin, ids.paidStudent, ids.freeStudent];
   await prisma.auditLog.deleteMany({ where: { actorUserId: { in: userIds } } });
-  await prisma.certificate.deleteMany({
-    where: { enrollment: { courseId: { in: courseIds } } },
-  });
-  await prisma.sessionCompletion.deleteMany({
-    where: { courseId: { in: courseIds } },
-  });
-  await prisma.studentProject.deleteMany({
-    where: { courseId: { in: courseIds } },
-  });
+  await prisma.certificate.deleteMany({ where: { enrollment: { courseId: { in: courseIds } } } });
+  await prisma.sessionCompletion.deleteMany({ where: { courseId: { in: courseIds } } });
+  await prisma.studentProject.deleteMany({ where: { courseId: { in: courseIds } } });
   await prisma.enrollment.deleteMany({ where: { courseId: { in: courseIds } } });
-  await prisma.batchSession.deleteMany({ where: { courseId: { in: courseIds } } });
-  await prisma.batch.deleteMany({ where: { courseId: { in: courseIds } } });
   await prisma.courseSession.deleteMany({ where: { courseId: { in: courseIds } } });
   await prisma.course.deleteMany({ where: { id: { in: courseIds } } });
-  await prisma.session.deleteMany({
-    where: { id: { in: [ids.paidSession, ids.freeSession] } },
-  });
-  await prisma.category.deleteMany({
-    where: { id: { in: [ids.paidCategory, ids.freeCategory] } },
-  });
+  await prisma.courseGroup.deleteMany({ where: { id: { in: [ids.paidGroup, ids.freeGroup] } } });
+  await prisma.session.deleteMany({ where: { id: { in: [ids.paidSession, ids.freeSession, ids.spareSession] } } });
+  await prisma.category.deleteMany({ where: { id: { in: [ids.paidCategory, ids.freeCategory] } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+}
+
+function commonCourseData() {
+  return {
+    title: "Pipeline AI/ML Ignition",
+    slug: "pipeline-ai-ml-ignition",
+    summary: "A complete paid intake integration fixture.",
+    description: "A complete paid intake integration fixture for validating delivery behavior.",
+    level: "BEGINNER",
+    durationValue: 4,
+    durationUnit: "MONTH",
+    price: 1000,
+    currency: "LKR",
+    highlights: ["Pipeline verification"],
+    skills: ["Integration testing"],
+    prerequisites: [],
+  };
 }
 
 async function seedFixture() {
   await prisma.user.createMany({
     data: [
-      {
-        id: ids.admin,
-        firstName: "Pipeline",
-        lastName: "Admin",
-        email: "pipeline-admin@foundry.test",
-        password: "integration-test-only",
-        role: "SUPER_ADMIN",
-        emailVerified: true,
-      },
-      {
-        id: ids.paidStudent,
-        firstName: "Paid",
-        lastName: "Student",
-        email: "pipeline-paid@foundry.test",
-        password: "integration-test-only",
-        role: "STUDENT",
-        emailVerified: true,
-      },
-      {
-        id: ids.freeStudent,
-        firstName: "Free",
-        lastName: "Student",
-        email: "pipeline-free@foundry.test",
-        password: "integration-test-only",
-        role: "STUDENT",
-        emailVerified: true,
-      },
+      { id: ids.admin, firstName: "Pipeline", lastName: "Admin", email: "pipeline-admin@foundry.test", password: "integration-test-only", role: "SUPER_ADMIN", emailVerified: true },
+      { id: ids.paidStudent, firstName: "Paid", lastName: "Student", email: "pipeline-paid@foundry.test", password: "integration-test-only", role: "STUDENT", emailVerified: true },
+      { id: ids.freeStudent, firstName: "Free", lastName: "Student", email: "pipeline-free@foundry.test", password: "integration-test-only", role: "STUDENT", emailVerified: true },
     ],
   });
   await prisma.category.createMany({
     data: [
-      {
-        id: ids.paidCategory,
-        serviceType: "BOOTCAMPS",
-        slug: "pipeline-paid-category",
-        title: "Pipeline Paid Category",
-        description: "Integration fixture",
-        visualKey: "code",
-        status: "PUBLISHED",
-      },
-      {
-        id: ids.freeCategory,
-        serviceType: "FREE_LEARNING",
-        slug: "pipeline-free-category",
-        title: "Pipeline Free Category",
-        description: "Integration fixture",
-        visualKey: "sparkles",
-        status: "PUBLISHED",
-      },
+      { id: ids.paidCategory, serviceId: ids.paidService, slug: "pipeline-ai-ml", title: "Pipeline AI/ML", description: "Paid pipeline integration category.", audienceLabel: "Beginning engineers", visualKey: "code2", status: "PUBLISHED" },
+      { id: ids.freeCategory, serviceId: ids.freeService, slug: "pipeline-git", title: "Pipeline Git", description: "Free pipeline integration category.", audienceLabel: "Everyone", visualKey: "git-branch", status: "PUBLISHED" },
+    ],
+  });
+  await prisma.courseGroup.createMany({
+    data: [
+      { id: ids.paidGroup, categoryId: ids.paidCategory, slug: "pipeline-ai-ml-ignition", title: "Pipeline AI/ML Ignition", batchCodePrefix: "PIPELINE-AI-ML", certificateEnabled: true },
+      { id: ids.freeGroup, categoryId: ids.freeCategory, slug: "pipeline-git-foundations", title: "Pipeline Git Foundations", batchCodePrefix: "PIPELINE-GIT", certificateEnabled: false },
     ],
   });
   await prisma.course.createMany({
     data: [
-      {
-        id: ids.paidCourse,
-        categoryId: ids.paidCategory,
-        slug: "pipeline-paid-course",
-        title: "Pipeline Paid Course",
-        summary: "Paid integration fixture",
-        description: "Paid integration fixture",
-        level: "BEGINNER",
-        accessType: "PAID",
-        price: 1000,
-        certificateEnabled: true,
-        skills: ["Pipeline testing"],
-        status: "PUBLISHED",
-      },
-      {
-        id: ids.freeCourse,
-        categoryId: ids.freeCategory,
-        slug: "pipeline-free-course",
-        title: "Pipeline Free Course",
-        summary: "Free integration fixture",
-        description: "Free integration fixture",
-        level: "OPEN",
-        accessType: "FREE",
-        price: 0,
-        enrollmentStatus: "OPEN",
-        certificateEnabled: false,
-        status: "PUBLISHED",
-      },
-      {
-        id: ids.archiveCourse,
-        categoryId: ids.paidCategory,
-        slug: "pipeline-archive-course",
-        title: "Pipeline Archive Course",
-        summary: "Archive integration fixture",
-        description: "Archive integration fixture",
-        level: "BEGINNER",
-        accessType: "PAID",
-        price: 1000,
-        certificateEnabled: false,
-        status: "PUBLISHED",
-      },
+      { id: ids.paidB1, courseGroupId: ids.paidGroup, categoryId: ids.paidCategory, intakeKey: "2026-B1", code: "PIPELINE-AI-ML-2026-B1", startDate: new Date("2026-08-01"), expectedEndDate: new Date("2026-12-01"), timezone: "Asia/Colombo", capacity: 10, status: "OPEN_ACTIVE", ...commonCourseData() },
+      { id: ids.paidB2, courseGroupId: ids.paidGroup, categoryId: ids.paidCategory, intakeKey: "2026-B2", code: "PIPELINE-AI-ML-2026-B2", startDate: new Date("2026-12-01"), expectedEndDate: new Date("2027-04-01"), timezone: "Asia/Colombo", capacity: 10, status: "DRAFT", ...commonCourseData() },
+      { id: ids.freeCourse, courseGroupId: ids.freeGroup, categoryId: ids.freeCategory, title: "Pipeline Git Foundations", slug: "pipeline-git-foundations", intakeKey: "EVERGREEN", code: "PIPELINE-GIT-EVERGREEN", startDate: null, expectedEndDate: null, timezone: "Asia/Colombo", capacity: null, summary: "A complete free learning integration fixture.", description: "A complete free learning integration fixture for verified self enrollment.", level: "OPEN", durationValue: 2, durationUnit: "SESSION", price: 0, currency: "LKR", highlights: [], skills: [], prerequisites: [], status: "OPEN_ACTIVE" },
     ],
   });
   await prisma.session.createMany({
     data: [
-      {
-        id: ids.paidSession,
-        title: "Paid pipeline session",
-        recordingUrl: "https://example.com/paid-recording",
-        reusePolicy: "REUSABLE",
-        status: "READY",
-      },
-      {
-        id: ids.freeSession,
-        title: "Free pipeline session",
-        recordingUrl: "https://example.com/free-recording",
-        reusePolicy: "REUSABLE",
-        status: "READY",
-      },
+      { id: ids.paidSession, title: "Paid pipeline session", recordingUrl: "https://example.com/paid-recording", status: "READY" },
+      { id: ids.freeSession, title: "Free pipeline session", recordingUrl: "https://example.com/free-recording", status: "READY" },
+      { id: ids.spareSession, title: "Spare terminal-write check", recordingUrl: "https://example.com/spare-recording", status: "READY" },
     ],
   });
   await prisma.courseSession.createMany({
     data: [
-      {
-        id: ids.paidCourseSession,
-        courseId: ids.paidCourse,
-        sessionId: ids.paidSession,
-        orderIndex: 0,
-      },
-      {
-        id: ids.freeCourseSession,
-        courseId: ids.freeCourse,
-        sessionId: ids.freeSession,
-        orderIndex: 0,
-      },
-    ],
-  });
-  await prisma.batch.createMany({
-    data: [
-      {
-        id: ids.paidBatch,
-        courseId: ids.paidCourse,
-        name: "Pipeline Active Batch",
-        code: "PIPELINE-ACTIVE-2026",
-        startDate: new Date("2026-08-01"),
-        expectedEndDate: new Date("2026-12-01"),
-        capacity: 10,
-        status: "ACTIVE",
-      },
-      {
-        id: ids.archiveBatch,
-        courseId: ids.archiveCourse,
-        name: "Pipeline Enrolling Batch",
-        code: "PIPELINE-ENROLLING-2026",
-        startDate: new Date("2026-09-01"),
-        expectedEndDate: new Date("2026-12-01"),
-        capacity: 10,
-        status: "ENROLLING",
-      },
+      { id: ids.paidB1Session, courseId: ids.paidB1, sessionId: ids.paidSession, orderIndex: 0, deliveryStatus: "RELEASED", firstReleasedAt: new Date() },
+      { id: ids.paidB2Session, courseId: ids.paidB2, sessionId: ids.paidSession, orderIndex: 0, deliveryStatus: "UNRELEASED" },
+      { id: ids.freeCourseSession, courseId: ids.freeCourse, sessionId: ids.freeSession, orderIndex: 0, deliveryStatus: "RELEASED", firstReleasedAt: new Date() },
     ],
   });
 }
 
-describe.runIf(runDatabaseIntegration)("learning delivery populated API pipeline", () => {
+describe.runIf(runDatabaseIntegration)("course-group and course-intake delivery pipeline", () => {
   beforeAll(async () => {
     await cleanupFixture();
     await seedFixture();
@@ -230,150 +125,214 @@ describe.runIf(runDatabaseIntegration)("learning delivery populated API pipeline
     await cleanupFixture();
   }, 60_000);
 
-  it("delivers a paid cohort through replacement certification and completion", async () => {
-    const release = await request(app)
-      .patch(
-        `/api/v1/batches/${ids.paidBatch}/sessions/${ids.paidCourseSession}/delivery`,
-      )
+  it("keeps copied intake curricula independent after attach, reorder, and detach", async () => {
+    const attach = await request(app)
+      .post(`/api/v1/courses/${ids.paidB2}/curriculum`)
       .set("Cookie", adminCookie())
-      .send({ mode: "RELEASED" });
+      .send({ sessionId: ids.spareSession });
+    expect(attach.status).toBe(201);
+    const spareCourseSessionId = attach.body.data.courseSession.id;
+
+    const reorder = await request(app)
+      .patch(`/api/v1/courses/${ids.paidB2}/curriculum/reorder`)
+      .set("Cookie", adminCookie())
+      .send({
+        courseSessions: [
+          { id: spareCourseSessionId, orderIndex: 0 },
+          { id: ids.paidB2Session, orderIndex: 1 },
+        ],
+      });
+    expect(reorder.status).toBe(200);
+
+    const sourceCurriculum = await prisma.courseSession.findMany({
+      where: { courseId: ids.paidB1, retiredAt: null },
+      orderBy: { orderIndex: "asc" },
+      select: { id: true, sessionId: true, orderIndex: true, deliveryStatus: true },
+    });
+    expect(sourceCurriculum).toEqual([
+      { id: ids.paidB1Session, sessionId: ids.paidSession, orderIndex: 0, deliveryStatus: "RELEASED" },
+    ]);
+
+    const detach = await request(app)
+      .delete(`/api/v1/courses/${ids.paidB2}/curriculum/${spareCourseSessionId}`)
+      .set("Cookie", adminCookie());
+    expect(detach.status).toBe(200);
+
+    const copiedCurriculum = await prisma.courseSession.findMany({
+      where: { courseId: ids.paidB2, retiredAt: null },
+      select: { id: true, sessionId: true, orderIndex: true, deliveryStatus: true },
+    });
+    expect(copiedCurriculum).toEqual([
+      { id: ids.paidB2Session, sessionId: ids.paidSession, orderIndex: 0, deliveryStatus: "UNRELEASED" },
+    ]);
+  }, 60_000);
+
+  it("atomically hands public enrollment from B1 to B2 without exposing intake metadata", async () => {
+    const handover = await request(app)
+      .patch(`/api/v1/courses/${ids.paidB2}/status`)
+      .set("Cookie", adminCookie())
+      .send({ expectedStatus: "DRAFT", status: "OPEN_ACTIVE" });
+    expect(handover.status).toBe(200);
+
+    const siblings = await prisma.course.findMany({ where: { courseGroupId: ids.paidGroup }, select: { id: true, status: true } });
+    expect(siblings).toEqual(expect.arrayContaining([
+      { id: ids.paidB1, status: "CLOSED_ACTIVE" },
+      { id: ids.paidB2, status: "OPEN_ACTIVE" },
+    ]));
+
+    const publicCourse = await request(app).get("/api/v1/catalog/bootcamps/categories/pipeline-ai-ml/courses/pipeline-ai-ml-ignition");
+    expect(publicCourse.status).toBe(200);
+    expect(publicCourse.body.data).toMatchObject({ id: ids.paidB2, title: "Pipeline AI/ML Ignition" });
+    expect(publicCourse.body.data).not.toHaveProperty("courseGroupId");
+    expect(publicCourse.body.data).not.toHaveProperty("intakeKey");
+    expect(publicCourse.body.data).not.toHaveProperty("code");
+
+    await expect(
+      prisma.course.update({ where: { id: ids.paidB1 }, data: { status: "OPEN_ACTIVE" } }),
+    ).rejects.toBeTruthy();
+  }, 60_000);
+
+  it("delivers, completes, certifies, and freezes one paid course intake", async () => {
+    const release = await request(app)
+      .patch(`/api/v1/courses/${ids.paidB2}/curriculum/${ids.paidB2Session}/delivery`)
+      .set("Cookie", adminCookie())
+      .send({ status: "RELEASED" });
     expect(release.status).toBe(200);
 
     const enrollmentResponse = await request(app)
-      .post(`/api/v1/batches/${ids.paidBatch}/enrollments`)
+      .post(`/api/v1/courses/${ids.paidB2}/enrollments`)
       .set("Cookie", adminCookie())
       .send({ userId: ids.paidStudent, paymentStatus: "COMPLETED" });
     expect(enrollmentResponse.status).toBe(201);
     const enrollmentId = enrollmentResponse.body.data.id;
 
-    const directArchive = await request(app)
-      .patch(`/api/v1/batches/${ids.paidBatch}/status`)
+    await expect(
+      prisma.sessionCompletion.create({
+        data: {
+          enrollmentId,
+          courseSessionId: ids.freeCourseSession,
+          courseId: ids.paidB2,
+        },
+      }),
+    ).rejects.toBeTruthy();
+
+    const close = await request(app)
+      .patch(`/api/v1/courses/${ids.paidB2}/status`)
       .set("Cookie", adminCookie())
-      .send({ status: "ARCHIVED" });
-    expect(directArchive.status).toBe(409);
+      .send({ expectedStatus: "OPEN_ACTIVE", status: "CLOSED_ACTIVE" });
+    expect(close.status).toBe(200);
+
+    const classroom = await request(app)
+      .get(`/api/v1/enrollments/${enrollmentId}/classroom`)
+      .set("Cookie", paidStudentCookie());
+    expect(classroom.status).toBe(200);
+    expect(classroom.body.data.sessions).toHaveLength(1);
+    expect(classroom.body.data.enrollment.course).toMatchObject({ intakeKey: "2026-B2", code: "PIPELINE-AI-ML-2026-B2" });
 
     const completion = await request(app)
-      .post(
-        `/api/v1/enrollments/${enrollmentId}/sessions/${ids.paidCourseSession}/complete`,
-      )
+      .post(`/api/v1/enrollments/${enrollmentId}/sessions/${ids.paidB2Session}/complete`)
       .set("Cookie", paidStudentCookie());
     expect(completion.status).toBe(201);
 
-    const completedEnrollment = await request(app)
+    const completeEnrollment = await request(app)
       .patch(`/api/v1/enrollments/${enrollmentId}`)
       .set("Cookie", adminCookie())
       .send({ status: "COMPLETED" });
-    expect(completedEnrollment.status).toBe(200);
+    expect(completeEnrollment.status).toBe(200);
 
-    const firstCertificate = await request(app)
+    const frozenProgress = await request(app)
+      .delete(`/api/v1/enrollments/${enrollmentId}/sessions/${ids.paidB2Session}/complete`)
+      .set("Cookie", paidStudentCookie());
+    expect(frozenProgress.status).toBe(409);
+    expect(frozenProgress.body.code).toBe("ENROLLMENT_COMPLETED");
+
+    const issue = await request(app)
       .post(`/api/v1/enrollments/${enrollmentId}/certificate`)
       .set("Cookie", adminCookie())
       .send({ description: "Pipeline completion" });
-    expect(firstCertificate.status).toBe(201);
+    expect(issue.status).toBe(201);
 
-    const revoked = await request(app)
-      .patch(`/api/v1/certificates/${firstCertificate.body.data.id}/revoke`)
+    const completeCourse = await request(app)
+      .patch(`/api/v1/courses/${ids.paidB2}/status`)
       .set("Cookie", adminCookie())
-      .send({ revocationReason: "Replacement required for integration test" });
-    expect(revoked.status).toBe(200);
-    expect(revoked.body.data.status).toBe("REVOKED");
+      .send({ expectedStatus: "CLOSED_ACTIVE", status: "COMPLETED" });
+    expect(completeCourse.status).toBe(200);
 
-    const replacement = await request(app)
-      .post(`/api/v1/enrollments/${enrollmentId}/certificate`)
+    const terminalAttach = await request(app)
+      .post(`/api/v1/courses/${ids.paidB2}/curriculum`)
       .set("Cookie", adminCookie())
-      .send({ description: "Replacement pipeline certificate" });
-    expect(replacement.status).toBe(201);
-    expect(replacement.body.data.certificateCode).not.toBe(
-      firstCertificate.body.data.certificateCode,
-    );
-
-    const completedBatch = await request(app)
-      .patch(`/api/v1/batches/${ids.paidBatch}/status`)
-      .set("Cookie", adminCookie())
-      .send({ status: "COMPLETED" });
-    expect(completedBatch.status).toBe(200);
-    expect(completedBatch.body.data.status).toBe("COMPLETED");
-
-    const [oldVerification, currentVerification] = await Promise.all([
-      request(app).get(
-        `/api/v1/certificates/verify/${firstCertificate.body.data.certificateCode}`,
-      ),
-      request(app).get(
-        `/api/v1/certificates/verify/${replacement.body.data.certificateCode}`,
-      ),
-    ]);
-    expect(oldVerification.body.data.status).toBe("REVOKED");
-    expect(currentVerification.body.data.status).toBe("ISSUED");
+      .send({ sessionId: ids.spareSession });
+    expect(terminalAttach.status).toBe(409);
   }, 60_000);
 
-  it("supports status-only Free Learning cancellation and same-row re-enrollment", async () => {
-    const firstEnrollment = await request(app)
-      .post(`/api/v1/courses/${ids.freeCourse}/enroll`)
-      .set("Cookie", freeStudentCookie())
-      .send();
-    expect(firstEnrollment.status).toBe(201);
-    const enrollmentId = firstEnrollment.body.data.id;
+  it("self-enrolls and reactivates the same free evergreen enrollment", async () => {
+    await expect(
+      prisma.course.create({
+        data: {
+          id: "f0000000-0000-4000-8000-000000000199",
+          courseGroupId: ids.freeGroup,
+          categoryId: ids.freeCategory,
+          title: "Pipeline Git Foundations",
+          slug: "pipeline-git-foundations",
+          intakeKey: "EVERGREEN-2",
+          code: "PIPELINE-GIT-EVERGREEN-2",
+          timezone: "Asia/Colombo",
+          summary: "A duplicate evergreen database invariant fixture.",
+          description: "A duplicate evergreen database invariant fixture that must be rejected.",
+          level: "OPEN",
+          price: 0,
+          currency: "LKR",
+          status: "DRAFT",
+        },
+      }),
+    ).rejects.toBeTruthy();
 
-    const cancelled = await request(app)
+    const first = await request(app)
+      .post(`/api/v1/courses/${ids.freeCourse}/enroll`)
+      .set("Cookie", freeStudentCookie());
+    expect(first.status).toBe(201);
+    const enrollmentId = first.body.data.id;
+
+    const cancel = await request(app)
       .patch(`/api/v1/enrollments/${enrollmentId}`)
       .set("Cookie", adminCookie())
       .send({ status: "CANCELLED" });
-    expect(cancelled.status).toBe(200);
-    expect(cancelled.body.data.paymentStatus).toBe("NOT_REQUIRED");
+    expect(cancel.status).toBe(200);
 
     const reactivated = await request(app)
       .post(`/api/v1/courses/${ids.freeCourse}/enroll`)
-      .set("Cookie", freeStudentCookie())
-      .send();
+      .set("Cookie", freeStudentCookie());
     expect(reactivated.status).toBe(200);
-    expect(reactivated.body.data.id).toBe(enrollmentId);
-    expect(reactivated.body.data.status).toBe("ACTIVE");
+    expect(reactivated.body.data).toMatchObject({ id: enrollmentId, status: "ACTIVE" });
+
+    const removeOnlyVisibleSession = await request(app)
+      .delete(`/api/v1/courses/${ids.freeCourse}/curriculum/${ids.freeCourseSession}`)
+      .set("Cookie", adminCookie());
+    expect(removeOnlyVisibleSession.status).toBe(409);
+    expect(removeOnlyVisibleSession.body.code).toBe("FREE_COURSE_REQUIRES_VISIBLE_SESSION");
   }, 60_000);
 
-  it("blocks archival until an enrolling batch is explicitly cancelled", async () => {
-    const blocked = await request(app)
-      .patch(`/api/v1/courses/${ids.archiveCourse}/archive`)
-      .set("Cookie", adminCookie())
-      .send();
-    expect(blocked.status).toBe(409);
-    expect(blocked.body.code).toBe("CATALOG_ARCHIVE_BLOCKED");
-
-    const enrollmentResponse = await request(app)
-      .post(`/api/v1/batches/${ids.archiveBatch}/enrollments`)
-      .set("Cookie", adminCookie())
-      .send({ userId: ids.paidStudent, paymentStatus: "COMPLETED" });
-    expect(enrollmentResponse.status).toBe(201);
-    const enrollmentId = enrollmentResponse.body.data.id;
-
-    const cancelledEnrollment = await request(app)
-      .patch(`/api/v1/enrollments/${enrollmentId}`)
-      .set("Cookie", adminCookie())
-      .send({ status: "CANCELLED" });
-    expect(cancelledEnrollment.status).toBe(200);
-
-    const [cancelledBatch, reactivation] = await Promise.all([
-      request(app)
-        .patch(`/api/v1/batches/${ids.archiveBatch}/status`)
-        .set("Cookie", adminCookie())
-        .send({ status: "CANCELLED" }),
-      request(app)
-        .patch(`/api/v1/enrollments/${enrollmentId}`)
-        .set("Cookie", adminCookie())
-        .send({ status: "ACTIVE" }),
-    ]);
-    expect(cancelledBatch.status).toBe(200);
-    expect([200, 409]).toContain(reactivation.status);
-    const finalEnrollment = await prisma.enrollment.findUnique({
-      where: { id: enrollmentId },
-      select: { status: true },
+  it("blocks destructive catalog changes and exposes no legacy batch API", async () => {
+    const groupImpact = await request(app)
+      .get(`/api/v1/course-groups/${ids.paidGroup}/deletion-impact`)
+      .set("Cookie", adminCookie());
+    expect(groupImpact.status).toBe(200);
+    expect(groupImpact.body.data).toMatchObject({
+      resourceType: "COURSE_GROUP",
+      resourceStatus: "ACTIVE",
+      courses: 2,
+      deletable: false,
     });
-    expect(finalEnrollment?.status).toBe("CANCELLED");
 
-    const archived = await request(app)
-      .patch(`/api/v1/courses/${ids.archiveCourse}/archive`)
-      .set("Cookie", adminCookie())
-      .send();
-    expect(archived.status).toBe(200);
-    expect(archived.body.data.status).toBe("ARCHIVED");
+    const archive = await request(app)
+      .patch(`/api/v1/categories/${ids.freeCategory}/archive`)
+      .set("Cookie", adminCookie());
+    expect(archive.status).toBe(409);
+    expect(archive.body.code).toBe("CATALOG_ARCHIVE_BLOCKED");
+
+    const legacy = await request(app)
+      .get("/api/v1/batches/f0000000-0000-4000-8000-000000000199")
+      .set("Cookie", adminCookie());
+    expect(legacy.status).toBe(404);
   }, 60_000);
 });

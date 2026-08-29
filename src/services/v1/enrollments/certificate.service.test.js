@@ -47,7 +47,7 @@ function enrollmentFixture() {
       title: "Machine Learning",
       slug: "machine-learning",
       skills: ["Python"],
-      certificateEnabled: true,
+      courseGroup: { certificateEnabled: true },
     },
   };
 }
@@ -149,8 +149,6 @@ describe("certificate service reliability", () => {
       certificate: updated,
       lifecycleContext: {
         enrollmentStatus: "COMPLETED",
-        batchId: "batch-1",
-        batchStatus: "COMPLETED",
         courseStatus: "ARCHIVED",
         categoryStatus: "ARCHIVED",
       },
@@ -174,7 +172,6 @@ describe("certificate service reliability", () => {
       expect.objectContaining({
         metadata: expect.objectContaining({
           enrollmentStatus: "COMPLETED",
-          batchStatus: "COMPLETED",
           courseStatus: "ARCHIVED",
         }),
       }),

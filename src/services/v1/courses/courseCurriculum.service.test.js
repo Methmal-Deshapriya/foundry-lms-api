@@ -1,191 +1,64 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../repositories/v1/courses/courseCurriculum.repository.js", () => ({
-  findByCourseId: vi.fn(),
-  findById: vi.fn(),
-  attachExisting: vi.fn(),
-  createAndAttach: vi.fn(),
-  reorder: vi.fn(),
-  removeOrRetire: vi.fn(),
+  findCurriculum: vi.fn(), attach: vi.fn(), reorder: vi.fn(), remove: vi.fn(), updateDelivery: vi.fn(),
 }));
+vi.mock("../../../repositories/v1/catalog/course.repository.js", () => ({ findById: vi.fn() }));
+vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
 
-vi.mock("../../../repositories/v1/catalog/course.repository.js", () => ({
-  findById: vi.fn(),
-}));
+import * as curriculumRepository from "../../../repositories/v1/courses/courseCurriculum.repository.js";
+import * as courseRepository from "../../../repositories/v1/catalog/course.repository.js";
+import { attachCourseSessionService, getCourseCurriculumService, removeCourseSessionService, reorderCourseCurriculumService, updateCourseSessionDeliveryService } from "./courseCurriculum.service.js";
 
-vi.mock("../audit/audit.service.js", () => ({
-  recordActionService: vi.fn(),
-}));
+const courseId = "20000000-0000-4000-8000-000000000001";
+const courseSessionId = "40000000-0000-4000-8000-000000000001";
+const sessionId = "50000000-0000-4000-8000-000000000001";
 
-import * as curriculumRepo from "../../../repositories/v1/courses/courseCurriculum.repository.js";
-import * as courseRepo from "../../../repositories/v1/catalog/course.repository.js";
-import {
-  attachCourseSessionService,
-  getCourseCurriculumService,
-  removeCourseSessionService,
-  reorderCourseCurriculumService,
-} from "./courseCurriculum.service.js";
-
-function courseFixture(serviceType = "BOOTCAMPS") {
-  return {
-    id: "20000000-0000-4000-8000-000000000001",
-    title: "Machine Learning 1",
-    status: "PUBLISHED",
-    category: {
-      id: "30000000-0000-4000-8000-000000000001",
-      title: "Machine Learning",
-      serviceType,
-      status: "PUBLISHED",
-    },
-    _count: { courseSessions: 1, batches: 0, enrollments: 4 },
-  };
+function courseFixture(overrides = {}) {
+  return { id: courseId, code: "AI-ML-2026-B1", status: "OPEN_ACTIVE", category: { serviceType: "BOOTCAMPS" }, _count: { courseSessions: 1, enrollments: 4 }, ...overrides };
 }
 
-function curriculumFixture() {
-  return {
-    id: "40000000-0000-4000-8000-000000000001",
-    courseId: courseFixture().id,
-    orderIndex: 0,
-    retiredAt: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    session: {
-      id: "50000000-0000-4000-8000-000000000001",
-      title: "Session 1",
-      status: "READY",
-      reusePolicy: "REUSABLE",
-    },
-    _count: { batchLinks: 2, completions: 3 },
-  };
+function curriculumFixture(overrides = {}) {
+  return { id: courseSessionId, courseId, orderIndex: 0, deliveryStatus: "UNRELEASED", availableAt: null, firstReleasedAt: null, retiredAt: null, historicalOrderIndex: null, session: { id: sessionId, title: "Session 1", status: "READY" }, _count: { completions: 0 }, ...overrides };
 }
 
 describe("course curriculum service", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); courseRepository.findById.mockResolvedValue(courseFixture()); });
 
-  it("reports immediate availability and affected learners for Free Learning", async () => {
-    courseRepo.findById.mockResolvedValue(courseFixture("FREE_LEARNING"));
-    curriculumRepo.findByCourseId.mockResolvedValue([curriculumFixture()]);
-
-    const result = await getCourseCurriculumService(courseFixture().id);
-
-    expect(result.delivery).toMatchObject({
-      deliveryMode: "SELF_PACED",
-      immediateAvailability: true,
-      affectedLearnerCount: 4,
-    });
-    expect(result.curriculum[0].usage).toEqual({
-      batchCount: 2,
-      completionCount: 3,
-      batches: [],
-    });
+  it("returns explicit course-level delivery state and retired history on request", async () => {
+    curriculumRepository.findCurriculum.mockResolvedValue([curriculumFixture({ deliveryStatus: "RELEASED", firstReleasedAt: new Date() })]);
+    const result = await getCourseCurriculumService(courseId, { includeRetired: "true" });
+    expect(curriculumRepository.findCurriculum).toHaveBeenCalledWith(courseId, true);
+    expect(result.curriculum[0]).toMatchObject({ deliveryStatus: "RELEASED", usage: { completionCount: 0 } });
   });
 
-  it("includes batch assignments for retired curriculum relationships", async () => {
-    courseRepo.findById.mockResolvedValue(courseFixture());
-    curriculumRepo.findByCourseId.mockResolvedValue([
-      {
-        ...curriculumFixture(),
-        orderIndex: null,
-        retiredAt: new Date("2026-08-09T09:14:28.079Z"),
-        batchLinks: [
-          {
-            id: "60000000-0000-4000-8000-000000000001",
-            batchId: "70000000-0000-4000-8000-000000000001",
-            isReleased: false,
-            availableAt: null,
-            batch: {
-              name: "August 2026",
-              code: "ML1-2026-AUG",
-              status: "ACTIVE",
-            },
-          },
-        ],
-      },
-    ]);
-
-    const result = await getCourseCurriculumService(courseFixture().id, {
-      includeRetired: "true",
-    });
-
-    expect(curriculumRepo.findByCourseId).toHaveBeenCalledWith(
-      courseFixture().id,
-      true,
-    );
-    expect(result.curriculum[0].usage.batches).toEqual([
-      expect.objectContaining({
-        batchName: "August 2026",
-        batchStatus: "ACTIVE",
-        isReleased: false,
-      }),
-    ]);
+  it("attaches an existing library session only", async () => {
+    curriculumRepository.attach.mockResolvedValue(curriculumFixture());
+    const result = await attachCourseSessionService(courseId, { sessionId, orderIndex: 0 }, "actor-1");
+    expect(curriculumRepository.attach).toHaveBeenCalledWith(courseId, sessionId, 0);
+    expect(result.courseSession.deliveryStatus).toBe("UNRELEASED");
   });
 
-  it("requires a recording for create-and-attach", async () => {
-    courseRepo.findById.mockResolvedValue(courseFixture());
-
-    await expect(
-      attachCourseSessionService(
-        courseFixture().id,
-        {
-          session: {
-            title: "Session without recording",
-            reusePolicy: "SINGLE_COURSE",
-          },
-        },
-        "actor-1",
-      ),
-    ).rejects.toThrow(/recording URL/i);
-    expect(curriculumRepo.createAndAttach).not.toHaveBeenCalled();
+  it("rejects duplicate or discontinuous ordering", async () => {
+    await expect(reorderCourseCurriculumService(courseId, { courseSessions: [{ id: courseSessionId, orderIndex: 0 }, { id: courseSessionId, orderIndex: 2 }] }, "actor-1")).rejects.toThrow(/continuous from zero/i);
+    expect(curriculumRepository.reorder).not.toHaveBeenCalled();
   });
 
-  it("rejects duplicate or discontinuous reorder payloads", async () => {
-    const id = curriculumFixture().id;
-    await expect(
-      reorderCourseCurriculumService(
-        courseFixture().id,
-        {
-          courseSessions: [
-            { id, orderIndex: 0 },
-            { id, orderIndex: 2 },
-          ],
-        },
-        "actor-1",
-      ),
-    ).rejects.toThrow(/unique and use continuous/i);
-    expect(courseRepo.findById).not.toHaveBeenCalled();
+  it("delegates detach-versus-retire decisions to the locked repository", async () => {
+    curriculumRepository.remove.mockResolvedValue({ action: "RETIRED" });
+    await expect(removeCourseSessionService(courseId, courseSessionId, "actor-1")).resolves.toEqual({ action: "RETIRED" });
+    expect(curriculumRepository.remove).toHaveBeenCalledWith(courseId, courseSessionId);
   });
 
-  it("does not remove a curriculum item through another course", async () => {
-    courseRepo.findById.mockResolvedValue(courseFixture());
-    curriculumRepo.findById.mockResolvedValue({
-      ...curriculumFixture(),
-      courseId: "different-course",
-    });
-
-    await expect(
-      removeCourseSessionService(
-        courseFixture().id,
-        curriculumFixture().id,
-        "actor-1",
-      ),
-    ).rejects.toThrow(/not found/i);
-    expect(curriculumRepo.removeOrRetire).not.toHaveBeenCalled();
+  it("validates scheduled availability", async () => {
+    await expect(updateCourseSessionDeliveryService(courseId, courseSessionId, { status: "SCHEDULED" }, "actor-1")).rejects.toMatchObject({ statusCode: 400 });
+    expect(curriculumRepository.updateDelivery).not.toHaveBeenCalled();
   });
 
-  it("does not remove the final session while Free Learning enrollment is open", async () => {
-    courseRepo.findById.mockResolvedValue({
-      ...courseFixture("FREE_LEARNING"),
-      enrollmentStatus: "OPEN",
-    });
-    curriculumRepo.findById.mockResolvedValue(curriculumFixture());
-
-    await expect(
-      removeCourseSessionService(
-        courseFixture().id,
-        curriculumFixture().id,
-        "actor-1",
-      ),
-    ).rejects.toThrow(/Coming soon or Closed/i);
-    expect(curriculumRepo.removeOrRetire).not.toHaveBeenCalled();
+  it("updates delivery through the transaction repository", async () => {
+    curriculumRepository.updateDelivery.mockResolvedValue(curriculumFixture({ deliveryStatus: "RELEASED", firstReleasedAt: new Date() }));
+    const result = await updateCourseSessionDeliveryService(courseId, courseSessionId, { status: "RELEASED" }, "actor-1");
+    expect(curriculumRepository.updateDelivery).toHaveBeenCalledWith(courseId, courseSessionId, expect.objectContaining({ status: "RELEASED" }));
+    expect(result.deliveryStatus).toBe("RELEASED");
   });
 });

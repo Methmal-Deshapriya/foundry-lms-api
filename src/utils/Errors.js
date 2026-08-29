@@ -66,14 +66,14 @@ export class ConflictError extends CustomError {
 }
 
 /**
- * 409 used when a capacity check executed under the batch-enrollment lock
+ * 409 used when a capacity check executed under the course-enrollment lock
  * proves that no additional learner can be inserted.
  */
-export class BatchCapacityReachedError extends ConflictError {
+export class CourseCapacityReachedError extends ConflictError {
   constructor() {
     super(
-      "This batch has reached its enrollment capacity.",
-      "BATCH_CAPACITY_REACHED",
+      "This course intake has reached its enrollment capacity.",
+      "COURSE_CAPACITY_REACHED",
     );
   }
 }
@@ -100,7 +100,7 @@ export class EnrollmentCompletedError extends CustomError {
 export class CatalogDeletionBlockedError extends CustomError {
   constructor(details) {
     super(
-      "Permanent deletion is blocked because this catalog item contains operational batches or learner history.",
+      "Permanent deletion is blocked because this catalog item contains operational delivery or learner history.",
       409,
       "CATALOG_DELETION_BLOCKED",
     );

@@ -1,18 +1,10 @@
 import { z } from "zod";
-import { sessionContentSchema } from "../sessions/sessionLibrary.schema.js";
-
 const orderIndex = z.number().int().min(0).optional();
 
-export const attachCourseSessionSchema = z.union([
-  z.object({
-    sessionId: z.string().uuid("Invalid session ID."),
-    orderIndex,
-  }),
-  z.object({
-    session: sessionContentSchema,
-    orderIndex,
-  }),
-]);
+export const attachCourseSessionSchema = z.object({
+  sessionId: z.string().uuid("Invalid session ID."),
+  orderIndex,
+});
 
 export const courseCurriculumQuerySchema = z.object({
   includeRetired: z
@@ -31,4 +23,14 @@ export const reorderCourseCurriculumSchema = z.object({
     )
     .min(1),
   acknowledgeSequenceRisk: z.boolean().default(false),
+});
+
+export const updateCourseSessionDeliverySchema = z.object({
+  status: z.enum(["UNRELEASED", "SCHEDULED", "RELEASED", "WITHDRAWN"]),
+  availableAt: z.coerce.date().nullable().optional(),
+  acknowledgeSequenceRisk: z.boolean().default(false),
+}).superRefine((data, context) => {
+  if (data.status === "SCHEDULED" && !data.availableAt) {
+    context.addIssue({ code: "custom", path: ["availableAt"], message: "Scheduled delivery requires an availability date." });
+  }
 });

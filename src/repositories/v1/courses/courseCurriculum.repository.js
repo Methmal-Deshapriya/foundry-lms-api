@@ -1,417 +1,232 @@
 import prisma from "../../../utils/prisma.js";
-import { isSelfPacedService } from "../../../constants/v1/catalog/learningServicePolicy.constants.js";
-import {
-  ConflictError,
-  NotFoundError,
-  SequenceRiskError,
-  ValidationError,
-  handlePrismaError,
-} from "../../../utils/Errors.js";
+import { ConflictError, NotFoundError, SequenceRiskError, handlePrismaError } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
-const curriculumInclude = {
+const include = {
   session: true,
-  _count: { select: { batchLinks: true, completions: true } },
+  _count: { select: { completions: true } },
 };
 
-async function moveActiveLinksOutOfRange(transaction, courseId) {
+export function findById(id) { return prisma.courseSession.findUnique({ where: { id }, include }); }
+
+export function findCurriculum(courseId, includeRetired = false) {
+  return prisma.courseSession.findMany({
+    where: { courseId, ...(includeRetired ? {} : { retiredAt: null }) },
+    orderBy: [{ retiredAt: "asc" }, { orderIndex: "asc" }, { historicalOrderIndex: "asc" }],
+    include,
+  });
+}
+
+async function lockCourse(transaction, courseId) {
+  const initial = await transaction.course.findUnique({
+    where: { id: courseId },
+    select: { categoryId: true, courseGroupId: true, category: { select: { serviceId: true } } },
+  });
+  if (!initial) throw new NotFoundError("Course not found.");
+  await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+  await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+  await acquireTransactionLock(transaction, `course-group:${initial.courseGroupId}`);
+  await acquireTransactionLock(transaction, `course:${courseId}`);
+  const course = await transaction.course.findUnique({ where: { id: courseId }, include: { courseGroup: true, category: { include: { service: true } } } });
+  if (!course) throw new NotFoundError("Course not found.");
+  if (["COMPLETED", "CANCELLED", "ARCHIVED"].includes(course.status)) throw new ConflictError("Terminal courses have a frozen curriculum.");
+  if (course.category.service.status === "ARCHIVED" || course.courseGroup.archivedAt || course.category.status === "ARCHIVED") throw new ConflictError("Archived catalog setup is read-only.");
+  return course;
+}
+
+async function compact(transaction, courseId) {
+  const active = await transaction.courseSession.findMany({ where: { courseId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true } });
+  if (active.length === 0) return;
+  await moveActiveOrderIndexesOutOfRange(transaction, courseId, active);
+  for (const [orderIndex, item] of active.entries()) await transaction.courseSession.update({ where: { id: item.id }, data: { orderIndex } });
+}
+
+async function moveActiveOrderIndexesOutOfRange(transaction, courseId, active) {
+  const maxOrderIndex = active.reduce(
+    (maximum, item) => Math.max(maximum, item.orderIndex ?? 0),
+    0,
+  );
+  const offset = maxOrderIndex + active.length + 1;
   await transaction.courseSession.updateMany({
     where: { courseId, retiredAt: null },
-    data: { orderIndex: { increment: 1_000_000 } },
+    data: { orderIndex: { increment: offset } },
   });
 }
 
-async function assignContinuousOrder(transaction, orderedIds) {
-  for (const [orderIndex, id] of orderedIds.entries()) {
-    await transaction.courseSession.update({
-      where: { id },
-      data: { orderIndex, retiredAt: null },
-    });
-  }
+function isVisibleNow(item, now = new Date()) {
+  return item.deliveryStatus === "RELEASED" ||
+    (item.deliveryStatus === "SCHEDULED" && item.availableAt && item.availableAt <= now);
 }
 
-async function assertOperationalCourseInTransaction(transaction, courseId) {
-  const course = await transaction.course.findUnique({
-    where: { id: courseId },
-    select: {
-      status: true,
-      category: { select: { status: true } },
-    },
-  });
-  if (!course) throw new NotFoundError("Course not found.");
-  if (course.status === "ARCHIVED" || course.category.status === "ARCHIVED") {
-    throw new ConflictError(
-      "Archived courses are read-only. Session changes are not allowed.",
-    );
-  }
-}
-
-async function attachWithinTransaction(
-  transaction,
-  courseId,
-  sessionId,
-  requestedOrderIndex,
-) {
-  await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-  await assertOperationalCourseInTransaction(transaction, courseId);
-  await acquireTransactionLock(transaction, `session:${sessionId}`);
-
-  const session = await transaction.session.findUnique({
-    where: { id: sessionId },
-    include: {
-      courseSessions: { select: { id: true, courseId: true, retiredAt: true } },
-    },
-  });
-  if (!session) throw new NotFoundError("Session not found.");
-  if (session.status !== "READY") {
-    throw new ConflictError("Only ready sessions can be attached to a course.");
-  }
-
-  const existingForCourse = session.courseSessions.find(
-    (courseSession) => courseSession.courseId === courseId,
-  );
-  if (existingForCourse && !existingForCourse.retiredAt) {
-    throw new ConflictError("This session is already active in the course curriculum.");
-  }
+async function protectOpenFreeCurriculum(transaction, course, item, nextStatus = null, nextAvailableAt = null) {
   if (
-    session.reusePolicy === "SINGLE_COURSE" &&
-    session.courseSessions.some((courseSession) => courseSession.courseId !== courseId)
+    course.status !== "OPEN_ACTIVE" ||
+    course.category.service.courseMode !== "EVERGREEN" ||
+    course.category.service.accessType !== "FREE"
   ) {
-    throw new ConflictError("This one-course session is locked to another course.");
+    return;
   }
-
-  const activeLinks = await transaction.courseSession.findMany({
-    where: { courseId, retiredAt: null },
-    orderBy: { orderIndex: "asc" },
-    select: { id: true },
-  });
-  const orderIndex = requestedOrderIndex ?? activeLinks.length;
-  if (orderIndex < 0 || orderIndex > activeLinks.length) {
-    throw new ValidationError(
-      `Order index must be between 0 and ${activeLinks.length}.`,
-      "orderIndex",
-    );
-  }
-
-  let courseSessionId = existingForCourse?.id;
-  if (!courseSessionId) {
-    const relation = await transaction.courseSession.create({
-      data: {
-        courseId,
-        sessionId,
-        orderIndex: null,
-        retiredAt: new Date(),
-      },
-      select: { id: true },
-    });
-    courseSessionId = relation.id;
-  }
-
-  await moveActiveLinksOutOfRange(transaction, courseId);
-  const orderedIds = activeLinks.map(({ id }) => id);
-  orderedIds.splice(orderIndex, 0, courseSessionId);
-  await assignContinuousOrder(transaction, orderedIds);
-  return courseSessionId;
-}
-
-export async function findByCourseId(courseId, includeRetired = false) {
-  const [curriculum, retiredBatchLinks] = await Promise.all([
-    prisma.courseSession.findMany({
-      where: { courseId, ...(includeRetired ? {} : { retiredAt: null }) },
-      orderBy: [
-        { retiredAt: "asc" },
-        { orderIndex: "asc" },
-        { createdAt: "asc" },
+  const currentlyVisible = isVisibleNow(item);
+  const remainsVisible = nextStatus
+    ? isVisibleNow({ deliveryStatus: nextStatus, availableAt: nextAvailableAt })
+    : false;
+  if (!currentlyVisible || remainsVisible) return;
+  const otherVisibleCount = await transaction.courseSession.count({
+    where: {
+      courseId: course.id,
+      id: { not: item.id },
+      retiredAt: null,
+      OR: [
+        { deliveryStatus: "RELEASED" },
+        { deliveryStatus: "SCHEDULED", availableAt: { lte: new Date() } },
       ],
-      include: curriculumInclude,
-    }),
-    includeRetired
-      ? prisma.batchSession.findMany({
-          where: {
-            courseId,
-            courseSession: { retiredAt: { not: null } },
-          },
-          orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            batchId: true,
-            courseSessionId: true,
-            isReleased: true,
-            availableAt: true,
-            batch: {
-              select: { name: true, code: true, status: true },
-            },
-          },
-        })
-      : Promise.resolve([]),
-  ]);
-
-  const linksByCourseSession = retiredBatchLinks.reduce((links, batchLink) => {
-    const current = links.get(batchLink.courseSessionId) ?? [];
-    current.push(batchLink);
-    links.set(batchLink.courseSessionId, current);
-    return links;
-  }, new Map());
-
-  return curriculum.map((courseSession) => ({
-    ...courseSession,
-    batchLinks: linksByCourseSession.get(courseSession.id) ?? [],
-  }));
-}
-
-export async function findById(id) {
-  return prisma.courseSession.findUnique({
-    where: { id },
-    include: curriculumInclude,
+    },
   });
-}
-
-export async function attachExisting(courseId, sessionId, orderIndex) {
-  try {
-    const courseSessionId = await prisma.$transaction((transaction) =>
-      attachWithinTransaction(transaction, courseId, sessionId, orderIndex),
+  if (otherVisibleCount === 0) {
+    throw new ConflictError(
+      "An open Free Learning course must keep at least one visible session. Close or cancel the course first.",
+      "FREE_COURSE_REQUIRES_VISIBLE_SESSION",
     );
-    return await findById(courseSessionId);
-  } catch (error) {
-    if (
-      error instanceof ConflictError ||
-      error instanceof NotFoundError ||
-      error instanceof ValidationError
-    ) {
-      throw error;
-    }
-    throw handlePrismaError(error);
   }
 }
 
-export async function createAndAttach(courseId, sessionData, orderIndex) {
-  try {
-    const result = await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-      const session = await transaction.session.create({
-        data: { ...sessionData, status: "READY" },
-        select: { id: true },
-      });
-      const courseSessionId = await attachWithinTransaction(
-        transaction,
-        courseId,
-        session.id,
-        orderIndex,
-      );
-      return { sessionId: session.id, courseSessionId };
-    });
-    return { ...result, courseSession: await findById(result.courseSessionId) };
-  } catch (error) {
-    if (
-      error instanceof ConflictError ||
-      error instanceof NotFoundError ||
-      error instanceof ValidationError
-    ) {
-      throw error;
-    }
-    throw handlePrismaError(error);
-  }
-}
-
-export async function reorder(
-  courseId,
-  orderedCourseSessions,
-  acknowledgeSequenceRisk = false,
-) {
+export async function attach(courseId, sessionId, requestedIndex) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await acquireTransactionLock(transaction, `curriculum:${courseId}`);
-      await assertOperationalCourseInTransaction(transaction, courseId);
-      const activeLinks = await transaction.courseSession.findMany({
-          where: { courseId, retiredAt: null },
-          orderBy: { orderIndex: "asc" },
-          select: { id: true, session: { select: { title: true } } },
-        });
-      const liveBatches = await transaction.batch.findMany({
-          where: {
-            courseId,
-            status: { in: ["DRAFT", "ENROLLING", "ACTIVE"] },
-          },
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            sessions: {
-              select: {
-                courseSessionId: true,
-                isReleased: true,
-                availableAt: true,
-              },
-            },
-          },
-        });
-      const expectedIds = new Set(activeLinks.map(({ id }) => id));
-      const suppliedIds = new Set(orderedCourseSessions.map(({ id }) => id));
-      if (
-        expectedIds.size !== suppliedIds.size ||
-        [...suppliedIds].some((id) => !expectedIds.has(id))
-      ) {
-        throw new ValidationError(
-          "Reordering must include every active course session exactly once.",
-          "courseSessions",
-        );
+      await lockCourse(transaction, courseId);
+      const session = await transaction.session.findUnique({ where: { id: sessionId } });
+      if (!session) throw new NotFoundError("Session not found.");
+      if (session.status !== "READY") throw new ConflictError("Only Ready sessions can be attached.");
+      const existing = await transaction.courseSession.findUnique({ where: { courseId_sessionId: { courseId, sessionId } } });
+      if (existing && !existing.retiredAt) throw new ConflictError("Session is already attached to this course.");
+      const active = await transaction.courseSession.findMany({ where: { courseId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true, orderIndex: true } });
+      const index = Math.min(requestedIndex ?? active.length, active.length);
+      if (active.length > 0) await moveActiveOrderIndexesOutOfRange(transaction, courseId, active);
+      let relation;
+      if (existing) {
+        relation = await transaction.courseSession.update({ where: { id: existing.id }, data: { retiredAt: null, historicalOrderIndex: null, orderIndex: index, deliveryStatus: "WITHDRAWN", availableAt: null } });
+      } else {
+        relation = await transaction.courseSession.create({ data: { courseId, sessionId, orderIndex: index } });
       }
+      const ids = active.map(({ id }) => id);
+      ids.splice(index, 0, relation.id);
+      for (const [orderIndex, id] of ids.entries()) await transaction.courseSession.update({ where: { id }, data: { orderIndex } });
+      return transaction.courseSession.findUnique({ where: { id: relation.id }, include });
+    });
+  } catch (error) { throw handlePrismaError(error); }
+}
 
-      const titleById = new Map(
-        activeLinks.map(({ id, session }) => [id, session.title]),
-      );
-      const proposedIds = [...orderedCourseSessions]
-        .sort((left, right) => left.orderIndex - right.orderIndex)
-        .map(({ id }) => id);
-      const affectedBatches = liveBatches.flatMap((batch) => {
-        const deliveries = new Map(
-          batch.sessions.map((delivery) => [delivery.courseSessionId, delivery]),
-        );
-        let earlierUnreleased = null;
-        for (const courseSessionId of proposedIds) {
-          const delivery = deliveries.get(courseSessionId);
-          if (!delivery?.isReleased) {
-            earlierUnreleased ??= courseSessionId;
-            continue;
-          }
-          if (earlierUnreleased) {
-            return [{
-              batchId: batch.id,
-              batchName: batch.name,
-              batchCode: batch.code,
-              earlierUnreleased: {
-                courseSessionId: earlierUnreleased,
-                title: titleById.get(earlierUnreleased),
-              },
-              laterCommitted: {
-                courseSessionId,
-                title: titleById.get(courseSessionId),
-                state: delivery.availableAt ? "SCHEDULED" : "RELEASED",
-              },
-            }];
-          }
-        }
-        return [];
+export async function reorder(courseId, items, acknowledgeSequenceRisk = false) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      await lockCourse(transaction, courseId);
+      const active = await transaction.courseSession.findMany({
+        where: { courseId, retiredAt: null },
+        select: {
+          id: true,
+          orderIndex: true,
+          deliveryStatus: true,
+          firstReleasedAt: true,
+          _count: { select: { completions: true } },
+          session: { select: { title: true } },
+        },
       });
-
-      if (affectedBatches.length > 0 && !acknowledgeSequenceRisk) {
+      const expected = new Set(active.map(({ id }) => id));
+      if (items.length !== expected.size || items.some(({ id }) => !expected.has(id))) throw new ConflictError("Reorder must include every active course session exactly once.");
+      const nextOrder = new Map(items.map(({ id, orderIndex }) => [id, orderIndex]));
+      const affected = active.filter((item) =>
+        item.orderIndex !== nextOrder.get(item.id) &&
+        (
+          Boolean(item.firstReleasedAt) ||
+          ["RELEASED", "SCHEDULED"].includes(item.deliveryStatus) ||
+          item._count.completions > 0
+        ),
+      );
+      if (affected.length > 0 && !acknowledgeSequenceRisk) {
         throw new SequenceRiskError(
-          "This reorder would place a released or scheduled session after an unreleased session in one or more live batches.",
+          "Reordering changes the position of sessions already scheduled, released, or completed.",
           {
-            warningCode: "COURSE_REORDER_BREAKS_DELIVERY_SEQUENCE",
-            affectedBatchCount: affectedBatches.length,
-            affectedBatches: affectedBatches.slice(0, 20),
-            confirmationText: "CONFIRM",
+            blockingSessions: affected.map((item) => ({
+              id: item.id,
+              title: item.session.title,
+              orderIndex: item.orderIndex,
+              requestedOrderIndex: nextOrder.get(item.id),
+              deliveryStatus: item.deliveryStatus,
+              completionCount: item._count.completions,
+            })),
           },
         );
       }
-
-      await moveActiveLinksOutOfRange(transaction, courseId);
-      await assignContinuousOrder(
-        transaction,
-        proposedIds,
-      );
-      return {
-        affectedBatchCount: affectedBatches.length,
-        sequenceRiskAcknowledged:
-          affectedBatches.length > 0 && acknowledgeSequenceRisk,
-      };
+      if (active.length > 0) await moveActiveOrderIndexesOutOfRange(transaction, courseId, active);
+      for (const item of items) await transaction.courseSession.update({ where: { id: item.id }, data: { orderIndex: item.orderIndex } });
+      return true;
     });
-  } catch (error) {
-    if (error instanceof ValidationError || error instanceof SequenceRiskError) {
-      throw error;
-    }
-    throw handlePrismaError(error);
-  }
+  } catch (error) { throw handlePrismaError(error); }
 }
 
-export async function removeOrRetire(id, serviceType) {
+export async function remove(courseId, courseSessionId) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.courseSession.findUnique({
-        where: { id },
-        select: { courseId: true },
-      });
-      if (!initial) throw new NotFoundError("Course session not found.");
-
-      await acquireTransactionLock(transaction, `curriculum:${initial.courseId}`);
-      await assertOperationalCourseInTransaction(transaction, initial.courseId);
-      await acquireTransactionLock(transaction, `free-enrollment:${initial.courseId}`);
-      await acquireTransactionLock(transaction, `course-session:${id}`);
-
-      const courseSession = await transaction.courseSession.findUnique({
-        where: { id },
-        include: {
-          _count: { select: { batchLinks: true, completions: true } },
-          course: {
-            select: {
-              enrollmentStatus: true,
-              _count: {
-                select: {
-                  enrollments: true,
-                  courseSessions: { where: { retiredAt: null } },
-                },
-              },
-            },
-          },
-        },
-      });
-      if (!courseSession) throw new NotFoundError("Course session not found.");
-
-      if (
-        isSelfPacedService(serviceType) &&
-        courseSession.course.enrollmentStatus === "OPEN" &&
-        !courseSession.retiredAt &&
-        courseSession.course._count.courseSessions === 1
-      ) {
-        throw new ConflictError(
-          "Move enrollment to Coming soon or Closed before removing the final active session.",
-        );
-      }
-
-      const hasHistory =
-        courseSession._count.batchLinks > 0 ||
-        courseSession._count.completions > 0 ||
-        (isSelfPacedService(serviceType) &&
-          courseSession.course._count.enrollments > 0);
-
-      if (courseSession.retiredAt) {
-        if (hasHistory) return { id, action: "RETIRED" };
-        await transaction.courseSession.delete({ where: { id } });
-        return { id, action: "DETACHED" };
-      }
-
-      const remaining = await transaction.courseSession.findMany({
-        where: {
-          courseId: courseSession.courseId,
-          retiredAt: null,
-          id: { not: id },
-        },
-        orderBy: { orderIndex: "asc" },
-        select: { id: true },
-      });
-      await moveActiveLinksOutOfRange(transaction, courseSession.courseId);
-
-      if (hasHistory) {
-        await transaction.batchSession.updateMany({
-          where: { courseSessionId: id },
-          data: { historicalOrderIndex: courseSession.orderIndex },
-        });
+      const course = await lockCourse(transaction, courseId);
+      const item = await transaction.courseSession.findFirst({ where: { id: courseSessionId, courseId, retiredAt: null }, include: { _count: { select: { completions: true } } } });
+      if (!item) throw new NotFoundError("Course session not found.");
+      await protectOpenFreeCurriculum(transaction, course, item);
+      const protectedHistory =
+        Boolean(item.firstReleasedAt) ||
+        item.deliveryStatus === "RELEASED" ||
+        (item.deliveryStatus === "SCHEDULED" && item.availableAt && item.availableAt <= new Date()) ||
+        item._count.completions > 0;
+      if (protectedHistory) {
+        // Retirement removes the item from the live curriculum but preserves the
+        // delivery state learners already received. CourseSession is now the
+        // delivery record, so withdrawing here would destroy historical access.
         await transaction.courseSession.update({
-          where: { id },
-          data: { orderIndex: null, retiredAt: new Date() },
+          where: { id: item.id },
+          data: {
+            historicalOrderIndex: item.orderIndex,
+            orderIndex: null,
+            retiredAt: new Date(),
+          },
         });
       } else {
-        await transaction.courseSession.delete({ where: { id } });
+        await transaction.courseSession.delete({ where: { id: item.id } });
       }
-      await assignContinuousOrder(
-        transaction,
-        remaining.map(({ id: remainingId }) => remainingId),
-      );
-      return { id, action: hasHistory ? "RETIRED" : "DETACHED" };
+      await compact(transaction, courseId);
+      return { action: protectedHistory ? "RETIRED" : "DETACHED" };
     });
-  } catch (error) {
-    if (error instanceof NotFoundError || error instanceof ConflictError) throw error;
-    throw handlePrismaError(error);
-  }
+  } catch (error) { throw handlePrismaError(error); }
+}
+
+export async function updateDelivery(courseId, courseSessionId, input) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const course = await lockCourse(transaction, courseId);
+      if (!["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(course.status)) throw new ConflictError("Session delivery is available only while the course is active.");
+      const item = await transaction.courseSession.findFirst({ where: { id: courseSessionId, courseId, retiredAt: null }, include: { session: true } });
+      if (!item) throw new NotFoundError("Course session not found.");
+      if (["RELEASED", "SCHEDULED"].includes(input.status) && item.session.status !== "READY") throw new ConflictError("Archived sessions cannot be newly released or scheduled.");
+      if (input.status === "SCHEDULED" && (!input.availableAt || input.availableAt <= new Date())) throw new ConflictError("Scheduled availability must be in the future.");
+      await protectOpenFreeCurriculum(transaction, course, item, input.status, input.availableAt);
+      const all = await transaction.courseSession.findMany({ where: { courseId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true, orderIndex: true, deliveryStatus: true, availableAt: true, session: { select: { title: true } } } });
+      const now = new Date();
+      const isAvailableBy = (row, boundary) =>
+        row.deliveryStatus === "RELEASED" ||
+        (row.deliveryStatus === "SCHEDULED" && row.availableAt && row.availableAt <= boundary);
+      const releaseBoundary = input.status === "SCHEDULED" ? input.availableAt : now;
+      const blockers = input.status === "RELEASED" || input.status === "SCHEDULED"
+        ? all.filter((row) => row.orderIndex < item.orderIndex && !isAvailableBy(row, releaseBoundary))
+        : input.status === "WITHDRAWN"
+          ? all.filter((row) => row.orderIndex > item.orderIndex && ["RELEASED", "SCHEDULED"].includes(row.deliveryStatus))
+          : [];
+      if (blockers.length > 0 && !input.acknowledgeSequenceRisk) throw new SequenceRiskError("This delivery change breaks curriculum sequence.", { blockingSessions: blockers.map(({ id, session, orderIndex }) => ({ id, title: session.title, orderIndex })) });
+      const firstReleasedAt = input.status === "RELEASED"
+        ? item.firstReleasedAt ?? new Date()
+        : item.firstReleasedAt;
+      return transaction.courseSession.update({
+        where: { id: item.id },
+        data: { deliveryStatus: input.status, availableAt: input.status === "SCHEDULED" ? input.availableAt : null, firstReleasedAt },
+        include,
+      });
+    });
+  } catch (error) { if (error instanceof SequenceRiskError) throw error; throw handlePrismaError(error); }
 }

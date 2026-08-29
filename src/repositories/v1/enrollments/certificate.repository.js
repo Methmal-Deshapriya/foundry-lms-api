@@ -11,7 +11,6 @@ const certificateInclude = {
     include: {
       user: true,
       course: { include: { category: true } },
-      batch: true,
     },
   },
 };
@@ -98,25 +97,19 @@ export async function createIssued(data) {
     return await prisma.$transaction(async (transaction) => {
       const initialEnrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
-        select: { courseId: true, batchId: true },
+        select: { courseId: true },
       });
       if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
       await acquireTransactionLock(
         transaction,
-        `curriculum:${initialEnrollment.courseId}`,
+        `course:${initialEnrollment.courseId}`,
       );
-      if (initialEnrollment.batchId) {
-        await acquireTransactionLock(
-          transaction,
-          `batch:${initialEnrollment.batchId}`,
-        );
-      }
       await acquireTransactionLock(transaction, `enrollment:${data.enrollmentId}`);
       const enrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         select: {
           status: true,
-          course: { select: { certificateEnabled: true } },
+          course: { select: { courseGroup: { select: { certificateEnabled: true } } } },
         },
       });
       if (!enrollment) throw new NotFoundError("Enrollment not found.");
@@ -126,7 +119,7 @@ export async function createIssued(data) {
           "CERTIFICATE_ISSUANCE_BLOCKED",
         );
       }
-      if (!enrollment.course.certificateEnabled) {
+      if (!enrollment.course.courseGroup.certificateEnabled) {
         throw new ConflictError(
           "Certificates are not enabled for this course.",
           "CERTIFICATE_ISSUANCE_BLOCKED",
@@ -172,21 +165,15 @@ export async function revokeIssued(id, data) {
 
       const initialEnrollment = await transaction.enrollment.findUnique({
         where: { id: initial.enrollmentId },
-        select: { courseId: true, batchId: true },
+        select: { courseId: true },
       });
       if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
-      // Use the global curriculum -> batch -> enrollment order so revocation
-      // cannot race a batch completion readiness decision.
+      // Use the global course -> enrollment order so revocation cannot race a
+      // course-completion readiness decision.
       await acquireTransactionLock(
         transaction,
-        `curriculum:${initialEnrollment.courseId}`,
+        `course:${initialEnrollment.courseId}`,
       );
-      if (initialEnrollment.batchId) {
-        await acquireTransactionLock(
-          transaction,
-          `batch:${initialEnrollment.batchId}`,
-        );
-      }
       await acquireTransactionLock(
         transaction,
         `enrollment:${initial.enrollmentId}`,
@@ -202,8 +189,6 @@ export async function revokeIssued(id, data) {
 
       const lifecycleContext = {
         enrollmentStatus: current.enrollment.status,
-        batchId: current.enrollment.batchId,
-        batchStatus: current.enrollment.batch?.status ?? null,
         courseStatus: current.enrollment.course.status,
         categoryStatus: current.enrollment.course.category.status,
       };

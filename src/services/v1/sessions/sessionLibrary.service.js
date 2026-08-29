@@ -29,17 +29,16 @@ function toSessionLibraryResponse(session) {
   const usage = {
     courseCount: courseUsages.length,
     activeCourseCount: courseUsages.filter(({ retiredAt }) => !retiredAt).length,
-    batchCount: courseUsages.reduce(
-      (total, courseSession) => total + (courseSession._count?.batchLinks ?? 0),
-      0,
-    ),
+    courseGroupCount: new Set(courseUsages.map(({ course }) => course?.courseGroupId)).size,
     courses: courseUsages.map((courseSession) => ({
       courseSessionId: courseSession.id,
       courseId: courseSession.courseId,
       courseTitle: courseSession.course?.title,
+      courseCode: courseSession.course?.code,
+      courseGroupId: courseSession.course?.courseGroupId,
       orderIndex: courseSession.orderIndex,
       retiredAt: courseSession.retiredAt,
-      batchCount: courseSession._count?.batchLinks ?? 0,
+      deliveryStatus: courseSession.deliveryStatus,
     })),
   };
 
@@ -80,7 +79,7 @@ export async function createSessionLibraryItemService(data, actorId) {
     entityType: ENTITY_TYPES.SESSION,
     entityId: session.id,
     description: `Session "${session.title}" created in the library.`,
-    metadata: { reusePolicy: session.reusePolicy, status: session.status },
+    metadata: { status: session.status },
   });
   return toSessionLibraryResponse(session);
 }
@@ -99,10 +98,7 @@ export async function updateSessionLibraryItemService(id, data, actorId) {
     metadata: {
       changedFields,
       affectedCourses: current.courseSessions.length,
-      affectedBatches: current.courseSessions.reduce(
-        (total, courseSession) => total + (courseSession._count?.batchLinks ?? 0),
-        0,
-      ),
+      affectedCourseGroups: new Set(current.courseSessions.map(({ course }) => course?.courseGroupId)).size,
     },
   });
   return toSessionLibraryResponse(updated);
@@ -120,10 +116,7 @@ export async function archiveSessionLibraryItemService(id, actorId) {
     description: `Session "${current.title}" archived. Existing delivery access is preserved.`,
     metadata: {
       affectedCourses: current.courseSessions.length,
-      affectedBatches: current.courseSessions.reduce(
-        (total, courseSession) => total + (courseSession._count?.batchLinks ?? 0),
-        0,
-      ),
+      affectedCourseGroups: new Set(current.courseSessions.map(({ course }) => course?.courseGroupId)).size,
     },
   });
   return toSessionLibraryResponse(session);
@@ -164,7 +157,7 @@ export async function deleteSessionLibraryItemPermanentlyService(id, actorId) {
     entityType: ENTITY_TYPES.SESSION,
     entityId: id,
     description: `Session "${current.title}" permanently deleted from the library.`,
-    metadata: { title: current.title, reusePolicy: current.reusePolicy },
+    metadata: { title: current.title },
   });
   return result;
 }
