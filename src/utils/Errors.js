@@ -60,8 +60,62 @@ export class NotFoundError extends CustomError {
  * 409 Conflict — Use for duplicate records or resource state conflicts.
  */
 export class ConflictError extends CustomError {
-  constructor(message = "Resource already exists") {
-    super(message, 409, "CONFLICT");
+  constructor(message = "Resource already exists", code = "CONFLICT") {
+    super(message, 409, code);
+  }
+}
+
+/**
+ * 409 used when a capacity check executed under the course-enrollment lock
+ * proves that no additional learner can be inserted.
+ */
+export class CourseCapacityReachedError extends ConflictError {
+  constructor() {
+    super(
+      "This course intake has reached its enrollment capacity.",
+      "COURSE_CAPACITY_REACHED",
+    );
+  }
+}
+
+/**
+ * 409 used when a student attempts to mutate frozen learning history after
+ * the administrator has completed the enrollment.
+ */
+export class EnrollmentCompletedError extends CustomError {
+  constructor() {
+    super(
+      "This enrollment is completed. Session completion history is read-only.",
+      409,
+      "ENROLLMENT_COMPLETED",
+    );
+  }
+}
+
+/**
+ * 409 used when permanent catalog deletion would destroy operational delivery
+ * or learner history. The structured impact is safe to show in an admin
+ * confirmation dialog.
+ */
+export class CatalogDeletionBlockedError extends CustomError {
+  constructor(details) {
+    super(
+      "Permanent deletion is blocked because this catalog item contains operational delivery or learner history.",
+      409,
+      "CATALOG_DELETION_BLOCKED",
+    );
+    this.details = details;
+  }
+}
+
+/**
+ * 409 used when an operation would break the intended curriculum sequence.
+ * The client may retry only after an explicit, audited acknowledgement.
+ */
+export class SequenceRiskError extends CustomError {
+  constructor(message, details) {
+    super(message, 409, "SEQUENCE_RISK_CONFIRMATION_REQUIRED");
+    this.details = details;
   }
 }
 
@@ -108,6 +162,10 @@ export class DatabaseError extends CustomError {
  * @returns {CustomError} A mapped error or generic DatabaseError.
  */
 export function handlePrismaError(prismaError) {
+  // Repository catch blocks also receive deliberate application errors thrown
+  // from inside interactive transactions. Preserve their status/code instead
+  // of disguising them as generic database failures.
+  if (prismaError instanceof CustomError) return prismaError;
   if (prismaError?.code === "P2002") {
     return new ConflictError("A record with this value already exists");
   }

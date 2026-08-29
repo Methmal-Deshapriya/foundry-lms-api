@@ -19,8 +19,10 @@ export function toUserResponse(user) {
     lastName: user.lastName,
     email: user.email,
     role: user.role,
+    permissions: permissionsForRole(user.role),
     emailVerified: user.emailVerified,
     createdAt: user.createdAt,
     // We can add or rename fields here if the frontend needs a different shape
   };
 }
+import { permissionsForRole } from "../../../constants/v1/auth/permissions.constants.js";

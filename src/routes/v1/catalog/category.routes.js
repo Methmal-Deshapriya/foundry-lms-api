@@ -8,6 +8,11 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), categoryController.getCategoriesAdmin);
+router.get(
+  "/:id/deletion-impact",
+  requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY),
+  categoryController.getCategoryDeletionImpact,
+);
 router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), categoryController.getCategoryAdmin);
 router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), categoryController.createCategory);
 router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), categoryController.updateCategory);

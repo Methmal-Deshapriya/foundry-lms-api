@@ -5,31 +5,30 @@ import {
   toPublicCourseCard,
   toPublicCourseDetail,
 } from "../../../models/v1/catalog/catalog.model.js";
-import { SERVICE_SLUG_TO_TYPE } from "../../../constants/v1/catalog/catalog.constants.js";
 import { NotFoundError } from "../../../utils/Errors.js";
+import * as learningServiceRepository from "../../../repositories/v1/catalog/learningService.repository.js";
 
-function resolveServiceType(serviceSlug) {
-  const serviceType = SERVICE_SLUG_TO_TYPE[serviceSlug];
-  if (!serviceType) {
-    throw new NotFoundError("Learning service not found.");
-  }
-  return serviceType;
+async function resolveService(serviceSlug) {
+  const service = await learningServiceRepository.findBySlug(serviceSlug, { activeOnly: true });
+  if (!service) throw new NotFoundError("Learning service not found.");
+  return service;
 }
 
 export async function getPublicCategoriesService(serviceSlug) {
-  const serviceType = resolveServiceType(serviceSlug);
-  const categories = await categoryRepo.findPublicByService(serviceType);
+  const service = await resolveService(serviceSlug);
+  const categories = await categoryRepo.findPublicByService(service.id);
   return {
-    serviceType,
-    serviceSlug,
+    serviceId: service.id,
+    serviceType: service.key,
+    serviceSlug: service.slug,
     categoryCount: categories.length,
     categories: categories.map(toPublicCategory),
   };
 }
 
 export async function getPublicCategoryService(serviceSlug, categorySlug) {
-  const serviceType = resolveServiceType(serviceSlug);
-  const category = await categoryRepo.findPublicBySlug(serviceType, categorySlug);
+  const service = await resolveService(serviceSlug);
+  const category = await categoryRepo.findPublicBySlug(service.id, categorySlug);
   if (!category) {
     throw new NotFoundError("Category not found.");
   }
@@ -45,9 +44,9 @@ export async function getPublicCourseService(
   categorySlug,
   courseSlug,
 ) {
-  const serviceType = resolveServiceType(serviceSlug);
+  const service = await resolveService(serviceSlug);
   const course = await courseRepo.findPublicDetail(
-    serviceType,
+    service.id,
     categorySlug,
     courseSlug,
   );

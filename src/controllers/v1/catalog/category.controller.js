@@ -17,6 +17,16 @@ export async function getCategoryAdmin(req, res, next) {
   } catch (error) { next(error); }
 }
 
+export async function getCategoryDeletionImpact(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await categoryService.getCategoryDeletionImpactService(req.params.id),
+      "Category deletion impact fetched successfully",
+    );
+  } catch (error) { next(error); }
+}
+
 export async function createCategory(req, res, next) {
   try {
     return ApiResponse.send(

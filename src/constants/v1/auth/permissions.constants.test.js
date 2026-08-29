@@ -28,9 +28,13 @@ describe("central authorization policy", () => {
     ).toBe(false);
   });
 
-  it("only grants students the free-course self-enrollment capability", () => {
+  it("grants students only learner-owned capabilities", () => {
     expect(hasPermission(ROLES.STUDENT, PERMISSIONS.COURSES_SELF_ENROLL)).toBe(true);
+    expect(hasPermission(ROLES.STUDENT, PERMISSIONS.PROJECTS_SUBMIT)).toBe(true);
+    expect(hasPermission(ROLES.STUDENT, PERMISSIONS.PROJECTS_VIEW_OWN)).toBe(true);
+    expect(hasPermission(ROLES.STUDENT, PERMISSIONS.PROJECTS_EDIT_OWN)).toBe(true);
     expect(hasPermission(ROLES.STUDENT, PERMISSIONS.CATALOG_VIEW_ADMIN)).toBe(false);
+    expect(hasPermission(ROLES.ADMIN, PERMISSIONS.PROJECTS_SUBMIT)).toBe(false);
   });
 
   it("allows admins and super admins to manage learning delivery", () => {
@@ -38,8 +42,8 @@ describe("central authorization policy", () => {
       PERMISSIONS.SESSIONS_VIEW_LIBRARY,
       PERMISSIONS.SESSIONS_MANAGE_LIBRARY,
       PERMISSIONS.COURSE_CURRICULUM_MANAGE,
-      PERMISSIONS.BATCHES_MANAGE,
-      PERMISSIONS.BATCH_SESSIONS_RELEASE,
+      PERMISSIONS.COURSE_LIFECYCLE_MANAGE,
+      PERMISSIONS.COURSE_SESSIONS_RELEASE,
     ];
 
     for (const permission of deliveryPermissions) {

@@ -21,17 +21,31 @@ tags:
   - name: 02 Users
   - name: 03 Public Catalog
   - name: 04 Categories
-  - name: 05 Courses
-  - name: 06 Session Library
-  - name: 07 Course Curriculum
-  - name: 08 Batches & Delivery
+  - name: 05 Course Groups
+  - name: 06 Course Intakes
+  - name: 07 Session Library
+  - name: 08 Course Curriculum & Delivery
   - name: 09 Enrollments & Classroom
   - name: 10 Certificates
   - name: 11 Projects
   - name: 12 Audit Logs
+  - name: 13 Service Overview
 security:
   - cookieAuth: []
 paths:
+  /api/ready:
+    get:
+      tags: [00 System]
+      operationId: readiness
+      summary: Check API database readiness
+      x-access: PUBLIC
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "503":
+          description: Database unavailable
+
   /api/health:
     get:
       tags: [00 System]
@@ -39,6 +53,151 @@ paths:
       summary: Check API health
       x-access: PUBLIC
       security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services/summary:
+    get:
+      tags: [13 Service Overview]
+      operationId: getAdminLearningServiceSummaries
+      summary: Get learning-service administration summaries
+      x-access: ADMIN
+      description: Compatibility alias for the database-backed learning-service list. Returns every configured service with catalog, learner, curriculum, course-intake, payment-attention, and lifecycle aggregates.
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services:
+    get:
+      tags: [13 Service Overview]
+      operationId: listLearningServices
+      summary: List learning services and administration summaries
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceStatusFilter"
+        - $ref: "#/components/parameters/IncludeArchived"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [13 Service Overview]
+      operationId: createLearningService
+      summary: Create a learning service as Draft
+      x-access: SUPER_ADMIN
+      description: Super-admin only. The initial release supports either paid seasonal/admin-enrolled services or free evergreen/self-enrolled services.
+      requestBody:
+        $ref: "#/components/requestBodies/CreateLearningService"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/services/{learningServiceId}:
+    get:
+      tags: [13 Service Overview]
+      operationId: getLearningService
+      summary: Get a learning service and administration summary
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [13 Service Overview]
+      operationId: updateLearningService
+      summary: Update a Draft learning service
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Identity and policy are protected after categories or courses depend on the service; the stable key is never mutable.
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateLearningService"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [13 Service Overview]
+      operationId: deleteLearningServicePermanently
+      summary: "[DESTRUCTIVE] Permanently delete an archived empty learning service"
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Permanent deletion requires Archived status and no categories or protected descendant history.
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/CatalogDeletionBlocked"
+
+  /api/v1/services/{learningServiceId}/deletion-impact:
+    get:
+      tags: [13 Service Overview]
+      operationId: getLearningServiceDeletionImpact
+      summary: Preview whether permanent service deletion is safe
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services/{learningServiceId}/activate:
+    patch:
+      tags: [13 Service Overview]
+      operationId: activateLearningService
+      summary: Activate a Draft learning service
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      requestBody:
+        $ref: "#/components/requestBodies/TransitionLearningServiceStatus"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services/{learningServiceId}/deactivate:
+    patch:
+      tags: [13 Service Overview]
+      operationId: deactivateLearningService
+      summary: Return an Active learning service to Draft
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      requestBody:
+        $ref: "#/components/requestBodies/TransitionLearningServiceStatus"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services/{learningServiceId}/archive:
+    patch:
+      tags: [13 Service Overview]
+      operationId: archiveLearningService
+      summary: Archive an inactive learning service
+      x-access: SUPER_ADMIN
+      description: Live courses or enrollments block archival.
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      requestBody:
+        $ref: "#/components/requestBodies/TransitionLearningServiceStatus"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/services/{learningServiceId}/unarchive:
+    patch:
+      tags: [13 Service Overview]
+      operationId: unarchiveLearningService
+      summary: Restore an Archived learning service as Draft
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/LearningServiceId"
+      requestBody:
+        $ref: "#/components/requestBodies/TransitionLearningServiceStatus"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -96,6 +255,20 @@ paths:
       security: []
       requestBody:
         $ref: "#/components/requestBodies/Login"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/auth/verify-login-challenge:
+    post:
+      tags: [01 Authentication]
+      operationId: verifyAdministratorLogin
+      summary: Verify administrator login code
+      x-access: PUBLIC
+      description: Consumes a short-lived administrator email challenge and sets the HTTP-only authentication cookie.
+      security: []
+      requestBody:
+        $ref: "#/components/requestBodies/VerifyLoginChallenge"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -227,6 +400,18 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/catalog/services:
+    get:
+      tags: [03 Public Catalog]
+      operationId: listPublicLearningServices
+      summary: List active learning services
+      x-access: PUBLIC
+      description: Returns database-configured Active learning services and their inherited access, course, enrollment, and payment policies.
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
   /api/v1/catalog/{serviceSlug}/categories:
     get:
       tags: [03 Public Catalog]
@@ -276,7 +461,7 @@ paths:
       summary: List categories for administration
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/ServiceTypeFilter"
+        - $ref: "#/components/parameters/ServiceIdFilter"
         - $ref: "#/components/parameters/CatalogStatusFilter"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/Limit"
@@ -323,7 +508,22 @@ paths:
       operationId: deleteCategoryPermanently
       summary: "[DESTRUCTIVE] Permanently delete archived category"
       x-access: SUPER_ADMIN
-      description: Super-admin only. Deletes every child course and its learning records.
+      description: Super-admin only. Deletes only archived catalog setup without course curriculum or learner history.
+      parameters:
+        - $ref: "#/components/parameters/CategoryId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/CatalogDeletionBlocked"
+
+  /api/v1/categories/{categoryId}/deletion-impact:
+    get:
+      tags: [04 Categories]
+      operationId: getCategoryDeletionImpact
+      summary: Preview whether permanent category deletion is safe
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Aggregates child course-intake curriculum and protected learner history without changing data.
       parameters:
         - $ref: "#/components/parameters/CategoryId"
       responses:
@@ -382,18 +582,16 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses:
+  /api/v1/course-groups:
     get:
-      tags: [05 Courses]
-      operationId: listCoursesAdmin
-      summary: List courses for administration
+      tags: [05 Course Groups]
+      operationId: listCourseGroupsAdmin
+      summary: List internal course groups and their intake courses
       x-access: ADMIN
+      description: Course groups organize courses that represent the same real-world program and own the immutable certificate policy shared by every intake. They are never exposed by the public catalog.
       parameters:
-        - $ref: "#/components/parameters/ServiceTypeFilter"
         - $ref: "#/components/parameters/CategoryIdFilter"
-        - $ref: "#/components/parameters/CatalogStatusFilter"
-        - $ref: "#/components/parameters/CourseLevelFilter"
-        - $ref: "#/components/parameters/AccessTypeFilter"
+        - $ref: "#/components/parameters/ServiceIdFilter"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -401,10 +599,113 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     post:
-      tags: [05 Courses]
-      operationId: createCourse
-      summary: Create course draft
+      tags: [05 Course Groups]
+      operationId: createCourseGroup
+      summary: Create an internal course group
       x-access: ADMIN
+      requestBody:
+        $ref: "#/components/requestBodies/CreateCourseGroup"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/course-groups/{courseGroupId}:
+    get:
+      tags: [05 Course Groups]
+      operationId: getCourseGroupAdmin
+      summary: Get a course group and its intake courses
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseGroupId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [05 Course Groups]
+      operationId: updateCourseGroup
+      summary: Update internal course-group setup
+      x-access: ADMIN
+      description: Course-group identity is editable only before its first course is created. This keeps every intake and historical certificate tied to one stable real-world course identity.
+      parameters:
+        - $ref: "#/components/parameters/CourseGroupId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateCourseGroup"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [05 Course Groups]
+      operationId: deleteCourseGroupPermanently
+      summary: "[DESTRUCTIVE] Permanently delete an archived empty course group"
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseGroupId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/course-groups/{courseGroupId}/deletion-impact:
+    get:
+      tags: [05 Course Groups]
+      operationId: getCourseGroupDeletionImpact
+      summary: Inspect whether a course group can be permanently deleted
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseGroupId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/course-groups/{courseGroupId}/archive:
+    patch:
+      tags: [05 Course Groups]
+      operationId: archiveCourseGroup
+      summary: Archive an inactive course group
+      x-access: SUPER_ADMIN
+      description: Open or closed-active intake courses block archival.
+      parameters:
+        - $ref: "#/components/parameters/CourseGroupId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/course-groups/{courseGroupId}/unarchive:
+    patch:
+      tags: [05 Course Groups]
+      operationId: unarchiveCourseGroup
+      summary: Restore an archived course group
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseGroupId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses:
+    get:
+      tags: [06 Course Intakes]
+      operationId: listCoursesAdmin
+      summary: List courses for administration
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/ServiceIdFilter"
+        - $ref: "#/components/parameters/CategoryIdFilter"
+        - name: status
+          in: query
+          schema: { type: string, enum: [DRAFT, OPEN_ACTIVE, CLOSED_ACTIVE, COMPLETED, CANCELLED, ARCHIVED] }
+        - $ref: "#/components/parameters/CourseLevelFilter"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [06 Course Intakes]
+      operationId: createCourse
+      summary: Create a course intake draft
+      x-access: ADMIN
+      description: The first intake defines immutable public content. Certificate policy comes from the course group. Later intakes copy a selected existing sibling and its active Ready curriculum into independent course-session rows; learner history is never copied.
       requestBody:
         $ref: "#/components/requestBodies/CreateCourse"
       responses:
@@ -413,7 +714,7 @@ paths:
 
   /api/v1/courses/{courseId}:
     get:
-      tags: [05 Courses]
+      tags: [06 Course Intakes]
       operationId: getCourseAdmin
       summary: Get course for administration
       x-access: ADMIN
@@ -423,10 +724,11 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     patch:
-      tags: [05 Courses]
+      tags: [06 Course Intakes]
       operationId: updateCourse
-      summary: Update course
+      summary: Update intake dates, timezone, or capacity
       x-access: ADMIN
+      description: Certificate policy is not editable. It was fixed when the course was created.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       requestBody:
@@ -435,65 +737,43 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     delete:
-      tags: [05 Courses]
+      tags: [06 Course Intakes]
       operationId: deleteCoursePermanently
       summary: "[DESTRUCTIVE] Permanently delete archived course"
       x-access: SUPER_ADMIN
-      description: Super-admin only. Deletes sessions, enrollments, progress, certificates, and projects.
+      description: Super-admin only. Deletes only an archived intake without curriculum or learner history.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/CatalogDeletionBlocked"
+
+  /api/v1/courses/{courseId}/deletion-impact:
+    get:
+      tags: [06 Course Intakes]
+      operationId: getCourseDeletionImpact
+      summary: Preview whether permanent course deletion is safe
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Aggregates protected curriculum and enrollment history without changing data.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses/{courseId}/publish:
+  /api/v1/courses/{courseId}/status:
     patch:
-      tags: [05 Courses]
-      operationId: publishCourse
-      summary: Publish course
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Parent category must already be published.
+      tags: [06 Course Intakes]
+      operationId: transitionCourseStatus
+      summary: Transition the course-intake lifecycle
+      x-access: ADMIN
+      description: Uses expectedStatus for optimistic concurrency. Opening, closing, and archiving require Super Admin; completion and cancellation are available to authorized administrators. Opening one sibling atomically closes the previous OPEN_ACTIVE sibling.
       parameters:
         - $ref: "#/components/parameters/CourseId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/courses/{courseId}/unpublish:
-    patch:
-      tags: [05 Courses]
-      operationId: unpublishCourse
-      summary: Unpublish course
-      x-access: SUPER_ADMIN
-      description: Super-admin only.
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/courses/{courseId}/archive:
-    patch:
-      tags: [05 Courses]
-      operationId: archiveCourse
-      summary: Archive course
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Existing learner access is preserved.
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/courses/{courseId}/unarchive:
-    patch:
-      tags: [05 Courses]
-      operationId: unarchiveCourse
-      summary: Restore course as draft
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Parent category must not be archived.
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateCourseStatus"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -504,7 +784,7 @@ paths:
       operationId: selfEnrollFreeCourse
       summary: Self-enroll in free course
       x-access: STUDENT
-      description: Student-only. Course and parent category must be published and the course must be free.
+      description: Student-only. Course and parent category must be published, enrollment must be Open, and the Free Learning course must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -515,22 +795,22 @@ paths:
 
   /api/v1/sessions:
     get:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: listSessionLibrary
       summary: List Session Library resources
       x-access: ADMIN
-      description: Admin/session-library permission required. Supports lifecycle, reuse, search, and pagination filters.
+      description: Admin/session-library permission required. Supports lifecycle, search, pagination, and course-attachability filters. Every session is reusable across courses.
       parameters:
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/SessionStatusFilter"
-        - $ref: "#/components/parameters/SessionReusePolicyFilter"
+        - $ref: "#/components/parameters/AttachableCourseIdFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           $ref: "#/components/responses/Success"
     post:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: createSession
       summary: Create independent session resource
       x-access: ADMIN
@@ -543,7 +823,7 @@ paths:
 
   /api/v1/sessions/{sessionId}:
     get:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: getSession
       summary: Get Session Library detail and usage impact
       x-access: ADMIN
@@ -553,11 +833,11 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     patch:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: updateSession
       summary: Update session resource
       x-access: ADMIN
-      description: Archived resources are read-only. Shared updates affect every attached course and batch.
+      description: Archived resources are read-only. Shared updates affect every attached course intake.
       parameters:
         - $ref: "#/components/parameters/SessionId"
       requestBody:
@@ -566,7 +846,7 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     delete:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: deleteSession
       summary: "[DESTRUCTIVE] Permanently delete unused session"
       x-access: SUPER_ADMIN
@@ -579,7 +859,7 @@ paths:
 
   /api/v1/sessions/{sessionId}/archive:
     patch:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: archiveSession
       summary: Archive session resource
       x-access: ADMIN
@@ -591,7 +871,7 @@ paths:
 
   /api/v1/sessions/{sessionId}/unarchive:
     patch:
-      tags: [06 Session Library]
+      tags: [07 Session Library]
       operationId: unarchiveSession
       summary: Restore archived session as draft
       x-access: ADMIN
@@ -603,10 +883,11 @@ paths:
 
   /api/v1/courses/{courseId}/curriculum:
     get:
-      tags: [07 Course Curriculum]
+      tags: [08 Course Curriculum & Delivery]
       operationId: listCourseCurriculum
       summary: List course curriculum
       x-access: ADMIN
+      description: Set includeRetired to show history-preserved curriculum relationships that were already delivered or completed.
       parameters:
         - $ref: "#/components/parameters/CourseId"
         - name: includeRetired
@@ -616,11 +897,11 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     post:
-      tags: [07 Course Curriculum]
+      tags: [08 Course Curriculum & Delivery]
       operationId: attachCourseSession
-      summary: Attach existing or create-and-attach session
+      summary: Attach an existing Ready library session
       x-access: ADMIN
-      description: Enforces one-course/reusable policy transactionally.
+      description: Inline session creation is intentionally unavailable; create resources in the Session Library first.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       requestBody:
@@ -631,7 +912,7 @@ paths:
 
   /api/v1/courses/{courseId}/curriculum/reorder:
     patch:
-      tags: [07 Course Curriculum]
+      tags: [08 Course Curriculum & Delivery]
       operationId: reorderCourseCurriculum
       summary: Reorder active course curriculum
       x-access: ADMIN
@@ -642,149 +923,39 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/SequenceRisk"
 
   /api/v1/courses/{courseId}/curriculum/{courseSessionId}:
     delete:
-      tags: [07 Course Curriculum]
+      tags: [08 Course Curriculum & Delivery]
       operationId: removeCourseSession
       summary: Detach unused or retire delivered curriculum session
       x-access: ADMIN
       parameters:
         - $ref: "#/components/parameters/CourseId"
         - $ref: "#/components/parameters/CourseSessionId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateCourseSessionDelivery"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses/{courseId}/batches:
-    get:
-      tags: [08 Batches & Delivery]
-      operationId: listCourseBatches
-      summary: List paid course batches
+  /api/v1/courses/{courseId}/curriculum/{courseSessionId}/delivery:
+    patch:
+      tags: [08 Course Curriculum & Delivery]
+      operationId: updateCourseSessionDelivery
+      summary: Release, schedule, withdraw, or reset a course session
       x-access: ADMIN
+      description: Delivery belongs directly to the intake course. Unsafe sequencing returns 409 until explicitly acknowledged.
       parameters:
         - $ref: "#/components/parameters/CourseId"
-        - $ref: "#/components/parameters/BatchStatusFilter"
-        - $ref: "#/components/parameters/SearchQuery"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    post:
-      tags: [08 Batches & Delivery]
-      operationId: createBatch
-      summary: Create paid course batch
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CourseId"
-      requestBody:
-        $ref: "#/components/requestBodies/CreateBatch"
-      responses:
-        "201":
-          $ref: "#/components/responses/Created"
-
-  /api/v1/batches/{batchId}:
-    get:
-      tags: [08 Batches & Delivery]
-      operationId: getBatch
-      summary: Get batch detail
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    patch:
-      tags: [08 Batches & Delivery]
-      operationId: updateBatch
-      summary: Update batch setup
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      requestBody:
-        $ref: "#/components/requestBodies/UpdateBatch"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/batches/{batchId}/status:
-    patch:
-      tags: [08 Batches & Delivery]
-      operationId: updateBatchStatus
-      summary: Transition batch lifecycle status
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      requestBody:
-        $ref: "#/components/requestBodies/UpdateBatchStatus"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/batches/{batchId}/initialize-curriculum:
-    post:
-      tags: [08 Batches & Delivery]
-      operationId: initializeBatchCurriculum
-      summary: Snapshot current course curriculum into batch
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/batches/{batchId}/sessions:
-    get:
-      tags: [08 Batches & Delivery]
-      operationId: listBatchSessions
-      summary: List batch delivery sessions
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/batches/{batchId}/sessions/reorder:
-    patch:
-      tags: [08 Batches & Delivery]
-      operationId: reorderBatchSessions
-      summary: Reorder batch delivery
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      requestBody:
-        $ref: "#/components/requestBodies/ReorderBatchSessions"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/batches/{batchId}/sessions/{courseSessionId}:
-    put:
-      tags: [08 Batches & Delivery]
-      operationId: upsertBatchSession
-      summary: Add, release, schedule, or hide batch session
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-        - $ref: "#/components/parameters/CourseSessionId"
-      requestBody:
-        $ref: "#/components/requestBodies/UpsertBatchSession"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    delete:
-      tags: [08 Batches & Delivery]
-      operationId: removeBatchSession
-      summary: Remove hidden or withdraw delivered batch session
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
         - $ref: "#/components/parameters/CourseSessionId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/SequenceRisk"
 
   /api/v1/enrollments/my:
     get:
@@ -815,7 +986,7 @@ paths:
       operationId: getEnrollmentClassroom
       summary: Get delivery-specific classroom
       x-access: AUTHENTICATED
-      description: Owner or admin. Paid access requires completed payment and resolves released batch sessions; Free Learning resolves active curriculum.
+      description: Owner or admin. Paid access requires completed payment; all classrooms resolve released or mature scheduled sessions directly from the enrolled course intake.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
       responses:
@@ -840,7 +1011,8 @@ paths:
       tags: [09 Enrollments & Classroom]
       operationId: completeClassroomSession
       summary: Mark accessible session complete
-      x-access: AUTHENTICATED
+      x-access: STUDENT
+      description: Enrollment owner only. Completion may change only while the enrollment is Active; a Completed enrollment remains readable but its learning history is frozen.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
         - $ref: "#/components/parameters/CourseSessionId"
@@ -849,17 +1021,22 @@ paths:
           $ref: "#/components/responses/Created"
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
     delete:
       tags: [09 Enrollments & Classroom]
       operationId: uncompleteClassroomSession
       summary: Remove accessible session completion
-      x-access: AUTHENTICATED
+      x-access: STUDENT
+      description: Enrollment owner only. Completion may change only while the enrollment is Active; a Completed enrollment returns ENROLLMENT_COMPLETED and preserves its history.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
         - $ref: "#/components/parameters/CourseSessionId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
 
   /api/v1/enrollments/{enrollmentId}:
     patch:
@@ -867,7 +1044,7 @@ paths:
       operationId: updateEnrollment
       summary: Update enrollment or payment status
       x-access: ADMIN
-      description: Admin/enrollment-management permission required.
+      description: Admin/enrollment-management permission required. Active may move to Completed or Cancelled. Cancelled paid/admin enrollment may return to Active; cancelled self-enrollment is reactivated only by its student enrollment endpoint. Completed is terminal and cannot be reopened or cancelled through this operation. Status writes are serialized with student completion mutations.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
       requestBody:
@@ -875,68 +1052,69 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
 
-  /api/v1/batches/{batchId}/eligible-students:
+  /api/v1/courses/{courseId}/eligible-students:
     get:
       tags: [09 Enrollments & Classroom]
-      operationId: listBatchEligibleStudents
-      summary: Search verified students eligible for this batch
+      operationId: listCourseEligibleStudents
+      summary: Search verified students eligible for this paid course intake
       x-access: ADMIN
+      description: Returns a stable email-and-ID keyset page. Pass the opaque nextCursor from one response as cursor to request the next page; changing q starts a new search.
       parameters:
-        - $ref: "#/components/parameters/BatchId"
+        - $ref: "#/components/parameters/CourseId"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/EligibleLimit"
+        - $ref: "#/components/parameters/EligibleCursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/batches/{batchId}/enrollments:
+  /api/v1/courses/{courseId}/enrollments:
     get:
       tags: [09 Enrollments & Classroom]
-      operationId: listBatchRoster
-      summary: List batch roster and payment evidence
+      operationId: listCourseRoster
+      summary: List the course-intake roster and payment evidence
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/BatchId"
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/EnrollmentStatusFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
     post:
       tags: [09 Enrollments & Classroom]
       operationId: manuallyEnrollStudent
-      summary: Manually enroll verified student in paid batch
+      summary: Manually enroll a verified student in an open paid course intake
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/BatchId"
+        - $ref: "#/components/parameters/CourseId"
       requestBody:
         $ref: "#/components/requestBodies/CreatePaidEnrollment"
       responses:
         "201":
           $ref: "#/components/responses/Created"
 
-  /api/v1/batches/{batchId}/enrollments/bulk:
+  /api/v1/courses/{courseId}/enrollments/bulk:
     post:
       tags: [09 Enrollments & Classroom]
       operationId: bulkEnrollStudents
-      summary: Process batch enrollment for multiple students
+      summary: Process course-intake enrollment for multiple students
       x-access: ADMIN
-      description: Returns per-student CREATED or FAILED results; capacity and duplicates are concurrency-safe.
-      parameters:
-        - $ref: "#/components/parameters/BatchId"
-      requestBody:
-        $ref: "#/components/requestBodies/BulkPaidEnrollment"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/enrollments/course/{courseId}:
-    get:
-      tags: [09 Enrollments & Classroom]
-      operationId: listCourseEnrollments
-      summary: List aggregate course enrollments across batches or free delivery
-      x-access: ADMIN
+      description: >-
+        Returns ordered per-student CREATED or FAILED results. Writes are
+        serialized behind the course-enrollment lock so capacity and duplicate
+        decisions remain concurrency-safe. Once a locked transaction proves
+        capacity is exhausted, the remaining eligible rows receive
+        COURSE_CAPACITY_REACHED without opening additional insert transactions.
       parameters:
         - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/BulkPaidEnrollment"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -947,7 +1125,11 @@ paths:
       operationId: issueCertificate
       summary: Issue certificate
       x-access: ADMIN
-      description: Admin-only. Enrollment must be completed and the course must have certificates enabled.
+      description: >-
+        Admin-only. Enrollment must be completed and the course must have
+        certificates enabled. Random certificate-code collisions are retried
+        up to five times; a competing certificate for the same enrollment is
+        not treated as a retryable code collision.
       parameters:
         - $ref: "#/components/parameters/EnrollmentId"
       requestBody:
@@ -985,7 +1167,12 @@ paths:
       operationId: listCertificatesAdmin
       summary: List all certificates for administration
       x-access: ADMIN
-      description: Admin/certificate-management permission required.
+      description: Admin/certificate-management permission required. Returns a bounded keyset page.
+      parameters:
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/CertificateStatusFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1009,7 +1196,12 @@ paths:
       operationId: revokeCertificate
       summary: Revoke certificate
       x-access: ADMIN
-      description: Admin/certificate-management permission required.
+      description: >-
+        Admin/certificate-management permission required. Revocation locks the
+        enrollment, rereads the certificate and its course/catalog lifecycle in
+        one transaction, and rejects a repeated revocation. A credential may
+        still be revoked after its course or catalog parents become terminal or
+        archived because invalid credentials must remain revocable.
       parameters:
         - $ref: "#/components/parameters/CertificateId"
       requestBody:
@@ -1025,6 +1217,9 @@ paths:
       summary: List public approved projects
       x-access: PUBLIC
       security: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1061,6 +1256,9 @@ paths:
       operationId: listOwnProjects
       summary: List own projects
       x-access: AUTHENTICATED
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1071,7 +1269,7 @@ paths:
       operationId: getProject
       summary: Get project detail
       x-access: AUTHENTICATED
-      description: Available to the owner, an admin, or anyone when the project is approved and public.
+      description: Available only to the project owner or an administrator. Public approved projects use the separately projected showcase endpoint.
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
@@ -1098,6 +1296,9 @@ paths:
       summary: List all projects for review
       x-access: ADMIN
       description: Admin/project-review permission required.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1182,6 +1383,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    SequenceRisk:
+      description: Explicit confirmation is required because the operation breaks curriculum sequence.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SequenceRiskEnvelope"
+    CatalogDeletionBlocked:
+      description: Permanent deletion would destroy operational delivery or protected learner history.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CatalogDeletionBlockedEnvelope"
 
   parameters:
     TargetUserId:
@@ -1196,8 +1409,14 @@ components:
       required: true
       schema:
         type: string
-        enum: [bootcamps, pretech-courses, free-learning]
+        pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
       example: "{{serviceSlug}}"
+    LearningServiceId:
+      name: learningServiceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{learningServiceId}}"
     CategorySlug:
       name: categorySlug
       in: path
@@ -1222,6 +1441,12 @@ components:
       required: true
       schema: { type: string, format: uuid }
       example: "{{courseId}}"
+    CourseGroupId:
+      name: courseGroupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{courseGroupId}}"
     SessionId:
       name: sessionId
       in: path
@@ -1234,12 +1459,6 @@ components:
       required: true
       schema: { type: string, format: uuid }
       example: "{{courseSessionId}}"
-    BatchId:
-      name: batchId
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-      example: "{{batchId}}"
     EnrollmentId:
       name: enrollmentId
       in: path
@@ -1256,7 +1475,7 @@ components:
       name: certificateCode
       in: path
       required: true
-      schema: { type: string }
+      schema: { type: string, minLength: 20, maxLength: 64 }
       example: "{{certificateCode}}"
     ProjectId:
       name: projectId
@@ -1270,12 +1489,21 @@ components:
       schema:
         $ref: "#/components/schemas/Role"
       example: STUDENT
-    ServiceTypeFilter:
-      name: serviceType
+    ServiceIdFilter:
+      name: serviceId
+      in: query
+      schema: { type: string, format: uuid }
+      example: "{{learningServiceId}}"
+    LearningServiceStatusFilter:
+      name: status
       in: query
       schema:
-        $ref: "#/components/schemas/LearningServiceType"
-      example: BOOTCAMPS
+        $ref: "#/components/schemas/LearningServiceStatus"
+      example: ACTIVE
+    IncludeArchived:
+      name: includeArchived
+      in: query
+      schema: { type: boolean, default: true }
     CategoryIdFilter:
       name: categoryId
       in: query
@@ -1310,26 +1538,44 @@ components:
       schema:
         $ref: "#/components/schemas/SessionStatus"
       example: READY
-    SessionReusePolicyFilter:
-      name: reusePolicy
+    AttachableCourseIdFilter:
+      name: attachableCourseId
       in: query
-      schema:
-        $ref: "#/components/schemas/SessionReusePolicy"
-      example: REUSABLE
-    BatchStatusFilter:
+      description: Return Ready library sessions with no active or retired relationship to this course. Retired relationships are restored from curriculum history instead of the picker.
+      schema: { type: string, format: uuid }
+      example: "{{courseId}}"
+    EnrollmentStatusFilter:
       name: status
       in: query
       schema:
-        $ref: "#/components/schemas/BatchStatus"
+        $ref: "#/components/schemas/EnrollmentStatus"
       example: ACTIVE
+    CertificateStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/CertificateStatus"
+      example: ISSUED
     Limit:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.
+      schema: { type: string, maxLength: 1024 }
     EligibleLimit:
       name: limit
       in: query
-      schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      description: Page size. Use cursor for additional pages instead of increasing the limit.
+      schema: { type: integer, minimum: 1, maximum: 50, default: 25 }
+    EligibleCursor:
+      name: cursor
+      in: query
+      description: Opaque next-page cursor returned by the preceding eligible-student response. It is valid only with the same course and search query.
+      schema: { type: string, maxLength: 512 }
+      example: "{{eligibleStudentsCursor}}"
     Offset:
       name: offset
       in: query
@@ -1398,6 +1644,19 @@ components:
           example:
             email: "{{registrationEmail}}"
             code: "{{otpCode}}"
+    VerifyLoginChallenge:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [challengeId, code]
+            properties:
+              challengeId: { type: string, format: uuid }
+              code: { type: string, pattern: "^[0-9]{6}$" }
+          example:
+            challengeId: "{{loginChallengeId}}"
+            code: "{{otpCode}}"
     UpdateProfile:
       required: true
       content:
@@ -1412,6 +1671,40 @@ components:
             district: Colombo
             dateOfBirth: "2000-01-01T00:00:00.000Z"
             alStream: Technology
+    CreateLearningService:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateLearningServiceInput"
+          example:
+            key: PROFESSIONAL_WORKSHOPS
+            slug: professional-workshops
+            title: Professional Workshops
+            description: Short paid seasonal workshops administered by Foundry Academy.
+            accessType: PAID
+            courseMode: SEASONAL
+            enrollmentMode: ADMIN
+            paymentRequirement: REQUIRED
+            sortOrder: 4
+    UpdateLearningService:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateLearningServiceInput"
+          example:
+            title: Professional Workshops
+            description: Short paid seasonal workshops for working professionals.
+            sortOrder: 4
+    TransitionLearningServiceStatus:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TransitionLearningServiceStatusInput"
+          example:
+            expectedStatus: DRAFT
     CreateCategory:
       required: true
       content:
@@ -1419,7 +1712,7 @@ components:
           schema:
             $ref: "#/components/schemas/CreateCategoryInput"
           example:
-            serviceType: BOOTCAMPS
+            serviceId: "{{learningServiceId}}"
             slug: api-testing
             title: API Testing
             description: Practical API testing courses for software engineers.
@@ -1437,6 +1730,26 @@ components:
             title: API Testing and Quality
             description: Practical API testing and quality courses for software engineers.
             sortOrder: 1
+    CreateCourseGroup:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateCourseGroupInput"
+          example:
+            categoryId: "{{categoryId}}"
+            title: AI/ML Ignition Program
+            slug: ai-ml-ignition
+            batchCodePrefix: AI-ML-IGNITION
+            certificateEnabled: true
+    UpdateCourseGroup:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateCourseGroupInput"
+          example:
+            title: AI/ML Ignition Program
     CreateCourse:
       required: true
       content:
@@ -1444,18 +1757,18 @@ components:
           schema:
             $ref: "#/components/schemas/CreateCourseInput"
           example:
-            categoryId: "{{categoryId}}"
-            slug: postman-foundations
-            title: Postman Foundations
-            summary: Learn practical API exploration and automated request testing.
-            description: Build reliable Postman workflows for modern HTTP APIs from first request to regression collection.
+            courseGroupId: "{{courseGroupId}}"
+            intakeKey: 2026-B1
+            startDate: "2026-09-01T00:00:00.000Z"
+            expectedEndDate: "2026-12-01T00:00:00.000Z"
+            timezone: Asia/Colombo
+            capacity: 50
+            summary: Learn practical AI and machine-learning foundations.
+            description: A practical guided program for engineers beginning applied AI and machine learning.
             level: BEGINNER
             durationValue: 4
             durationUnit: WEEK
-            accessType: FREE
             price: 0
-            currency: LKR
-            certificateEnabled: true
             highlights: [Requests, Environments, Tests]
             skills: [Postman, HTTP, API Testing]
             prerequisites: [Basic web knowledge]
@@ -1468,9 +1781,21 @@ components:
           schema:
             $ref: "#/components/schemas/UpdateCourseInput"
           example:
-            title: Postman and API Testing Foundations
-            summary: Learn practical API exploration, environments, and automated tests.
-            certificateEnabled: true
+            capacity: 60
+            expectedEndDate: "2026-12-15T00:00:00.000Z"
+    UpdateCourseStatus:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status, expectedStatus]
+            properties:
+              status: { $ref: "#/components/schemas/CourseStatus" }
+              expectedStatus: { $ref: "#/components/schemas/CourseStatus" }
+          example:
+            expectedStatus: DRAFT
+            status: OPEN_ACTIVE
     CreateSession:
       required: true
       content:
@@ -1485,7 +1810,6 @@ components:
             quizUrl: null
             feedbackUrl: null
             durationMinutes: 60
-            reusePolicy: REUSABLE
             status: READY
     UpdateSession:
       required: true
@@ -1526,32 +1850,13 @@ components:
                   properties:
                     id: { type: string, format: uuid }
                     orderIndex: { type: integer, minimum: 0 }
+              acknowledgeSequenceRisk: { type: boolean, default: false }
           example:
             courseSessions:
               - id: "{{courseSessionId}}"
                 orderIndex: 0
-    CreateBatch:
-      required: true
-      content:
-        application/json:
-          schema: { type: object }
-          example:
-            name: August 2026
-            code: ML1-2026-AUG
-            startDate: "2026-08-01"
-            expectedEndDate: "2026-12-01"
-            timezone: Asia/Colombo
-            capacity: 30
-            initializeCurriculum: true
-    UpdateBatch:
-      required: true
-      content:
-        application/json:
-          schema: { type: object }
-          example:
-            name: August 2026 - Batch 1
-            capacity: 35
-    UpdateBatchStatus:
+            acknowledgeSequenceRisk: false
+    UpdateCourseSessionDelivery:
       required: true
       content:
         application/json:
@@ -1560,27 +1865,14 @@ components:
             required: [status]
             properties:
               status:
-                $ref: "#/components/schemas/BatchStatus"
+                type: string
+                enum: [UNRELEASED, SCHEDULED, RELEASED, WITHDRAWN]
+              availableAt: { type: string, format: date-time, nullable: true }
+              acknowledgeSequenceRisk: { type: boolean, default: false }
           example:
-            status: ENROLLING
-    UpsertBatchSession:
-      required: true
-      content:
-        application/json:
-          schema: { type: object }
-          example:
-            orderIndex: 0
-            isReleased: true
+            status: RELEASED
             availableAt: null
-    ReorderBatchSessions:
-      required: true
-      content:
-        application/json:
-          schema: { type: object }
-          example:
-            batchSessions:
-              - id: "{{batchSessionId}}"
-                orderIndex: 0
+            acknowledgeSequenceRisk: false
     CreatePaidEnrollment:
       required: true
       content:
@@ -1700,12 +1992,116 @@ components:
         code: { type: string }
         field: { type: string, nullable: true }
         details: { nullable: true }
+    SequenceRiskEnvelope:
+      type: object
+      required: [success, error, code, details]
+      properties:
+        success: { type: boolean, example: false }
+        error: { type: string }
+        code:
+          type: string
+          enum: [SEQUENCE_RISK_CONFIRMATION_REQUIRED]
+        details:
+          type: object
+          required: [blockingSessions]
+          properties:
+            blockingSessions:
+              type: array
+              items: { type: object }
+    CatalogDeletionBlockedEnvelope:
+      type: object
+      required: [success, error, code, details]
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: string
+          example: Permanent deletion is blocked because this catalog item contains curriculum or learner history.
+        code:
+          type: string
+          enum: [CATALOG_DELETION_BLOCKED]
+        details:
+          $ref: "#/components/schemas/CatalogDeletionImpact"
+    CatalogDeletionImpact:
+      type: object
+      required: [resourceType, resourceId, resourceStatus, deletable]
+      properties:
+        resourceType: { type: string, enum: [LEARNING_SERVICE, CATEGORY, COURSE_GROUP, COURSE] }
+        resourceId: { type: string, format: uuid }
+        resourceStatus: { type: string }
+        deletable: { type: boolean }
+        courses: { type: integer, minimum: 0 }
+        courseGroups: { type: integer, minimum: 0 }
+        history: { type: integer, minimum: 0 }
+        curriculumLinks: { type: integer, minimum: 0 }
+        enrollments: { type: integer, minimum: 0 }
+        projects: { type: integer, minimum: 0 }
     Role:
       type: string
       enum: [STUDENT, ADMIN, SUPER_ADMIN]
     LearningServiceType:
       type: string
-      enum: [BOOTCAMPS, PRETECH, FREE_LEARNING]
+      description: Stable service key. Existing examples include BOOTCAMPS, PRETECH, and FREE_LEARNING; new services may introduce additional keys.
+      pattern: "^[A-Z0-9]+(?:_[A-Z0-9]+)*$"
+    LearningAccessType:
+      type: string
+      enum: [FREE, PAID]
+    LearningCourseMode:
+      type: string
+      enum: [SEASONAL, EVERGREEN]
+    LearningEnrollmentMode:
+      type: string
+      enum: [ADMIN, SELF]
+    LearningPaymentRequirement:
+      type: string
+      enum: [REQUIRED, NOT_REQUIRED]
+    LearningServiceStatus:
+      type: string
+      enum: [DRAFT, ACTIVE, ARCHIVED]
+    LearningService:
+      type: object
+      required: [id, key, slug, title, description, accessType, courseMode, enrollmentMode, paymentRequirement, status, sortOrder]
+      properties:
+        id: { type: string, format: uuid }
+        key: { $ref: "#/components/schemas/LearningServiceType" }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        title: { type: string }
+        description: { type: string }
+        accessType: { $ref: "#/components/schemas/LearningAccessType" }
+        courseMode: { $ref: "#/components/schemas/LearningCourseMode" }
+        enrollmentMode: { $ref: "#/components/schemas/LearningEnrollmentMode" }
+        paymentRequirement: { $ref: "#/components/schemas/LearningPaymentRequirement" }
+        status: { $ref: "#/components/schemas/LearningServiceStatus" }
+        sortOrder: { type: integer, minimum: 0 }
+    CreateLearningServiceInput:
+      type: object
+      required: [key, slug, title, description, accessType, courseMode, enrollmentMode, paymentRequirement]
+      properties:
+        key: { $ref: "#/components/schemas/LearningServiceType" }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", minLength: 2, maxLength: 100 }
+        title: { type: string, minLength: 3, maxLength: 120 }
+        description: { type: string, minLength: 10, maxLength: 600 }
+        accessType: { $ref: "#/components/schemas/LearningAccessType" }
+        courseMode: { $ref: "#/components/schemas/LearningCourseMode" }
+        enrollmentMode: { $ref: "#/components/schemas/LearningEnrollmentMode" }
+        paymentRequirement: { $ref: "#/components/schemas/LearningPaymentRequirement" }
+        sortOrder: { type: integer, minimum: 0, default: 0 }
+    UpdateLearningServiceInput:
+      type: object
+      minProperties: 1
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", minLength: 2, maxLength: 100 }
+        title: { type: string, minLength: 3, maxLength: 120 }
+        description: { type: string, minLength: 10, maxLength: 600 }
+        accessType: { $ref: "#/components/schemas/LearningAccessType" }
+        courseMode: { $ref: "#/components/schemas/LearningCourseMode" }
+        enrollmentMode: { $ref: "#/components/schemas/LearningEnrollmentMode" }
+        paymentRequirement: { $ref: "#/components/schemas/LearningPaymentRequirement" }
+        sortOrder: { type: integer, minimum: 0 }
+    TransitionLearningServiceStatusInput:
+      type: object
+      required: [expectedStatus]
+      properties:
+        expectedStatus: { $ref: "#/components/schemas/LearningServiceStatus" }
     CatalogStatus:
       type: string
       enum: [DRAFT, PUBLISHED, ARCHIVED]
@@ -1715,6 +2111,12 @@ components:
     CourseAccessType:
       type: string
       enum: [FREE, PAID]
+    CourseStatus:
+      type: string
+      enum: [DRAFT, OPEN_ACTIVE, CLOSED_ACTIVE, COMPLETED, CANCELLED, ARCHIVED]
+    CourseInstanceKind:
+      type: string
+      enum: [SEASONAL, EVERGREEN]
     DurationUnit:
       type: string
       enum: [SESSION, DAY, WEEK, MONTH]
@@ -1724,15 +2126,9 @@ components:
     PaymentStatus:
       type: string
       enum: [NOT_REQUIRED, PENDING, PARTIAL, COMPLETED]
-    SessionReusePolicy:
-      type: string
-      enum: [SINGLE_COURSE, REUSABLE]
     SessionStatus:
       type: string
       enum: [DRAFT, READY, ARCHIVED]
-    BatchStatus:
-      type: string
-      enum: [DRAFT, ENROLLING, ACTIVE, COMPLETED, CANCELLED, ARCHIVED]
     RegisterInput:
       type: object
       required: [firstName, lastName, email, password, phone, address, district, dateOfBirth, alStream]
@@ -1764,10 +2160,9 @@ components:
         alStream: { type: string, enum: [Science, Mathematics, Commerce, Arts, Technology] }
     CreateCategoryInput:
       type: object
-      required: [serviceType, slug, title, description, visualKey]
+      required: [serviceId, slug, title, description, visualKey]
       properties:
-        serviceType:
-          $ref: "#/components/schemas/LearningServiceType"
+        serviceId: { type: string, format: uuid }
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         title: { type: string, minLength: 2, maxLength: 120 }
         description: { type: string, minLength: 10, maxLength: 600 }
@@ -1781,8 +2176,6 @@ components:
       type: object
       minProperties: 1
       properties:
-        serviceType:
-          $ref: "#/components/schemas/LearningServiceType"
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         title: { type: string, minLength: 2, maxLength: 120 }
         description: { type: string, minLength: 10, maxLength: 600 }
@@ -1792,13 +2185,35 @@ components:
           enum: [sparkles, cpu, code2, workflow, calculator, atom, bar-chart3, terminal, git-branch, globe, languages]
         badgeLabel: { type: string, nullable: true }
         sortOrder: { type: integer, minimum: 0 }
-    CreateCourseInput:
+    CreateCourseGroupInput:
       type: object
-      required: [categoryId, slug, title, summary, description, level, accessType, price]
+      required: [categoryId, title, slug, batchCodePrefix, certificateEnabled]
       properties:
         categoryId: { type: string, format: uuid }
-        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         title: { type: string, minLength: 3, maxLength: 160 }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        batchCodePrefix: { type: string, pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$" }
+        certificateEnabled:
+          type: boolean
+          description: Immutable policy for every current and future course intake in this group.
+    UpdateCourseGroupInput:
+      type: object
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 3, maxLength: 160 }
+        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+        batchCodePrefix: { type: string, pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$" }
+    CreateCourseInput:
+      type: object
+      required: [courseGroupId, intakeKey]
+      properties:
+        courseGroupId: { type: string, format: uuid }
+        sourceCourseId: { type: string, format: uuid, description: Required after the first intake in a group. }
+        intakeKey: { type: string, pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$" }
+        startDate: { type: string, format: date-time, nullable: true }
+        expectedEndDate: { type: string, format: date-time, nullable: true }
+        timezone: { type: string, default: Asia/Colombo }
+        capacity: { type: integer, minimum: 1, maximum: 100000, nullable: true }
         summary: { type: string, minLength: 10, maxLength: 300 }
         description: { type: string, minLength: 20, maxLength: 5000 }
         level:
@@ -1808,11 +2223,7 @@ components:
           allOf:
             - $ref: "#/components/schemas/DurationUnit"
           nullable: true
-        accessType:
-          $ref: "#/components/schemas/CourseAccessType"
         price: { type: number, minimum: 0, maximum: 99999999 }
-        currency: { type: string, minLength: 3, maxLength: 3, default: LKR }
-        certificateEnabled: { type: boolean, default: false }
         highlights:
           type: array
           maxItems: 30
@@ -1831,40 +2242,13 @@ components:
       type: object
       minProperties: 1
       properties:
-        categoryId: { type: string, format: uuid }
-        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
-        title: { type: string, minLength: 3, maxLength: 160 }
-        summary: { type: string, minLength: 10, maxLength: 300 }
-        description: { type: string, minLength: 20, maxLength: 5000 }
-        level:
-          $ref: "#/components/schemas/CourseLevel"
-        durationValue: { type: integer, minimum: 1, maximum: 999, nullable: true }
-        durationUnit:
-          allOf:
-            - $ref: "#/components/schemas/DurationUnit"
-          nullable: true
-        accessType:
-          $ref: "#/components/schemas/CourseAccessType"
-        price: { type: number, minimum: 0, maximum: 99999999 }
-        currency: { type: string, minLength: 3, maxLength: 3 }
-        certificateEnabled: { type: boolean }
-        highlights:
-          type: array
-          maxItems: 30
-          items: { type: string }
-        skills:
-          type: array
-          maxItems: 30
-          items: { type: string }
-        prerequisites:
-          type: array
-          maxItems: 30
-          items: { type: string }
-        thumbnailUrl: { type: string, format: uri, nullable: true }
-        sortOrder: { type: integer, minimum: 0 }
+        startDate: { type: string, format: date-time, nullable: true }
+        expectedEndDate: { type: string, format: date-time, nullable: true }
+        timezone: { type: string }
+        capacity: { type: integer, minimum: 1, maximum: 100000, nullable: true }
     CreateSessionInput:
       type: object
-      required: [title, reusePolicy]
+      required: [title]
       properties:
         title: { type: string, minLength: 3 }
         description: { type: string, nullable: true }
@@ -1873,8 +2257,6 @@ components:
         quizUrl: { type: string, format: uri, nullable: true }
         feedbackUrl: { type: string, format: uri, nullable: true }
         durationMinutes: { type: integer, minimum: 1, nullable: true }
-        reusePolicy:
-          $ref: "#/components/schemas/SessionReusePolicy"
         status:
           type: string
           enum: [DRAFT, READY]
@@ -1890,8 +2272,6 @@ components:
         quizUrl: { type: string, format: uri, nullable: true }
         feedbackUrl: { type: string, format: uri, nullable: true }
         durationMinutes: { type: integer, minimum: 1, nullable: true }
-        reusePolicy:
-          $ref: "#/components/schemas/SessionReusePolicy"
         status:
           type: string
           enum: [DRAFT, READY]

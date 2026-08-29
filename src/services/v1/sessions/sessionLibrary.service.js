@@ -29,17 +29,16 @@ function toSessionLibraryResponse(session) {
   const usage = {
     courseCount: courseUsages.length,
     activeCourseCount: courseUsages.filter(({ retiredAt }) => !retiredAt).length,
-    batchCount: courseUsages.reduce(
-      (total, courseSession) => total + (courseSession._count?.batchLinks ?? 0),
-      0,
-    ),
+    courseGroupCount: new Set(courseUsages.map(({ course }) => course?.courseGroupId)).size,
     courses: courseUsages.map((courseSession) => ({
       courseSessionId: courseSession.id,
       courseId: courseSession.courseId,
       courseTitle: courseSession.course?.title,
+      courseCode: courseSession.course?.code,
+      courseGroupId: courseSession.course?.courseGroupId,
       orderIndex: courseSession.orderIndex,
       retiredAt: courseSession.retiredAt,
-      batchCount: courseSession._count?.batchLinks ?? 0,
+      deliveryStatus: courseSession.deliveryStatus,
     })),
   };
 
@@ -80,50 +79,16 @@ export async function createSessionLibraryItemService(data, actorId) {
     entityType: ENTITY_TYPES.SESSION,
     entityId: session.id,
     description: `Session "${session.title}" created in the library.`,
-    metadata: { reusePolicy: session.reusePolicy, status: session.status },
+    metadata: { status: session.status },
   });
   return toSessionLibraryResponse(session);
 }
 
 export async function updateSessionLibraryItemService(id, data, actorId) {
   const input = parse(updateSessionLibrarySchema, data);
-  const current = await sessionRepo.findById(id);
-  if (!current) throw new NotFoundError("Session not found.");
-  if (current.status === "ARCHIVED") {
-    throw new ConflictError("Archived sessions must be restored before editing.");
-  }
-  if (
-    input.reusePolicy === "SINGLE_COURSE" &&
-    current.reusePolicy !== "SINGLE_COURSE" &&
-    current.courseSessions.length > 1
-  ) {
-    throw new ConflictError(
-      "A session used by multiple courses cannot become a one-course session.",
-    );
-  }
-  if (input.status === "DRAFT" && current.courseSessions.length > 0) {
-    throw new ConflictError(
-      "A session used by a course cannot return to draft. Archive it to stop new use while preserving learner access.",
-    );
-  }
-  const resultingStatus = input.status ?? current.status;
-  const resultingRecordingUrl =
-    input.recordingUrl !== undefined ? input.recordingUrl : current.recordingUrl;
-  if (resultingStatus === "READY" && !resultingRecordingUrl) {
-    throw new ValidationError(
-      "A ready session must have a recording URL.",
-      "recordingUrl",
-    );
-  }
-
-  const changedFields = Object.keys(input).filter((field) => {
-    const currentValue = current[field];
-    const nextValue = input[field];
-    return (currentValue ?? null) !== (nextValue ?? null);
-  });
-  if (changedFields.length === 0) return toSessionLibraryResponse(current);
-
-  const updated = await sessionRepo.update(id, input);
+  const { previous: current, session: updated, changedFields } =
+    await sessionRepo.updateSafely(id, input);
+  if (changedFields.length === 0) return toSessionLibraryResponse(updated);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.SESSION_UPDATED,
@@ -133,20 +98,16 @@ export async function updateSessionLibraryItemService(id, data, actorId) {
     metadata: {
       changedFields,
       affectedCourses: current.courseSessions.length,
-      affectedBatches: current.courseSessions.reduce(
-        (total, courseSession) => total + (courseSession._count?.batchLinks ?? 0),
-        0,
-      ),
+      affectedCourseGroups: new Set(current.courseSessions.map(({ course }) => course?.courseGroupId)).size,
     },
   });
   return toSessionLibraryResponse(updated);
 }
 
 export async function archiveSessionLibraryItemService(id, actorId) {
-  const current = await sessionRepo.findById(id);
-  if (!current) throw new NotFoundError("Session not found.");
-  if (current.status === "ARCHIVED") return toSessionLibraryResponse(current);
-  const session = await sessionRepo.update(id, { status: "ARCHIVED" });
+  const { previous: current, session, changed } =
+    await sessionRepo.archiveSafely(id);
+  if (!changed) return toSessionLibraryResponse(session);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.SESSION_ARCHIVED,
@@ -155,28 +116,25 @@ export async function archiveSessionLibraryItemService(id, actorId) {
     description: `Session "${current.title}" archived. Existing delivery access is preserved.`,
     metadata: {
       affectedCourses: current.courseSessions.length,
-      affectedBatches: current.courseSessions.reduce(
-        (total, courseSession) => total + (courseSession._count?.batchLinks ?? 0),
-        0,
-      ),
+      affectedCourseGroups: new Set(current.courseSessions.map(({ course }) => course?.courseGroupId)).size,
     },
   });
   return toSessionLibraryResponse(session);
 }
 
 export async function unarchiveSessionLibraryItemService(id, actorId) {
-  const current = await sessionRepo.findById(id);
-  if (!current) throw new NotFoundError("Session not found.");
-  if (current.status !== "ARCHIVED") {
-    throw new ConflictError("Only archived sessions can be restored.");
-  }
-  const session = await sessionRepo.update(id, { status: "DRAFT" });
+  const { previous: current, session, restoredStatus } =
+    await sessionRepo.restoreSafely(id);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.SESSION_UNARCHIVED,
     entityType: ENTITY_TYPES.SESSION,
     entityId: id,
-    description: `Session "${current.title}" restored as a draft.`,
+    description: `Session "${current.title}" restored as ${restoredStatus.toLowerCase()}.`,
+    metadata: {
+      restoredStatus,
+      affectedCourses: current.courseSessions.length,
+    },
   });
   return toSessionLibraryResponse(session);
 }
@@ -199,7 +157,7 @@ export async function deleteSessionLibraryItemPermanentlyService(id, actorId) {
     entityType: ENTITY_TYPES.SESSION,
     entityId: id,
     description: `Session "${current.title}" permanently deleted from the library.`,
-    metadata: { title: current.title, reusePolicy: current.reusePolicy },
+    metadata: { title: current.title },
   });
   return result;
 }

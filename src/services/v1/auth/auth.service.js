@@ -8,12 +8,22 @@ import {
   resetPasswordSchema,
   verifyOtpSchema,
   resendOtpSchema,
+  verifyLoginChallengeSchema,
 } from "../../../constants/v1/auth/auth.schema.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import { generateToken } from "../../../utils/jwt.js";
 import { generateResetToken, hashResetToken } from "../../../utils/resetToken.js";
-import { generateOtp, hashOtp } from "../../../utils/otp.js";
-import { sendPasswordResetEmail, sendOtpEmail } from "../../../utils/email.js";
+import {
+  generateOtp,
+  hashOtpCandidates,
+} from "../../../utils/otp.js";
+import {
+  sendLoginChallengeEmail,
+  sendPasswordChangedEmail,
+  sendPasswordResetEmail,
+  sendOtpEmail,
+} from "../../../utils/email.js";
+import Logger from "../../../utils/logger.js";
 import {
   ConflictError,
   ValidationError,
@@ -23,6 +33,16 @@ import {
 } from "../../../utils/Errors.js";
 
 const MAX_OTP_ATTEMPTS = 5;
+const PRIVILEGED_ROLES = new Set([ROLES.ADMIN, ROLES.SUPER_ADMIN]);
+
+function createSessionToken(user, mfa) {
+  return generateToken({
+    id: user.id,
+    role: user.role,
+    sv: user.securityVersion ?? 0,
+    mfa,
+  });
+}
 
 /**
  * Auth Service - The "Brain"
@@ -83,11 +103,23 @@ export async function registerService(userData) {
 
   // 5. Generate an OTP, persist only its hash, email the raw code
   const { code, codeHash, expiresAt } = generateOtp();
-  await authRepo.createEmailOtp({ userId: newUser.id, codeHash, expiresAt });
-  await sendOtpEmail(newUser.email, code);
+  await authRepo.replaceEmailOtp({ userId: newUser.id, codeHash, expiresAt });
+  let verificationEmailSent = true;
+  try {
+    await sendOtpEmail(newUser.email, code);
+  } catch (error) {
+    verificationEmailSent = false;
+    Logger.error("Registration verification email delivery failed", {
+      userId: newUser.id,
+      message: error?.message,
+    });
+  }
 
   // 6. Return the safe (unverified) user — no token, no cookie
-  return authModel.toUserResponse(newUser);
+  return {
+    ...authModel.toUserResponse(newUser),
+    verificationEmailSent,
+  };
 }
 
 /**
@@ -136,21 +168,37 @@ export async function loginService(credentials) {
     );
   }
 
+  if (PRIVILEGED_ROLES.has(user.role)) {
+    const { code, codeHash, expiresAt } = generateOtp();
+    const challenge = await authRepo.createLoginChallenge({
+      userId: user.id,
+      codeHash,
+      expiresAt,
+    });
+    await sendLoginChallengeEmail(user.email, code);
+    return {
+      requiresMfa: true,
+      challengeId: challenge.id,
+      expiresAt: challenge.expiresAt,
+    };
+  }
+
   // 5. Success: Transform to Safe Shape & Generate Token
   const safeUser = authModel.toUserResponse(user);
-  const token = generateToken({ id: safeUser.id, role: safeUser.role });
+  const token = createSessionToken(user, false);
 
   return { user: safeUser, token };
 }
 
 /**
  * Service: Request a password reset email.
- * Reveals whether the email is registered (throws NotFoundError if not) —
- * a deliberate product choice favoring UX over enumeration-hardening.
+ * Uses the same response and minimum processing duration for registered and
+ * unknown addresses, preventing direct account discovery.
  *
  * @param {object} payload - { email }
  */
 export async function forgotPasswordService(payload) {
+  const startedAt = Date.now();
   // 1. Validation: Use the centralized Zod schema
   const validation = forgotPasswordSchema.safeParse(payload);
 
@@ -165,7 +213,8 @@ export async function forgotPasswordService(payload) {
   const user = await authRepo.findUserByEmail(email);
 
   if (!user) {
-    throw new NotFoundError("This email isn't registered. Please try another one, or sign up.");
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, 300 - (Date.now() - startedAt))));
+    return;
   }
 
   // 3. Generate token, persist only its hash, email the raw token
@@ -178,7 +227,14 @@ export async function forgotPasswordService(payload) {
   });
 
   const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
-  await sendPasswordResetEmail(user.email, resetUrl);
+  sendPasswordResetEmail(user.email, resetUrl).catch((error) => {
+    Logger.error("Password-reset email delivery failed", error);
+  });
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, 300 - (Date.now() - startedAt))));
+}
+
+export async function logoutService(userId) {
+  await authRepo.invalidateUserSessions(userId);
 }
 
 /**
@@ -198,18 +254,13 @@ export async function resetPasswordService(payload) {
 
   // 2. Look up the token by its hash — never by the raw value
   const tokenHash = hashResetToken(token);
-  const resetToken = await authRepo.findValidResetToken(tokenHash);
-
-  if (!resetToken) {
-    throw new ValidationError("This reset link is invalid or has expired.", "token");
-  }
-
-  // 3. Hash the new password and update the user
   const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await authRepo.updateUserPassword(resetToken.userId, hashedPassword);
-
-  // 4. Burn the token so it can't be replayed
-  await authRepo.markResetTokenUsed(resetToken.id);
+  const user = await authRepo.resetPasswordWithToken(tokenHash, hashedPassword);
+  try {
+    await sendPasswordChangedEmail(user.email);
+  } catch (error) {
+    Logger.error("Password-changed notification failed", error);
+  }
 }
 
 /**
@@ -229,44 +280,14 @@ export async function verifyOtpService(payload) {
   const { email, code } = validation.data;
 
   // 2. Look up the user and their currently-active OTP
-  const user = await authRepo.findUserByEmail(email);
-
-  if (!user) {
-    throw new NotFoundError("This email isn't registered. Please sign up first.");
-  }
-
-  if (user.emailVerified) {
-    throw new ConflictError("This email is already verified.");
-  }
-
-  const otp = await authRepo.findActiveOtpForUser(user.id);
-
-  if (!otp) {
-    throw new ValidationError(
-      "This code has expired. Please request a new one.",
-      "code"
-    );
-  }
-
-  if (otp.attempts >= MAX_OTP_ATTEMPTS) {
-    throw new ValidationError(
-      "Too many incorrect attempts. Please request a new code.",
-      "code"
-    );
-  }
-
-  // 3. Compare hashes — wrong guesses still count against this OTP's attempts
-  if (otp.codeHash !== hashOtp(code)) {
-    await authRepo.incrementOtpAttempts(otp.id);
-    throw new ValidationError("Incorrect code. Please try again.", "code");
-  }
-
-  // 4. Success: burn the OTP, verify the user, log them in
-  await authRepo.markOtpVerified(otp.id);
-  const verifiedUser = await authRepo.markUserEmailVerified(user.id);
+  const verifiedUser = await authRepo.verifyEmailWithOtp(
+    email,
+    hashOtpCandidates(code),
+    MAX_OTP_ATTEMPTS,
+  );
 
   const safeUser = authModel.toUserResponse(verifiedUser);
-  const token = generateToken({ id: safeUser.id, role: safeUser.role });
+  const token = createSessionToken(verifiedUser, false);
 
   return { user: safeUser, token };
 }
@@ -297,8 +318,39 @@ export async function resendOtpService(payload) {
   }
 
   const { code, codeHash, expiresAt } = generateOtp();
-  await authRepo.createEmailOtp({ userId: user.id, codeHash, expiresAt });
+  await authRepo.replaceEmailOtp({ userId: user.id, codeHash, expiresAt });
   await sendOtpEmail(user.email, code);
+}
+
+export async function verifyLoginChallengeService(payload) {
+  const validation = verifyLoginChallengeSchema.safeParse(payload);
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  const { challengeId, code } = validation.data;
+  const user = await authRepo.verifyLoginChallenge(
+    challengeId,
+    hashOtpCandidates(code),
+    MAX_OTP_ATTEMPTS,
+  );
+  if (!PRIVILEGED_ROLES.has(user.role)) {
+    throw new ForbiddenError(
+      "This challenge is not valid for an administrator account.",
+      "INVALID_LOGIN_CHALLENGE",
+    );
+  }
+  if (!user.emailVerified) {
+    throw new ForbiddenError(
+      "Please verify your email before logging in.",
+      "EMAIL_NOT_VERIFIED",
+    );
+  }
+  return {
+    user: authModel.toUserResponse(user),
+    token: createSessionToken(user, true),
+  };
 }
 
 /**

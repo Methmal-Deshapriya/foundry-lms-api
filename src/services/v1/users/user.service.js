@@ -1,6 +1,10 @@
 import * as userRepo from "../../../repositories/v1/users/user.repository.js";
 import * as userModel from "../../../models/v1/users/user.model.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import {
+  userIdSchema,
+  userListQuerySchema,
+} from "../../../constants/v1/users/user.schema.js";
 import { updateProfileSchema } from "../../../constants/v1/auth/auth.schema.js";
 import { transformUser } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
@@ -32,7 +36,13 @@ export async function updateUserProfileService(userId, data) {
   }
 
   // 3. Update
-  const updatedUser = await userRepo.updateUser(userId, validation.data);
+  const updateData = {
+    ...validation.data,
+    ...(validation.data.dateOfBirth
+      ? { dateOfBirth: new Date(`${validation.data.dateOfBirth}T00:00:00.000Z`) }
+      : {}),
+  };
+  const updatedUser = await userRepo.updateUser(userId, updateData);
 
   return transformUser(updatedUser);
 }
@@ -40,12 +50,14 @@ export async function updateUserProfileService(userId, data) {
 /**
  * Service: Get a paginated list of users with optional role filtering.
  */
-export async function getAllUsersService(filters = {}, limit = 10, offset = 0) {
-  const sanitizedFilters = {};
-
-  if (filters.role && Object.values(ROLES).includes(filters.role)) {
-    sanitizedFilters.role = filters.role;
+export async function getAllUsersService(query = {}) {
+  const validation = userListQuerySchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path.join(".") || null);
   }
+  const { role, limit, offset } = validation.data;
+  const sanitizedFilters = role ? { role } : {};
 
   const { total, users } = await userRepo.findAndCountUsers(
     sanitizedFilters,
@@ -71,6 +83,10 @@ export async function getAllUsersService(filters = {}, limit = 10, offset = 0) {
  * @param {string} actorId - The Super Admin performing the action.
  */
 export async function promoteUserService(targetId, actorId) {
+  const parsedId = userIdSchema.safeParse(targetId);
+  if (!parsedId.success) {
+    throw new ValidationError(parsedId.error.issues[0].message, "id");
+  }
   // 1. Find the target user
   const user = await userRepo.findUserById(targetId);
   if (!user) {
@@ -105,6 +121,10 @@ export async function promoteUserService(targetId, actorId) {
  * @param {string} actorId - The Super Admin performing the action.
  */
 export async function demoteUserService(targetId, actorId) {
+  const parsedId = userIdSchema.safeParse(targetId);
+  if (!parsedId.success) {
+    throw new ValidationError(parsedId.error.issues[0].message, "id");
+  }
   // 1. Find the target user
   const user = await userRepo.findUserById(targetId);
   if (!user) {

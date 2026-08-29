@@ -1,6 +1,8 @@
 import * as auditRepo from "../../../repositories/v1/audit/audit.repository.js";
 import * as auditModel from "../../../models/v1/audit/audit.model.js";
 import Logger from "../../../utils/logger.js";
+import { auditLogQuerySchema } from "../../../constants/v1/audit/audit.schema.js";
+import { ValidationError } from "../../../utils/Errors.js";
 
 /**
  * Audit Service - The "Accountability Engine"
@@ -31,19 +33,26 @@ export function recordActionService(payload) {
  * @param {number} offset - Items to skip.
  * @returns {Promise<object>} { logs, pagination }
  */
-export async function getAuditLogsService(filters, limit = 50, offset = 0) {
-  // 1. Fetch data and total count from repository
-  const { total, logs } = await auditRepo.findAndCount(filters, limit, offset);
-
-  // 2. Map raw records to sanitized model shape
-  const sanitizedLogs = auditModel.toAuditLogListResponse(logs);
-
-  // 3. Construct professional pagination metadata
+export async function getAuditLogsService(query = {}) {
+  const validation = auditLogQuerySchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path.join(".") || null);
+  }
+  const { resourceType, limit, cursor, ...filters } = validation.data;
+  const { total, logs } = await auditRepo.findAndCount(
+    { ...filters, entityType: resourceType },
+    limit,
+    cursor,
+  );
+  const hasMore = logs.length > limit;
+  const pageLogs = logs.slice(0, limit);
+  const sanitizedLogs = auditModel.toAuditLogListResponse(pageLogs);
   const pagination = {
     total,
-    limit: Number(limit),
-    offset: Number(offset),
-    hasMore: Number(offset) + sanitizedLogs.length < total,
+    limit,
+    hasMore,
+    nextCursor: hasMore ? pageLogs.at(-1)?.id ?? null : null,
   };
 
   return {

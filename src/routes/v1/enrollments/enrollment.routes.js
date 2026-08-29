@@ -60,15 +60,4 @@ router.patch(
   enrollmentController.updateEnrollmentController
 );
 
-/**
- * @route   GET /v1/enrollments/course/:courseId
- * @desc    Get all students enrolled in a specific course
- * @access  Private (ADMIN, SUPER_ADMIN only)
- */
-router.get(
-  "/course/:courseId",
-  requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE),
-  enrollmentController.getCourseStudentsController
-);
-
 export default router;

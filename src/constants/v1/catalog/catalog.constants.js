@@ -1,21 +1,3 @@
-export const LEARNING_SERVICE_TYPES = Object.freeze({
-  BOOTCAMPS: "BOOTCAMPS",
-  PRETECH: "PRETECH",
-  FREE_LEARNING: "FREE_LEARNING",
-});
-
-export const SERVICE_SLUG_TO_TYPE = Object.freeze({
-  bootcamps: LEARNING_SERVICE_TYPES.BOOTCAMPS,
-  "pretech-courses": LEARNING_SERVICE_TYPES.PRETECH,
-  "free-learning": LEARNING_SERVICE_TYPES.FREE_LEARNING,
-});
-
-export const SERVICE_TYPE_TO_SLUG = Object.freeze(
-  Object.fromEntries(
-    Object.entries(SERVICE_SLUG_TO_TYPE).map(([slug, type]) => [type, slug]),
-  ),
-);
-
 export const CATALOG_STATUSES = Object.freeze({
   DRAFT: "DRAFT",
   PUBLISHED: "PUBLISHED",
@@ -30,7 +12,21 @@ export const COURSE_LEVELS = Object.freeze([
   "ADVANCED",
 ]);
 
-export const COURSE_ACCESS_TYPES = Object.freeze(["FREE", "PAID"]);
+export const COURSE_STATUSES = Object.freeze([
+  "DRAFT",
+  "OPEN_ACTIVE",
+  "CLOSED_ACTIVE",
+  "COMPLETED",
+  "CANCELLED",
+  "ARCHIVED",
+]);
+export const COURSE_SESSION_DELIVERY_STATUSES = Object.freeze([
+  "UNRELEASED",
+  "SCHEDULED",
+  "RELEASED",
+  "WITHDRAWN",
+]);
+export const COURSE_CURRENCY = "LKR";
 export const DURATION_UNITS = Object.freeze([
   "SESSION",
   "DAY",

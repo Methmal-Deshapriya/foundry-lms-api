@@ -35,46 +35,6 @@ export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
   return { total, users };
 }
 
-/**
- * Search students who are not already enrolled in a given course.
- * @param {string} courseId - UUID of the course.
- * @param {string} query - Partial email search text.
- * @param {number} limit - Max number of students to return.
- * @returns {Promise<Array>} List of eligible student users.
- */
-export async function searchEligibleStudentsForBatch(
-  batchId,
-  query = "",
-  limit = 10
-) {
-  const normalizedQuery = typeof query === "string" ? query.trim() : "";
-
-  return await prisma.user.findMany({
-    where: {
-      role: "STUDENT",
-      emailVerified: true,
-      ...(normalizedQuery
-        ? {
-            OR: [
-              { email: { contains: normalizedQuery, mode: "insensitive" } },
-              { firstName: { contains: normalizedQuery, mode: "insensitive" } },
-              { lastName: { contains: normalizedQuery, mode: "insensitive" } },
-            ],
-          }
-        : {}),
-      enrollments: {
-        none: {
-          batchId,
-        },
-      },
-    },
-    orderBy: {
-      email: "asc",
-    },
-    take: Number(limit),
-  });
-}
-
 export async function findVerifiedStudentsByIds(ids) {
   if (!Array.isArray(ids) || ids.length === 0) return [];
   return prisma.user.findMany({
@@ -104,7 +64,10 @@ export async function findUserById(id) {
  * @returns {Promise<object>} The updated user object.
  */
 export async function updateUserRole(id, role) {
-  return await updateUser(id, { role });
+  return await updateUser(id, {
+    role,
+    securityVersion: { increment: 1 },
+  });
 }
 
 /**

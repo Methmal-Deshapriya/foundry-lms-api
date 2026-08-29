@@ -4,7 +4,9 @@ vi.mock("../../../repositories/v1/sessions/sessionLibrary.repository.js", () => 
   findAdmin: vi.fn(),
   findById: vi.fn(),
   create: vi.fn(),
-  update: vi.fn(),
+  updateSafely: vi.fn(),
+  archiveSafely: vi.fn(),
+  restoreSafely: vi.fn(),
   removePermanently: vi.fn(),
 }));
 
@@ -32,7 +34,6 @@ function sessionFixture(overrides = {}) {
     quizUrl: null,
     feedbackUrl: null,
     durationMinutes: 60,
-    reusePolicy: "REUSABLE",
     status: "READY",
     createdAt: new Date("2026-08-07T00:00:00.000Z"),
     updatedAt: new Date("2026-08-07T00:00:00.000Z"),
@@ -44,7 +45,7 @@ function sessionFixture(overrides = {}) {
 describe("Session Library service", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns paginated sessions with course and batch impact counts", async () => {
+  it("returns paginated sessions with course and group impact counts", async () => {
     sessionRepo.findAdmin.mockResolvedValue({
       total: 1,
       sessions: [
@@ -55,8 +56,7 @@ describe("Session Library service", () => {
               courseId: "course-1",
               orderIndex: 0,
               retiredAt: null,
-              course: { title: "ML 1" },
-              _count: { batchLinks: 2 },
+              course: { title: "ML 1", courseGroupId: "group-1" },
             },
           ],
         }),
@@ -68,7 +68,7 @@ describe("Session Library service", () => {
     expect(result.sessions[0].usage).toMatchObject({
       courseCount: 1,
       activeCourseCount: 1,
-      batchCount: 2,
+      courseGroupCount: 1,
     });
     expect(result.pagination).toEqual({
       total: 1,
@@ -76,6 +76,23 @@ describe("Session Library service", () => {
       offset: 0,
       hasMore: false,
     });
+  });
+
+  it("passes the course attachability filter to the repository", async () => {
+    const attachableCourseId = "20000000-0000-4000-8000-000000000002";
+    sessionRepo.findAdmin.mockResolvedValue({ total: 0, sessions: [] });
+
+    await listSessionLibraryService({
+      status: "READY",
+      attachableCourseId,
+      limit: "100",
+    });
+
+    expect(sessionRepo.findAdmin).toHaveBeenCalledWith(
+      { status: "READY", attachableCourseId },
+      100,
+      0,
+    );
   });
 
   it("creates an independent draft session and records an audit event", async () => {
@@ -86,20 +103,21 @@ describe("Session Library service", () => {
     const result = await createSessionLibraryItemService(
       {
         title: "Introduction to machine learning",
-        reusePolicy: "REUSABLE",
       },
       "actor-1",
     );
 
     expect(sessionRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "DRAFT", reusePolicy: "REUSABLE" }),
+      expect.objectContaining({ status: "DRAFT" }),
     );
     expect(result.usage.courseCount).toBe(0);
     expect(recordActionService).toHaveBeenCalledOnce();
   });
 
   it("blocks editing an archived session", async () => {
-    sessionRepo.findById.mockResolvedValue(sessionFixture({ status: "ARCHIVED" }));
+    sessionRepo.updateSafely.mockRejectedValue(
+      new Error("Archived sessions must be restored before editing."),
+    );
 
     await expect(
       updateSessionLibraryItemService(
@@ -108,26 +126,7 @@ describe("Session Library service", () => {
         "actor-1",
       ),
     ).rejects.toThrow(/restored before editing/i);
-    expect(sessionRepo.update).not.toHaveBeenCalled();
-  });
-
-  it("blocks changing a multi-course reusable session to one-course", async () => {
-    sessionRepo.findById.mockResolvedValue(
-      sessionFixture({
-        courseSessions: [
-          { _count: { batchLinks: 0 } },
-          { _count: { batchLinks: 0 } },
-        ],
-      }),
-    );
-
-    await expect(
-      updateSessionLibraryItemService(
-        sessionFixture().id,
-        { reusePolicy: "SINGLE_COURSE" },
-        "actor-1",
-      ),
-    ).rejects.toThrow(/used by multiple courses/i);
+    expect(sessionRepo.updateSafely).toHaveBeenCalledOnce();
   });
 
   it("requires a recording before a session becomes ready", async () => {
@@ -135,7 +134,6 @@ describe("Session Library service", () => {
       createSessionLibraryItemService(
         {
           title: "Recording is still processing",
-          reusePolicy: "SINGLE_COURSE",
           status: "READY",
         },
         "actor-1",
@@ -145,12 +143,16 @@ describe("Session Library service", () => {
 
   it("archives without removing usage relationships", async () => {
     const current = sessionFixture({
-      courseSessions: [{ _count: { batchLinks: 3 } }],
+      courseSessions: [{ course: { courseGroupId: "group-1" } }],
     });
-    sessionRepo.findById.mockResolvedValue(current);
-    sessionRepo.update.mockResolvedValue(
-      sessionFixture({ status: "ARCHIVED", courseSessions: current.courseSessions }),
-    );
+    sessionRepo.archiveSafely.mockResolvedValue({
+      previous: current,
+      session: sessionFixture({
+        status: "ARCHIVED",
+        courseSessions: current.courseSessions,
+      }),
+      changed: true,
+    });
 
     const result = await archiveSessionLibraryItemService(
       current.id,
@@ -158,17 +160,15 @@ describe("Session Library service", () => {
     );
 
     expect(result.status).toBe("ARCHIVED");
-    expect(result.usage).toMatchObject({ courseCount: 1, batchCount: 3 });
-    expect(sessionRepo.update).toHaveBeenCalledWith(current.id, {
-      status: "ARCHIVED",
-    });
+    expect(result.usage).toMatchObject({ courseCount: 1, courseGroupCount: 1 });
+    expect(sessionRepo.archiveSafely).toHaveBeenCalledWith(current.id);
   });
 
   it("requires an archived, unused session for permanent deletion", async () => {
     sessionRepo.findById.mockResolvedValue(
       sessionFixture({
         status: "ARCHIVED",
-        courseSessions: [{ _count: { batchLinks: 0 } }],
+        courseSessions: [{ course: { courseGroupId: "group-1" } }],
       }),
     );
 

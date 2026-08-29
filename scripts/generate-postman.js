@@ -30,11 +30,11 @@ const captureScripts = new Map([
   ["verifyEmailOtp", [["currentUserId", "id"]]],
   ["login", [["currentUserId", "id"]]],
   ["createCategory", [["categoryId", "id"], ["categorySlug", "slug"]]],
+  ["createCourseGroup", [["courseGroupId", "id"]]],
   ["createCourse", [["courseId", "id"], ["courseSlug", "slug"]]],
   ["createSession", [["sessionId", "id"]]],
   ["attachCourseSession", [["courseSessionId", "courseSession.id"]]],
-  ["createBatch", [["batchId", "batch.id"]]],
-  ["upsertBatchSession", [["batchSessionId", "id"]]],
+  ["listCourseEligibleStudents", [["eligibleStudentsCursor", "pagination.nextCursor"]]],
   ["selfEnrollFreeCourse", [["enrollmentId", "id"]]],
   ["manuallyEnrollStudent", [["enrollmentId", "id"]]],
   ["issueCertificate", [["certificateId", "id"], ["certificateCode", "certificateCode"]]],
@@ -55,12 +55,12 @@ const environmentVariables = [
   ["serviceSlug", "bootcamps"],
   ["categoryId", ""],
   ["categorySlug", ""],
+  ["courseGroupId", ""],
   ["courseId", ""],
   ["courseSlug", ""],
   ["sessionId", ""],
   ["courseSessionId", ""],
-  ["batchId", ""],
-  ["batchSessionId", ""],
+  ["eligibleStudentsCursor", ""],
   ["enrollmentId", ""],
   ["certificateId", ""],
   ["certificateCode", ""],
@@ -184,6 +184,12 @@ function decorateRequests(items) {
     ];
     for (const [variable, property] of captures) {
       const optionalProperty = property.split(".").join("?.");
+      if (variable === "eligibleStudentsCursor") {
+        lines.push(
+          `  pm.environment.set("${variable}", data?.${optionalProperty} ?? "");`,
+        );
+        continue;
+      }
       lines.push(
         `  if (data?.${optionalProperty}) pm.environment.set("${variable}", data.${property});`,
       );

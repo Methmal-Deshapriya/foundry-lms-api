@@ -1,18 +1,15 @@
 import * as authService from "../../../services/v1/auth/auth.service.js";
 import { ApiResponse } from "../../../utils/responseHandler.js";
+import {
+  AUTH_COOKIE_NAME,
+  clearAuthCookie,
+  getAuthCookieOptions,
+} from "../../../config/authCookie.js";
 
 /**
  * Auth Controller - The "Front Desk"
  * Handles HTTP requests and responses for authentication.
  */
-
-// Common cookie options for both register, login, and logout
-const cookieOptions = {
-  httpOnly: true, // Prevents JavaScript from reading the cookie
-  secure: process.env.NODE_ENV === "production", // Only sent over HTTPS in production
-  maxAge: 24 * 60 * 60 * 1000, // 24 hours
-  sameSite: "strict", // Protects against CSRF attacks
-};
 
 /**
  * Controller: Register a new user.
@@ -23,11 +20,14 @@ export async function registerController(req, res, next) {
     // Registering does NOT log the user in — no cookie is set here.
     // They must verify their email via OTP first (see verifyOtpController).
     const user = await authService.registerService(req.body);
+    const message = user.verificationEmailSent
+      ? "Registration successful. Please check your email for a verification code."
+      : "Your account was created, but the verification email could not be delivered. Use resend verification when email service is available.";
 
     return ApiResponse.send(
       res,
       user,
-      "Registration successful. Please check your email for a verification code.",
+      message,
       201
     );
   } catch (error) {
@@ -41,12 +41,34 @@ export async function registerController(req, res, next) {
  */
 export async function loginController(req, res, next) {
   try {
-    const { user, token } = await authService.loginService(req.body);
+    const result = await authService.loginService(req.body);
+
+    if (result.requiresMfa) {
+      return ApiResponse.send(
+        res,
+        result,
+        "A verification code was sent to your administrator email.",
+      );
+    }
+
+    const { user, token } = result;
 
     // Set the secure cookie
-    res.cookie("token", token, cookieOptions);
+    res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
     return ApiResponse.send(res, user, "Login successful");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function verifyLoginChallengeController(req, res, next) {
+  try {
+    const { user, token } = await authService.verifyLoginChallengeService(
+      req.body,
+    );
+    res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
+    return ApiResponse.send(res, user, "Administrator login successful.");
   } catch (error) {
     next(error);
   }
@@ -58,8 +80,10 @@ export async function loginController(req, res, next) {
  */
 export async function logoutController(req, res, next) {
   try {
-    // 1. Clear the authentication cookie
-    res.clearCookie("token", cookieOptions);
+    // Invalidate the server-side session version before clearing this browser.
+    // This makes logout immediate even if a copy of the JWT exists elsewhere.
+    await authService.logoutService(req.user.id);
+    clearAuthCookie(res);
 
     // 2. Return a success response
     return ApiResponse.send(res, { message: "Logout successful" });
@@ -76,7 +100,8 @@ export async function forgotPasswordController(req, res, next) {
   try {
     await authService.forgotPasswordService(req.body);
 
-    const message = "A password reset link has been sent to your email.";
+    const message =
+      "If that email is registered, a password reset link has been sent.";
     return ApiResponse.send(res, { message }, message);
   } catch (error) {
     next(error);
@@ -107,7 +132,7 @@ export async function verifyOtpController(req, res, next) {
   try {
     const { user, token } = await authService.verifyOtpService(req.body);
 
-    res.cookie("token", token, cookieOptions);
+    res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
     return ApiResponse.send(res, user, "Email verified successfully.");
   } catch (error) {
@@ -142,6 +167,7 @@ export async function getMeController(req, res, next) {
     // 2. Return a success response
     return ApiResponse.send(res, user, "User profile fetched successfully");
   } catch (error) {
+    if (error?.statusCode === 404) clearAuthCookie(res);
     next(error);
   }
 }

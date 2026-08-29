@@ -1,5 +1,19 @@
 import prisma from "../../../utils/prisma.js";
-import { handlePrismaError } from "../../../utils/Errors.js";
+import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
+import {
+  ConflictError,
+  NotFoundError,
+  handlePrismaError,
+} from "../../../utils/Errors.js";
+
+const certificateInclude = {
+  enrollment: {
+    include: {
+      user: true,
+      course: { include: { category: true } },
+    },
+  },
+};
 
 /**
  * Certificate Repository
@@ -8,14 +22,7 @@ import { handlePrismaError } from "../../../utils/Errors.js";
 export async function findById(id) {
   return await prisma.certificate.findUnique({
     where: { id },
-    include: {
-      enrollment: {
-        include: {
-          user: true,
-          course: { include: { category: true } },
-        },
-      },
-    },
+    include: certificateInclude,
   });
 }
 
@@ -25,27 +32,47 @@ export async function findByCode(certificateCode) {
   });
 }
 
-export async function findByEnrollmentId(enrollmentId) {
-  return await prisma.certificate.findUnique({
-    where: { enrollmentId },
+export async function findCurrentByEnrollmentId(enrollmentId) {
+  return await prisma.certificate.findFirst({
+    where: { enrollmentId, status: "ISSUED" },
+    orderBy: { issuedDate: "desc" },
   });
 }
 
-export async function findAllAdmin() {
+export async function findAllAdmin({ q = "", status, limit = 50, cursor = null }) {
+  const where = {
+    ...(status ? { status } : {}),
+    ...(q
+      ? {
+          OR: [
+            { certificateCode: { contains: q, mode: "insensitive" } },
+            { studentName: { contains: q, mode: "insensitive" } },
+            { courseName: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    ...(cursor
+      ? {
+          AND: [
+            {
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            },
+          ],
+        }
+      : {}),
+  };
   return await prisma.certificate.findMany({
-    include: {
-      enrollment: {
-        include: {
-          user: true,
-          course: { include: { category: true } },
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
+    where,
+    include: certificateInclude,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
   });
 }
 
-export async function findUserCertificates(userId) {
+export async function findUserCertificates(userId, { limit, cursor }) {
   return await prisma.certificate.findMany({
     where: {
       enrollment: {
@@ -59,16 +86,59 @@ export async function findUserCertificates(userId) {
         },
       },
     },
-    orderBy: { issuedDate: "desc" },
+    orderBy: [{ issuedDate: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 }
 
-export async function create(data) {
+export async function createIssued(data) {
   try {
-    return await prisma.certificate.create({
-      data,
+    return await prisma.$transaction(async (transaction) => {
+      const initialEnrollment = await transaction.enrollment.findUnique({
+        where: { id: data.enrollmentId },
+        select: { courseId: true },
+      });
+      if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
+      await acquireTransactionLock(
+        transaction,
+        `course:${initialEnrollment.courseId}`,
+      );
+      await acquireTransactionLock(transaction, `enrollment:${data.enrollmentId}`);
+      const enrollment = await transaction.enrollment.findUnique({
+        where: { id: data.enrollmentId },
+        select: {
+          status: true,
+          course: { select: { courseGroup: { select: { certificateEnabled: true } } } },
+        },
+      });
+      if (!enrollment) throw new NotFoundError("Enrollment not found.");
+      if (enrollment.status !== "COMPLETED") {
+        throw new ConflictError(
+          "Enrollment must remain completed while issuing a certificate.",
+          "CERTIFICATE_ISSUANCE_BLOCKED",
+        );
+      }
+      if (!enrollment.course.courseGroup.certificateEnabled) {
+        throw new ConflictError(
+          "Certificates are not enabled for this course.",
+          "CERTIFICATE_ISSUANCE_BLOCKED",
+        );
+      }
+      const current = await transaction.certificate.findFirst({
+        where: { enrollmentId: data.enrollmentId, status: "ISSUED" },
+        select: { id: true },
+      });
+      if (current) {
+        throw new ConflictError(
+          "A current certificate has already been issued for this enrollment.",
+          "CERTIFICATE_ALREADY_ISSUED",
+        );
+      }
+      return transaction.certificate.create({ data });
     });
   } catch (error) {
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
     throw handlePrismaError(error);
   }
 }
@@ -80,6 +150,57 @@ export async function update(id, data) {
       data,
     });
   } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+export async function revokeIssued(id, data) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.certificate.findUnique({
+        where: { id },
+        select: { enrollmentId: true },
+      });
+      if (!initial) throw new NotFoundError("Certificate not found.");
+
+      const initialEnrollment = await transaction.enrollment.findUnique({
+        where: { id: initial.enrollmentId },
+        select: { courseId: true },
+      });
+      if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
+      // Use the global course -> enrollment order so revocation cannot race a
+      // course-completion readiness decision.
+      await acquireTransactionLock(
+        transaction,
+        `course:${initialEnrollment.courseId}`,
+      );
+      await acquireTransactionLock(
+        transaction,
+        `enrollment:${initial.enrollmentId}`,
+      );
+      const current = await transaction.certificate.findUnique({
+        where: { id },
+        include: certificateInclude,
+      });
+      if (!current) throw new NotFoundError("Certificate not found.");
+      if (current.status === "REVOKED") {
+        throw new ConflictError("Certificate is already revoked.");
+      }
+
+      const lifecycleContext = {
+        enrollmentStatus: current.enrollment.status,
+        courseStatus: current.enrollment.course.status,
+        categoryStatus: current.enrollment.course.category.status,
+      };
+      const certificate = await transaction.certificate.update({
+        where: { id },
+        data,
+        include: certificateInclude,
+      });
+      return { certificate, lifecycleContext };
+    });
+  } catch (error) {
+    if (error instanceof ConflictError || error instanceof NotFoundError) throw error;
     throw handlePrismaError(error);
   }
 }

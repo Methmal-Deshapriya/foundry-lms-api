@@ -7,11 +7,18 @@ import nodemailer from "nodemailer";
  */
 
 let transporter;
+let lastVerifiedAt = 0;
+
+const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS ?? 5_000);
+const SMTP_READINESS_CACHE_MS = Number(
+  process.env.SMTP_READINESS_CACHE_MS ?? 60_000,
+);
 
 const getTransporter = () => {
   if (!transporter) {
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASSWORD;
+    const port = Number(process.env.SMTP_PORT ?? 587);
 
     if (!user || !pass) {
       throw new Error("SMTP_USER or SMTP_PASSWORD is missing in environment variables!");
@@ -19,8 +26,11 @@ const getTransporter = () => {
 
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: false, // STARTTLS on port 587, not implicit TLS
+      port,
+      secure: port === 465,
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
       auth: { user, pass },
     });
   }
@@ -67,6 +77,39 @@ export const sendOtpEmail = async (to, code) => {
       <p>Welcome to Foundry LMS! Use the code below to verify your email address:</p>
       <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px;">${code}</p>
       <p>This code expires in 10 minutes. If you didn't create this account, you can safely ignore this email.</p>
+    `,
+  });
+};
+
+export const checkEmailReadiness = async ({ force = false } = {}) => {
+  if (!force && Date.now() - lastVerifiedAt < SMTP_READINESS_CACHE_MS) return;
+  await getTransporter().verify();
+  lastVerifiedAt = Date.now();
+};
+
+export const sendLoginChallengeEmail = async (to, code) => {
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  await getTransporter().sendMail({
+    from,
+    to,
+    subject: "Your Foundry LMS administrator login code",
+    html: `
+      <p>A login was requested for your Foundry LMS administrator account.</p>
+      <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px;">${code}</p>
+      <p>This code expires in 10 minutes. If this was not you, reset your password immediately.</p>
+    `,
+  });
+};
+
+export const sendPasswordChangedEmail = async (to) => {
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  await getTransporter().sendMail({
+    from,
+    to,
+    subject: "Your Foundry LMS password was changed",
+    html: `
+      <p>Your Foundry LMS password was changed successfully.</p>
+      <p>All existing sessions have been invalidated. If you did not make this change, contact Foundry Academy immediately.</p>
     `,
   });
 };

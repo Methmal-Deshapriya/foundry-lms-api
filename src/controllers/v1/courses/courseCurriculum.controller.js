@@ -62,3 +62,17 @@ export async function removeSession(req, res, next) {
   }
 }
 
+export async function updateDelivery(req, res, next) {
+  try {
+    return ApiResponse.send(
+      res,
+      await curriculumService.updateCourseSessionDeliveryService(
+        req.params.courseId,
+        req.params.courseSessionId,
+        req.body,
+        req.user.id,
+      ),
+      "Course session delivery updated",
+    );
+  } catch (error) { next(error); }
+}

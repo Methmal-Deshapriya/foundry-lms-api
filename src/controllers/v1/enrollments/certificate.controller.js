@@ -41,7 +41,10 @@ export async function verifyCertificate(req, res, next) {
 export async function getMyCertificates(req, res, next) {
   try {
     const userId = req.user.id;
-    const certificates = await certificateService.getMyCertificatesService(userId);
+    const certificates = await certificateService.getMyCertificatesService(
+      userId,
+      req.query,
+    );
     return ApiResponse.send(res, certificates, "Your certificates fetched successfully");
   } catch (error) {
     next(error);
@@ -50,7 +53,7 @@ export async function getMyCertificates(req, res, next) {
 
 export async function getAllCertificatesAdmin(req, res, next) {
   try {
-    const certificates = await certificateService.getAllCertificatesAdminService();
+    const certificates = await certificateService.getAllCertificatesAdminService(req.query);
     return ApiResponse.send(res, certificates, "All certificates fetched successfully");
   } catch (error) {
     next(error);

@@ -8,8 +8,7 @@ import { ROLES } from "../../../constants/v1/users/users.constants.js";
 
 export async function submitProject(req, res, next) {
   try {
-    const userId = req.user.id;
-    const project = await projectService.submitProjectService(userId, req.body);
+    const project = await projectService.submitProjectService(req.user, req.body);
     return ApiResponse.send(res, project, "Project submitted successfully", 201);
   } catch (error) {
     next(error);
@@ -41,7 +40,7 @@ export async function reviewProject(req, res, next) {
 export async function getMyProjects(req, res, next) {
   try {
     const userId = req.user.id;
-    const projects = await projectService.getMyProjectsService(userId);
+    const projects = await projectService.getMyProjectsService(userId, req.query);
     return ApiResponse.send(res, projects, "Your projects fetched successfully");
   } catch (error) {
     next(error);
@@ -50,7 +49,7 @@ export async function getMyProjects(req, res, next) {
 
 export async function getAllProjectsAdmin(req, res, next) {
   try {
-    const projects = await projectService.getAllProjectsAdminService();
+    const projects = await projectService.getAllProjectsAdminService(req.query);
     return ApiResponse.send(res, projects, "All projects fetched successfully");
   } catch (error) {
     next(error);
@@ -59,8 +58,19 @@ export async function getAllProjectsAdmin(req, res, next) {
 
 export async function getPublicShowcase(req, res, next) {
   try {
-    const projects = await projectService.getPublicShowcaseService();
+    const projects = await projectService.getPublicShowcaseService(req.query);
     return ApiResponse.send(res, projects, "Public showcase fetched successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getPublicProjectDetails(req, res, next) {
+  try {
+    const project = await projectService.getPublicProjectDetailsService(
+      req.params.id,
+    );
+    return ApiResponse.send(res, project, "Public project fetched successfully");
   } catch (error) {
     next(error);
   }
