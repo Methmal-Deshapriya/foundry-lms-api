@@ -9,32 +9,43 @@ const ids = {
   freeService: "e1000000-0000-4000-8000-000000000002",
   paidCategory: "e1000000-0000-4000-8000-000000000003",
   freeCategory: "e1000000-0000-4000-8000-000000000004",
-  paidGroup: "e1000000-0000-4000-8000-000000000005",
-  freeGroup: "e1000000-0000-4000-8000-000000000006",
+  paidCourse: "e1000000-0000-4000-8000-000000000005",
+  freeCourse: "e1000000-0000-4000-8000-000000000006",
   user: "e1000000-0000-4000-8000-000000000007",
 };
 
-const courseData = ({ id, groupId, categoryId, code, price, seasonal = false, status = "DRAFT" }) => ({
+// The real-world program. Price and certificate policy live here now, not
+// on the intake — see the 2026-08-30 course-to-program-intake rename plan.
+const courseData = ({ id, categoryId, slug, price, certificateEnabled }) => ({
   id,
-  courseGroupId: groupId,
   categoryId,
-  slug: code.toLowerCase(),
+  slug,
   title: "Policy verification course",
   summary: "A database policy verification course.",
   description: "A database policy verification course used only by the integration suite.",
   level: "OPEN",
-  intakeKey: code,
-  code,
+  price,
+  currency: "LKR",
+  intakeCodePrefix: slug.toUpperCase(),
+  certificateEnabled,
+});
+
+// One scheduled run of a course. Dates/status live here.
+const intakeData = ({ id, courseId, categoryId, intakeKey, seasonal = false, status = "DRAFT" }) => ({
+  id,
+  courseId,
+  categoryId,
+  intakeKey,
+  code: intakeKey,
   startDate: seasonal ? new Date("2027-01-01") : null,
   expectedEndDate: seasonal ? new Date("2027-03-01") : null,
-  price,
   status,
 });
 
 async function cleanup() {
   await prisma.enrollment.deleteMany({ where: { course: { categoryId: { in: [ids.paidCategory, ids.freeCategory] } } } });
+  await prisma.intake.deleteMany({ where: { categoryId: { in: [ids.paidCategory, ids.freeCategory] } } });
   await prisma.course.deleteMany({ where: { categoryId: { in: [ids.paidCategory, ids.freeCategory] } } });
-  await prisma.courseGroup.deleteMany({ where: { id: { in: [ids.paidGroup, ids.freeGroup] } } });
   await prisma.category.deleteMany({ where: { id: { in: [ids.paidCategory, ids.freeCategory] } } });
   await prisma.user.deleteMany({ where: { id: ids.user } });
   for (const id of [ids.paidService, ids.freeService]) {
@@ -57,9 +68,9 @@ describe.runIf(runDatabaseIntegration)("LearningService database policy boundary
       { id: ids.paidCategory, serviceId: ids.paidService, slug: "verify-paid-category", title: "Verify Paid Category", description: "Paid policy verification category.", visualKey: "sparkles", status: "PUBLISHED" },
       { id: ids.freeCategory, serviceId: ids.freeService, slug: "verify-free-category", title: "Verify Free Category", description: "Free policy verification category.", visualKey: "sparkles", status: "PUBLISHED" },
     ] });
-    await prisma.courseGroup.createMany({ data: [
-      { id: ids.paidGroup, categoryId: ids.paidCategory, slug: "verify-paid-course", title: "Verify Paid Course", batchCodePrefix: "VERIFY-PAID", certificateEnabled: true },
-      { id: ids.freeGroup, categoryId: ids.freeCategory, slug: "verify-free-course", title: "Verify Free Course", batchCodePrefix: "VERIFY-FREE", certificateEnabled: false },
+    await prisma.course.createMany({ data: [
+      courseData({ id: ids.paidCourse, categoryId: ids.paidCategory, slug: "verify-paid-course", price: 1000, certificateEnabled: true }),
+      courseData({ id: ids.freeCourse, categoryId: ids.freeCategory, slug: "verify-free-course", price: 0, certificateEnabled: false }),
     ] });
     await prisma.user.create({ data: { id: ids.user, firstName: "Policy", lastName: "Student", email: "policy-verification@foundry.test", password: "integration-test-only", role: "STUDENT", emailVerified: true } });
   }, 60_000);
@@ -89,40 +100,43 @@ describe.runIf(runDatabaseIntegration)("LearningService database policy boundary
     await expect(prisma.$executeRawUnsafe(`UPDATE learning_services SET key = 'REWRITTEN' WHERE id = $1`, ids.paidService)).rejects.toBeTruthy();
     await expect(prisma.$executeRawUnsafe(`UPDATE learning_services SET slug = 'rewritten' WHERE id = $1`, ids.paidService)).rejects.toBeTruthy();
     await expect(prisma.$executeRawUnsafe(`UPDATE categories SET service_id = $1 WHERE id = $2`, ids.freeService, ids.paidCategory)).rejects.toBeTruthy();
-    await expect(prisma.courseGroup.update({ where: { id: ids.paidGroup }, data: { certificateEnabled: false } })).rejects.toBeTruthy();
+    await expect(prisma.course.update({ where: { id: ids.paidCourse }, data: { certificateEnabled: false } })).rejects.toBeTruthy();
   });
 
-  it("enforces price and intake shape without the API", async () => {
-    await expect(prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000010", groupId: ids.freeGroup, categoryId: ids.freeCategory, code: "VERIFY-FREE-BAD-PRICE", price: 1 }) })).rejects.toBeTruthy();
-    await expect(prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000011", groupId: ids.paidGroup, categoryId: ids.paidCategory, code: "VERIFY-PAID-BAD-PRICE", price: 0, seasonal: true }) })).rejects.toBeTruthy();
-    await expect(prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000012", groupId: ids.paidGroup, categoryId: ids.paidCategory, code: "VERIFY-PAID-NO-DATES", price: 1000 }) })).rejects.toBeTruthy();
+  it("enforces course pricing policy without the API", async () => {
+    await expect(prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000010", categoryId: ids.freeCategory, slug: "verify-free-bad-price", price: 1, certificateEnabled: false }) })).rejects.toBeTruthy();
+    await expect(prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000011", categoryId: ids.paidCategory, slug: "verify-paid-bad-price", price: 0, certificateEnabled: true }) })).rejects.toBeTruthy();
+  });
+
+  it("enforces intake date shape without the API", async () => {
+    await expect(prisma.intake.create({ data: intakeData({ id: "e1000000-0000-4000-8000-000000000012", courseId: ids.paidCourse, categoryId: ids.paidCategory, intakeKey: "VERIFY-PAID-NO-DATES" }) })).rejects.toBeTruthy();
   });
 
   it("serializes concurrent evergreen inserts", async () => {
     const attempts = await Promise.allSettled([
-      prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000020", groupId: ids.freeGroup, categoryId: ids.freeCategory, code: "VERIFY-FREE-A", price: 0 }) }),
-      prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000021", groupId: ids.freeGroup, categoryId: ids.freeCategory, code: "VERIFY-FREE-B", price: 0 }) }),
+      prisma.intake.create({ data: intakeData({ id: "e1000000-0000-4000-8000-000000000020", courseId: ids.freeCourse, categoryId: ids.freeCategory, intakeKey: "VERIFY-FREE-A" }) }),
+      prisma.intake.create({ data: intakeData({ id: "e1000000-0000-4000-8000-000000000021", courseId: ids.freeCourse, categoryId: ids.freeCategory, intakeKey: "VERIFY-FREE-B" }) }),
     ]);
     expect(attempts.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(attempts.filter(({ status }) => status === "rejected")).toHaveLength(1);
   }, 60_000);
 
   it("enforces enrollment source/payment and blocks service archive with active learning", async () => {
-    const freeCourse = await prisma.course.findFirstOrThrow({ where: { courseGroupId: ids.freeGroup } });
-    await expect(prisma.enrollment.create({ data: { userId: ids.user, courseId: freeCourse.id, source: "ADMIN", paymentStatus: "NOT_REQUIRED" } })).rejects.toBeTruthy();
-    const freeEnrollment = await prisma.enrollment.create({ data: { userId: ids.user, courseId: freeCourse.id, source: "SELF", paymentStatus: "NOT_REQUIRED" } });
+    const freeIntake = await prisma.intake.findFirstOrThrow({ where: { courseId: ids.freeCourse } });
+    await expect(prisma.enrollment.create({ data: { userId: ids.user, courseId: ids.freeCourse, intakeId: freeIntake.id, source: "ADMIN", paymentStatus: "NOT_REQUIRED" } })).rejects.toBeTruthy();
+    const freeEnrollment = await prisma.enrollment.create({ data: { userId: ids.user, courseId: ids.freeCourse, intakeId: freeIntake.id, source: "SELF", paymentStatus: "NOT_REQUIRED" } });
     await expect(prisma.certificate.create({
       data: {
         enrollmentId: freeEnrollment.id,
         certificateCode: "VERIFY-FREE-CERTIFICATE-BLOCKED",
         studentName: "Policy Student",
-        courseName: freeCourse.title,
+        courseName: "Policy verification course",
         issuedDate: new Date(),
         certificateData: {},
       },
     })).rejects.toBeTruthy();
 
-    await prisma.course.create({ data: courseData({ id: "e1000000-0000-4000-8000-000000000030", groupId: ids.paidGroup, categoryId: ids.paidCategory, code: "VERIFY-PAID-ACTIVE", price: 1000, seasonal: true, status: "OPEN_ACTIVE" }) });
+    await prisma.intake.create({ data: intakeData({ id: "e1000000-0000-4000-8000-000000000030", courseId: ids.paidCourse, categoryId: ids.paidCategory, intakeKey: "VERIFY-PAID-ACTIVE", seasonal: true, status: "OPEN_ACTIVE" }) });
     await expect(prisma.learningService.update({ where: { id: ids.paidService }, data: { status: "ARCHIVED" } })).rejects.toBeTruthy();
   });
 });

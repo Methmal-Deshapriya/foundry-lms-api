@@ -21,15 +21,16 @@ tags:
   - name: 02 Users
   - name: 03 Public Catalog
   - name: 04 Categories
-  - name: 05 Course Groups
+  - name: 05 Courses
   - name: 06 Course Intakes
   - name: 07 Session Library
   - name: 08 Course Curriculum & Delivery
   - name: 09 Enrollments & Classroom
-  - name: 10 Certificates
-  - name: 11 Projects
-  - name: 12 Audit Logs
-  - name: 13 Service Overview
+  - name: 10 Enrollment Requests
+  - name: 11 Certificates
+  - name: 12 Projects
+  - name: 13 Audit Logs
+  - name: 14 Service Overview
 security:
   - cookieAuth: []
 paths:
@@ -59,7 +60,7 @@ paths:
 
   /api/v1/services/summary:
     get:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: getAdminLearningServiceSummaries
       summary: Get learning-service administration summaries
       x-access: ADMIN
@@ -70,7 +71,7 @@ paths:
 
   /api/v1/services:
     get:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: listLearningServices
       summary: List learning services and administration summaries
       x-access: ADMIN
@@ -84,7 +85,7 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     post:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: createLearningService
       summary: Create a learning service as Draft
       x-access: SUPER_ADMIN
@@ -97,7 +98,7 @@ paths:
 
   /api/v1/services/{learningServiceId}:
     get:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: getLearningService
       summary: Get a learning service and administration summary
       x-access: ADMIN
@@ -107,7 +108,7 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     patch:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: updateLearningService
       summary: Update a Draft learning service
       x-access: SUPER_ADMIN
@@ -120,7 +121,7 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     delete:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: deleteLearningServicePermanently
       summary: "[DESTRUCTIVE] Permanently delete an archived empty learning service"
       x-access: SUPER_ADMIN
@@ -135,7 +136,7 @@ paths:
 
   /api/v1/services/{learningServiceId}/deletion-impact:
     get:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: getLearningServiceDeletionImpact
       summary: Preview whether permanent service deletion is safe
       x-access: SUPER_ADMIN
@@ -147,7 +148,7 @@ paths:
 
   /api/v1/services/{learningServiceId}/activate:
     patch:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: activateLearningService
       summary: Activate a Draft learning service
       x-access: SUPER_ADMIN
@@ -161,7 +162,7 @@ paths:
 
   /api/v1/services/{learningServiceId}/deactivate:
     patch:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: deactivateLearningService
       summary: Return an Active learning service to Draft
       x-access: SUPER_ADMIN
@@ -175,7 +176,7 @@ paths:
 
   /api/v1/services/{learningServiceId}/archive:
     patch:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: archiveLearningService
       summary: Archive an inactive learning service
       x-access: SUPER_ADMIN
@@ -190,7 +191,7 @@ paths:
 
   /api/v1/services/{learningServiceId}/unarchive:
     patch:
-      tags: [13 Service Overview]
+      tags: [14 Service Overview]
       operationId: unarchiveLearningService
       summary: Restore an Archived learning service as Draft
       x-access: SUPER_ADMIN
@@ -582,118 +583,23 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/course-groups:
-    get:
-      tags: [05 Course Groups]
-      operationId: listCourseGroupsAdmin
-      summary: List internal course groups and their intake courses
-      x-access: ADMIN
-      description: Course groups organize courses that represent the same real-world program and own the immutable certificate policy shared by every intake. They are never exposed by the public catalog.
-      parameters:
-        - $ref: "#/components/parameters/CategoryIdFilter"
-        - $ref: "#/components/parameters/ServiceIdFilter"
-        - $ref: "#/components/parameters/SearchQuery"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    post:
-      tags: [05 Course Groups]
-      operationId: createCourseGroup
-      summary: Create an internal course group
-      x-access: ADMIN
-      requestBody:
-        $ref: "#/components/requestBodies/CreateCourseGroup"
-      responses:
-        "201":
-          $ref: "#/components/responses/Created"
-
-  /api/v1/course-groups/{courseGroupId}:
-    get:
-      tags: [05 Course Groups]
-      operationId: getCourseGroupAdmin
-      summary: Get a course group and its intake courses
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CourseGroupId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    patch:
-      tags: [05 Course Groups]
-      operationId: updateCourseGroup
-      summary: Update internal course-group setup
-      x-access: ADMIN
-      description: Course-group identity is editable only before its first course is created. This keeps every intake and historical certificate tied to one stable real-world course identity.
-      parameters:
-        - $ref: "#/components/parameters/CourseGroupId"
-      requestBody:
-        $ref: "#/components/requestBodies/UpdateCourseGroup"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    delete:
-      tags: [05 Course Groups]
-      operationId: deleteCourseGroupPermanently
-      summary: "[DESTRUCTIVE] Permanently delete an archived empty course group"
-      x-access: SUPER_ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CourseGroupId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/course-groups/{courseGroupId}/deletion-impact:
-    get:
-      tags: [05 Course Groups]
-      operationId: getCourseGroupDeletionImpact
-      summary: Inspect whether a course group can be permanently deleted
-      x-access: SUPER_ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CourseGroupId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/course-groups/{courseGroupId}/archive:
-    patch:
-      tags: [05 Course Groups]
-      operationId: archiveCourseGroup
-      summary: Archive an inactive course group
-      x-access: SUPER_ADMIN
-      description: Open or closed-active intake courses block archival.
-      parameters:
-        - $ref: "#/components/parameters/CourseGroupId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/course-groups/{courseGroupId}/unarchive:
-    patch:
-      tags: [05 Course Groups]
-      operationId: unarchiveCourseGroup
-      summary: Restore an archived course group
-      x-access: SUPER_ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CourseGroupId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
   /api/v1/courses:
     get:
-      tags: [06 Course Intakes]
+      tags: [05 Courses]
       operationId: listCoursesAdmin
-      summary: List courses for administration
+      summary: List internal courses for administration
       x-access: ADMIN
+      description: >-
+        A Course is the real-world program a student browses and enrolls
+        in — content, pricing, and certificate policy are fixed here and
+        shared by every Intake underneath it. See the 2026-08-30
+        course-to-program-intake rename plan.
       parameters:
-        - $ref: "#/components/parameters/ServiceIdFilter"
         - $ref: "#/components/parameters/CategoryIdFilter"
-        - name: status
-          in: query
-          schema: { type: string, enum: [DRAFT, OPEN_ACTIVE, CLOSED_ACTIVE, COMPLETED, CANCELLED, ARCHIVED] }
+        - $ref: "#/components/parameters/ServiceIdFilter"
         - $ref: "#/components/parameters/CourseLevelFilter"
+        - $ref: "#/components/parameters/CourseEnrollmentStatusFilter"
+        - $ref: "#/components/parameters/CourseIncludeArchivedFilter"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -701,11 +607,11 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     post:
-      tags: [06 Course Intakes]
+      tags: [05 Courses]
       operationId: createCourse
-      summary: Create a course intake draft
+      summary: Create a course
       x-access: ADMIN
-      description: The first intake defines immutable public content. Certificate policy comes from the course group. Later intakes copy a selected existing sibling and its active Ready curriculum into independent course-session rows; learner history is never copied.
+      description: Certificate policy, discount amount, and intake code prefix are fixed at creation and immutable afterward. A course is never published directly — it only becomes visible once it has an Intake, and its enrollmentStatus is then derived from that Intake's lifecycle.
       requestBody:
         $ref: "#/components/requestBodies/CreateCourse"
       responses:
@@ -714,7 +620,7 @@ paths:
 
   /api/v1/courses/{courseId}:
     get:
-      tags: [06 Course Intakes]
+      tags: [05 Courses]
       operationId: getCourseAdmin
       summary: Get course for administration
       x-access: ADMIN
@@ -724,11 +630,11 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     patch:
-      tags: [06 Course Intakes]
+      tags: [05 Courses]
       operationId: updateCourse
-      summary: Update intake dates, timezone, or capacity
+      summary: Update course content and pricing
       x-access: ADMIN
-      description: Certificate policy is not editable. It was fixed when the course was created.
+      description: Certificate policy, discount amount, intake code prefix, and parent category cannot be changed after creation.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       requestBody:
@@ -737,11 +643,11 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     delete:
-      tags: [06 Course Intakes]
+      tags: [05 Courses]
       operationId: deleteCoursePermanently
-      summary: "[DESTRUCTIVE] Permanently delete archived course"
+      summary: "[DESTRUCTIVE] Permanently delete an archived course with no intake history"
       x-access: SUPER_ADMIN
-      description: Super-admin only. Deletes only an archived intake without curriculum or learner history.
+      description: Super-admin only. The course must already be archived and must have zero intakes, ever — a course that ever ran an intake keeps that history and cannot be deleted.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -752,62 +658,205 @@ paths:
 
   /api/v1/courses/{courseId}/deletion-impact:
     get:
-      tags: [06 Course Intakes]
+      tags: [05 Courses]
       operationId: getCourseDeletionImpact
       summary: Preview whether permanent course deletion is safe
       x-access: SUPER_ADMIN
-      description: Super-admin only. Aggregates protected curriculum and enrollment history without changing data.
+      description: Super-admin only. Aggregates every intake's curriculum and enrollment history without changing data.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses/{courseId}/analytics:
+  /api/v1/courses/{courseId}/archive:
+    patch:
+      tags: [05 Courses]
+      operationId: archiveCourse
+      summary: Archive an inactive course
+      x-access: SUPER_ADMIN
+      description: Open or closed-active intakes block archival.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/unarchive:
+    patch:
+      tags: [05 Courses]
+      operationId: unarchiveCourse
+      summary: Restore an archived course
+      x-access: SUPER_ADMIN
+      description: Blocked while the parent category or learning service is itself archived.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/intakes:
     get:
       tags: [06 Course Intakes]
-      operationId: getCourseAnalytics
-      summary: Get enrollment, revenue, district, and engagement analytics for a course intake
+      operationId: listCourseIntakes
+      summary: List a course's intakes
       x-access: ADMIN
-      description: >-
-        Powers the course workspace's Overview tab and KPI row. Revenue and
-        payment breakdowns read the payment ledger directly (SUM of actual
-        Payment rows) — not an estimate. successRate.completedPct is null
-        until at least one enrollment has completed or cancelled, since a
-        course with only active enrollments hasn't produced an outcome yet.
+      description: Convenience alias for GET /intakes?courseId={courseId} — powers the course workspace's intake list.
       parameters:
         - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           $ref: "#/components/responses/Success"
-
-  /api/v1/courses/{courseId}/status:
-    patch:
+    post:
       tags: [06 Course Intakes]
-      operationId: transitionCourseStatus
-      summary: Transition the course-intake lifecycle
+      operationId: createIntake
+      summary: Create an intake draft under a course
       x-access: ADMIN
-      description: Uses expectedStatus for optimistic concurrency. Opening, closing, and archiving require Super Admin; completion and cancellation are available to authorized administrators. Opening one sibling atomically closes the previous OPEN_ACTIVE sibling.
+      description: Nearly everything about an intake is inherited from its Course or auto-suggested (see GET .../intakes/defaults) — this is deliberately a small payload. Seasonal courses require startDate/expectedEndDate together; evergreen courses must omit both.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       requestBody:
-        $ref: "#/components/requestBodies/UpdateCourseStatus"
+        $ref: "#/components/requestBodies/CreateIntake"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/courses/{courseId}/intakes/defaults:
+    get:
+      tags: [06 Course Intakes]
+      operationId: getIntakeDefaults
+      summary: Suggest the next intake key, code, and timezone
+      x-access: ADMIN
+      description: Pre-fills the create-intake form — the suggested intakeKey follows the {year}-{ordinal} convention (e.g. 2026-1).
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses/{courseId}/enroll:
+  /api/v1/courses/{courseId}/enrollment-requests:
     post:
-      tags: [09 Enrollments & Classroom]
-      operationId: selfEnrollFreeCourse
-      summary: Self-enroll in free course
+      tags: [10 Enrollment Requests]
+      operationId: createEnrollmentRequest
+      summary: Request enrollment in a paid course
       x-access: STUDENT
-      description: Student-only. Course and parent category must be published, enrollment must be Open, and the Free Learning course must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.
+      description: >-
+        The missing link between a PAID course's public "Enroll" button and
+        the admin-mediated payment process. Filed against the course's
+        current open (or next) intake; notifies every admin by email with a
+        deep link. Does not create an Enrollment by itself — an admin
+        converts the request via POST /enrollment-requests/{id}/enroll.
       parameters:
         - $ref: "#/components/parameters/CourseId"
+      requestBody:
+        $ref: "#/components/requestBodies/CreateEnrollmentRequest"
       responses:
         "201":
           $ref: "#/components/responses/Created"
+
+  /api/v1/intakes:
+    get:
+      tags: [06 Course Intakes]
+      operationId: listIntakesAdmin
+      summary: List intakes for administration
+      x-access: ADMIN
+      description: One Intake is a single scheduled, enrollable run of a Course — dates, capacity, code, and lifecycle status live here.
+      parameters:
+        - $ref: "#/components/parameters/ServiceIdFilter"
+        - $ref: "#/components/parameters/CategoryIdFilter"
+        - $ref: "#/components/parameters/CourseIdFilter"
+        - $ref: "#/components/parameters/IntakeStatusFilter"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/intakes/{intakeId}:
+    get:
+      tags: [06 Course Intakes]
+      operationId: getIntakeAdmin
+      summary: Get intake for administration
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [06 Course Intakes]
+      operationId: updateIntake
+      summary: Update intake dates, timezone, or capacity
+      x-access: ADMIN
+      description: Only dates, timezone, and capacity can be changed after intake creation. Everything else — content, pricing, certificate policy — lives on the parent course.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateIntake"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [06 Course Intakes]
+      operationId: deleteIntakePermanently
+      summary: "[DESTRUCTIVE] Permanently delete an unused archived intake"
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Deletes only an archived intake with no curriculum, enrollments, or projects.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/CatalogDeletionBlocked"
+
+  /api/v1/intakes/{intakeId}/deletion-impact:
+    get:
+      tags: [06 Course Intakes]
+      operationId: getIntakeDeletionImpact
+      summary: Preview whether permanent intake deletion is safe
+      x-access: SUPER_ADMIN
+      description: Super-admin only. Aggregates protected curriculum, enrollment, and project history without changing data.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/intakes/{intakeId}/analytics:
+    get:
+      tags: [06 Course Intakes]
+      operationId: getIntakeAnalytics
+      summary: Get enrollment, revenue, district, and engagement analytics for one intake
+      x-access: ADMIN
+      description: >-
+        Powers the intake workspace's Overview tab and KPI row. Revenue and
+        payment breakdowns read the payment ledger directly (SUM of actual
+        Payment rows) — not an estimate. successRate.completedPct is null
+        until at least one enrollment has completed or cancelled, since an
+        intake with only active enrollments hasn't produced an outcome yet.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/intakes/{intakeId}/status:
+    patch:
+      tags: [06 Course Intakes]
+      operationId: transitionIntakeStatus
+      summary: Transition the intake lifecycle
+      x-access: ADMIN
+      description: Uses expectedStatus for optimistic concurrency. Opening, closing, and archiving require Super Admin; completion and cancellation are available to authorized administrators. Opening one sibling atomically closes the previous OPEN_ACTIVE sibling and recomputes the parent course's derived enrollmentStatus.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateIntakeStatus"
+      responses:
         "200":
           $ref: "#/components/responses/Success"
 
@@ -817,12 +866,12 @@ paths:
       operationId: listSessionLibrary
       summary: List Session Library resources
       x-access: ADMIN
-      description: Admin/session-library permission required. Supports lifecycle, search, pagination, and course-attachability filters. Every session is reusable across courses. The response includes a `summary` object ({ all, ready, draft, archive }) counting sessions by status under the current search/tag filters, independent of the status filter itself — used to drive status filter pills.
+      description: Admin/session-library permission required. Supports lifecycle, search, pagination, and intake-attachability filters. Every session is reusable across intakes. The response includes a `summary` object ({ all, ready, draft, archive }) counting sessions by status under the current search/tag filters, independent of the status filter itself — used to drive status filter pills.
       parameters:
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/SessionStatusFilter"
         - $ref: "#/components/parameters/SessionTagFilter"
-        - $ref: "#/components/parameters/AttachableCourseIdFilter"
+        - $ref: "#/components/parameters/AttachableIntakeIdFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -926,15 +975,15 @@ paths:
         "201":
           $ref: "#/components/responses/Created"
 
-  /api/v1/courses/{courseId}/curriculum:
+  /api/v1/intakes/{intakeId}/curriculum:
     get:
       tags: [08 Course Curriculum & Delivery]
       operationId: listCourseCurriculum
-      summary: List course curriculum
+      summary: List intake curriculum
       x-access: ADMIN
       description: Set includeRetired to show history-preserved curriculum relationships that were already delivered or completed.
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
         - name: includeRetired
           in: query
           schema: { type: boolean, default: false }
@@ -948,21 +997,21 @@ paths:
       x-access: ADMIN
       description: Inline session creation is intentionally unavailable; create resources in the Session Library first.
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
       requestBody:
         $ref: "#/components/requestBodies/AttachCourseSession"
       responses:
         "201":
           $ref: "#/components/responses/Created"
 
-  /api/v1/courses/{courseId}/curriculum/reorder:
+  /api/v1/intakes/{intakeId}/curriculum/reorder:
     patch:
       tags: [08 Course Curriculum & Delivery]
       operationId: reorderCourseCurriculum
-      summary: Reorder active course curriculum
+      summary: Reorder active intake curriculum
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
       requestBody:
         $ref: "#/components/requestBodies/ReorderCourseCurriculum"
       responses:
@@ -971,14 +1020,14 @@ paths:
         "409":
           $ref: "#/components/responses/SequenceRisk"
 
-  /api/v1/courses/{courseId}/curriculum/{courseSessionId}:
+  /api/v1/intakes/{intakeId}/curriculum/{courseSessionId}:
     delete:
       tags: [08 Course Curriculum & Delivery]
       operationId: removeCourseSession
       summary: Detach unused or retire delivered curriculum session
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
         - $ref: "#/components/parameters/CourseSessionId"
       requestBody:
         $ref: "#/components/requestBodies/UpdateCourseSessionDelivery"
@@ -986,15 +1035,15 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses/{courseId}/curriculum/{courseSessionId}/delivery:
+  /api/v1/intakes/{intakeId}/curriculum/{courseSessionId}/delivery:
     patch:
       tags: [08 Course Curriculum & Delivery]
       operationId: updateCourseSessionDelivery
       summary: Release, schedule, withdraw, or reset a course session
       x-access: ADMIN
-      description: Delivery belongs directly to the intake course. Unsafe sequencing returns 409 until explicitly acknowledged.
+      description: Delivery belongs directly to the intake. Unsafe sequencing returns 409 until explicitly acknowledged.
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
         - $ref: "#/components/parameters/CourseSessionId"
       responses:
         "200":
@@ -1120,15 +1169,47 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
-  /api/v1/courses/{courseId}/eligible-students:
+  /api/v1/intakes/{intakeId}/enroll:
+    post:
+      tags: [09 Enrollments & Classroom]
+      operationId: selfEnrollFreeCourse
+      summary: Self-enroll in a free intake
+      x-access: STUDENT
+      description: Student-only. The intake and its parent category must be published, enrollment must be Open, and the Free Learning intake must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/intakes/{intakeId}/enrollment-requests:
+    get:
+      tags: [10 Enrollment Requests]
+      operationId: listIntakeEnrollmentRequests
+      summary: List enrollment requests filed against this intake
+      x-access: ADMIN
+      description: Admin/enrollment-management permission required. Returns a `summary` object counting requests by status ({ all, PENDING, CONTACTED, ENROLLED, DECLINED }) alongside the offset-paginated page.
+      parameters:
+        - $ref: "#/components/parameters/IntakeId"
+        - $ref: "#/components/parameters/EnrollmentRequestStatusFilter"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/intakes/{intakeId}/eligible-students:
     get:
       tags: [09 Enrollments & Classroom]
       operationId: listCourseEligibleStudents
-      summary: Search verified students eligible for this paid course intake
+      summary: Search verified students eligible for this paid intake
       x-access: ADMIN
       description: Returns a stable email-and-ID keyset page. Pass the opaque nextCursor from one response as cursor to request the next page; changing q starts a new search.
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/EligibleLimit"
         - $ref: "#/components/parameters/EligibleCursor"
@@ -1136,14 +1217,14 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/courses/{courseId}/enrollments:
+  /api/v1/intakes/{intakeId}/enrollments:
     get:
       tags: [09 Enrollments & Classroom]
       operationId: listCourseRoster
-      summary: List the course-intake roster and payment evidence
+      summary: List the intake roster and payment evidence
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/EnrollmentStatusFilter"
         - $ref: "#/components/parameters/Limit"
@@ -1154,39 +1235,86 @@ paths:
     post:
       tags: [09 Enrollments & Classroom]
       operationId: manuallyEnrollStudent
-      summary: Manually enroll a verified student in an open paid course intake
+      summary: Manually enroll a verified student in an open paid intake
       x-access: ADMIN
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
       requestBody:
         $ref: "#/components/requestBodies/CreatePaidEnrollment"
       responses:
         "201":
           $ref: "#/components/responses/Created"
 
-  /api/v1/courses/{courseId}/enrollments/bulk:
+  /api/v1/intakes/{intakeId}/enrollments/bulk:
     post:
       tags: [09 Enrollments & Classroom]
       operationId: bulkEnrollStudents
-      summary: Process course-intake enrollment for multiple students
+      summary: Process intake enrollment for multiple students
       x-access: ADMIN
       description: >-
         Returns ordered per-student CREATED or FAILED results. Writes are
-        serialized behind the course-enrollment lock so capacity and duplicate
+        serialized behind the intake-enrollment lock so capacity and duplicate
         decisions remain concurrency-safe. Once a locked transaction proves
         capacity is exhausted, the remaining eligible rows receive
         COURSE_CAPACITY_REACHED without opening additional insert transactions.
       parameters:
-        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IntakeId"
       requestBody:
         $ref: "#/components/requestBodies/BulkPaidEnrollment"
       responses:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/enrollment-requests/{enrollmentRequestId}:
+    get:
+      tags: [10 Enrollment Requests]
+      operationId: getEnrollmentRequest
+      summary: Get an enrollment request
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentRequestId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollment-requests/{enrollmentRequestId}/status:
+    patch:
+      tags: [10 Enrollment Requests]
+      operationId: updateEnrollmentRequestStatus
+      summary: Mark an enrollment request Contacted or Declined
+      x-access: ADMIN
+      description: Only a Pending or Contacted request may transition. Enrolled is reached only through POST .../enroll, never through this endpoint.
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentRequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/UpdateEnrollmentRequestStatus"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollment-requests/{enrollmentRequestId}/enroll:
+    post:
+      tags: [10 Enrollment Requests]
+      operationId: enrollFromEnrollmentRequest
+      summary: Convert a request into a real enrollment
+      x-access: ADMIN
+      description: >-
+        Records payment and creates the Enrollment through the same shared
+        enroll mutation the direct search-and-enroll flow uses (POST
+        /intakes/{intakeId}/enrollments) — not a second implementation of the
+        enroll rules. Marks the request Enrolled and links it to the new
+        enrollment.
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentRequestId"
+      requestBody:
+        $ref: "#/components/requestBodies/EnrollFromRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
   /api/v1/enrollments/{enrollmentId}/certificate:
     post:
-      tags: [10 Certificates]
+      tags: [11 Certificates]
       operationId: issueCertificate
       summary: Issue certificate
       x-access: ADMIN
@@ -1205,7 +1333,7 @@ paths:
 
   /api/v1/certificates/verify/{certificateCode}:
     get:
-      tags: [10 Certificates]
+      tags: [11 Certificates]
       operationId: verifyCertificate
       summary: Verify certificate publicly
       x-access: PUBLIC
@@ -1218,7 +1346,7 @@ paths:
 
   /api/v1/certificates/my:
     get:
-      tags: [10 Certificates]
+      tags: [11 Certificates]
       operationId: listOwnCertificates
       summary: List own certificates
       x-access: AUTHENTICATED
@@ -1228,7 +1356,7 @@ paths:
 
   /api/v1/certificates/admin:
     get:
-      tags: [10 Certificates]
+      tags: [11 Certificates]
       operationId: listCertificatesAdmin
       summary: List all certificates for administration
       x-access: ADMIN
@@ -1236,7 +1364,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/CertificateStatusFilter"
-        - $ref: "#/components/parameters/CourseIdFilter"
+        - $ref: "#/components/parameters/IntakeIdFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
       responses:
@@ -1245,7 +1373,7 @@ paths:
 
   /api/v1/certificates/{certificateId}:
     get:
-      tags: [10 Certificates]
+      tags: [11 Certificates]
       operationId: getCertificate
       summary: Get certificate detail
       x-access: AUTHENTICATED
@@ -1258,7 +1386,7 @@ paths:
 
   /api/v1/certificates/{certificateId}/revoke:
     patch:
-      tags: [10 Certificates]
+      tags: [11 Certificates]
       operationId: revokeCertificate
       summary: Revoke certificate
       x-access: ADMIN
@@ -1278,7 +1406,7 @@ paths:
 
   /api/v1/projects/showcase:
     get:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: listPublicProjects
       summary: List public approved projects
       x-access: PUBLIC
@@ -1292,7 +1420,7 @@ paths:
 
   /api/v1/projects/showcase/{projectId}:
     get:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: getPublicProject
       summary: Get public approved project
       x-access: PUBLIC
@@ -1305,7 +1433,7 @@ paths:
 
   /api/v1/projects:
     post:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: submitProject
       summary: Submit project
       x-access: STUDENT
@@ -1318,7 +1446,7 @@ paths:
 
   /api/v1/projects/my:
     get:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: listOwnProjects
       summary: List own projects
       x-access: AUTHENTICATED
@@ -1331,7 +1459,7 @@ paths:
 
   /api/v1/projects/{projectId}:
     get:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: getProject
       summary: Get project detail
       x-access: AUTHENTICATED
@@ -1342,7 +1470,7 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
     patch:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: updateProject
       summary: Update pending project
       x-access: STUDENT
@@ -1357,13 +1485,13 @@ paths:
 
   /api/v1/projects/admin/all:
     get:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: listProjectsAdmin
       summary: List all projects for review
       x-access: ADMIN
       description: Admin/project-review permission required.
       parameters:
-        - $ref: "#/components/parameters/CourseIdFilter"
+        - $ref: "#/components/parameters/IntakeIdFilter"
         - $ref: "#/components/parameters/ProjectStatusFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -1373,7 +1501,7 @@ paths:
 
   /api/v1/projects/{projectId}/review:
     patch:
-      tags: [11 Projects]
+      tags: [12 Projects]
       operationId: reviewProject
       summary: Review project
       x-access: ADMIN
@@ -1388,7 +1516,7 @@ paths:
 
   /api/v1/audit/logs:
     get:
-      tags: [12 Audit Logs]
+      tags: [13 Audit Logs]
       operationId: listAuditLogs
       summary: Search audit logs
       x-access: SUPER_ADMIN
@@ -1509,12 +1637,18 @@ components:
       required: true
       schema: { type: string, format: uuid }
       example: "{{courseId}}"
-    CourseGroupId:
-      name: courseGroupId
+    IntakeId:
+      name: intakeId
       in: path
       required: true
       schema: { type: string, format: uuid }
-      example: "{{courseGroupId}}"
+      example: "{{intakeId}}"
+    EnrollmentRequestId:
+      name: enrollmentRequestId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{enrollmentRequestId}}"
     SessionId:
       name: sessionId
       in: path
@@ -1589,6 +1723,29 @@ components:
       schema:
         $ref: "#/components/schemas/CourseLevel"
       example: BEGINNER
+    CourseEnrollmentStatusFilter:
+      name: enrollmentStatus
+      in: query
+      description: The course's derived, stored enrollment status — recomputed at intake create/transition/delete, not per-request.
+      schema:
+        $ref: "#/components/schemas/CourseEnrollmentStatus"
+      example: OPEN
+    CourseIncludeArchivedFilter:
+      name: includeArchived
+      in: query
+      schema: { type: boolean, default: false }
+    IntakeStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/IntakeStatus"
+      example: OPEN_ACTIVE
+    EnrollmentRequestStatusFilter:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/EnrollmentRequestStatus"
+      example: PENDING
     AccessTypeFilter:
       name: accessType
       in: query
@@ -1606,18 +1763,18 @@ components:
       schema:
         $ref: "#/components/schemas/SessionStatus"
       example: READY
-    AttachableCourseIdFilter:
-      name: attachableCourseId
+    AttachableIntakeIdFilter:
+      name: attachableIntakeId
       in: query
-      description: Return Ready library sessions with no active or retired relationship to this course. Retired relationships are restored from curriculum history instead of the picker.
+      description: Return Ready library sessions with no active or retired relationship to this intake. Retired relationships are restored from curriculum history instead of the picker.
       schema: { type: string, format: uuid }
-      example: "{{courseId}}"
-    CourseIdFilter:
-      name: courseId
+      example: "{{intakeId}}"
+    IntakeIdFilter:
+      name: intakeId
       in: query
-      description: Scope the list to one course intake — used by the course workspace's Certificates and Projects tabs.
+      description: Scope the list to one intake — used by the intake workspace's Certificates and Projects tabs.
       schema: { type: string, format: uuid }
-      example: "{{courseId}}"
+      example: "{{intakeId}}"
     ProjectStatusFilter:
       name: status
       in: query
@@ -1815,26 +1972,6 @@ components:
             title: API Testing and Quality
             description: Practical API testing and quality courses for software engineers.
             sortOrder: 1
-    CreateCourseGroup:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/CreateCourseGroupInput"
-          example:
-            categoryId: "{{categoryId}}"
-            title: AI/ML Ignition Program
-            slug: ai-ml-ignition
-            batchCodePrefix: AI-ML-IGNITION
-            certificateEnabled: true
-    UpdateCourseGroup:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/UpdateCourseGroupInput"
-          example:
-            title: AI/ML Ignition Program
     CreateCourse:
       required: true
       content:
@@ -1842,12 +1979,9 @@ components:
           schema:
             $ref: "#/components/schemas/CreateCourseInput"
           example:
-            courseGroupId: "{{courseGroupId}}"
-            intakeKey: 2026-B1
-            startDate: "2026-09-01T00:00:00.000Z"
-            expectedEndDate: "2026-12-01T00:00:00.000Z"
-            timezone: Asia/Colombo
-            capacity: 50
+            categoryId: "{{categoryId}}"
+            slug: ai-ml-ignition
+            title: AI/ML Ignition Program
             summary: Learn practical AI and machine-learning foundations.
             description: A practical guided program for engineers beginning applied AI and machine learning.
             level: BEGINNER
@@ -1859,6 +1993,9 @@ components:
             prerequisites: [Basic web knowledge]
             thumbnailUrl: null
             sortOrder: 0
+            intakeCodePrefix: AI-ML-IGNITION
+            certificateEnabled: true
+            discountAmount: 0
     UpdateCourse:
       required: true
       content:
@@ -1866,9 +2003,30 @@ components:
           schema:
             $ref: "#/components/schemas/UpdateCourseInput"
           example:
+            summary: Learn practical, hands-on AI and machine-learning foundations.
+            price: 0
+    CreateIntake:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateIntakeInput"
+          example:
+            intakeKey: 2026-1
+            startDate: "2026-09-01T00:00:00.000Z"
+            expectedEndDate: "2026-12-01T00:00:00.000Z"
+            timezone: Asia/Colombo
+            capacity: 50
+    UpdateIntake:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UpdateIntakeInput"
+          example:
             capacity: 60
             expectedEndDate: "2026-12-15T00:00:00.000Z"
-    UpdateCourseStatus:
+    UpdateIntakeStatus:
       required: true
       content:
         application/json:
@@ -1876,11 +2034,40 @@ components:
             type: object
             required: [status, expectedStatus]
             properties:
-              status: { $ref: "#/components/schemas/CourseStatus" }
-              expectedStatus: { $ref: "#/components/schemas/CourseStatus" }
+              status: { $ref: "#/components/schemas/IntakeStatus" }
+              expectedStatus: { $ref: "#/components/schemas/IntakeStatus" }
           example:
             expectedStatus: DRAFT
             status: OPEN_ACTIVE
+    CreateEnrollmentRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CreateEnrollmentRequestInput"
+          example:
+            contactPhone: "0751234567"
+    UpdateEnrollmentRequestStatus:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status]
+            properties:
+              status: { type: string, enum: [CONTACTED, DECLINED] }
+          example:
+            status: CONTACTED
+    EnrollFromRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/EnrollFromRequestInput"
+          example:
+            paymentStatus: COMPLETED
+            externalPaymentReference: PAY-2026-0001
+            paymentNote: Payment confirmed outside the LMS.
     CreateSession:
       required: true
       content:
@@ -2040,7 +2227,7 @@ components:
           schema:
             $ref: "#/components/schemas/CreateProjectInput"
           example:
-            courseId: "{{courseId}}"
+            intakeId: "{{intakeId}}"
             enrollmentId: "{{enrollmentId}}"
             title: Foundry API Test Suite
             description: A reusable automated API regression collection.
@@ -2212,9 +2399,16 @@ components:
     CourseAccessType:
       type: string
       enum: [FREE, PAID]
-    CourseStatus:
+    IntakeStatus:
       type: string
       enum: [DRAFT, OPEN_ACTIVE, CLOSED_ACTIVE, COMPLETED, CANCELLED, ARCHIVED]
+    CourseEnrollmentStatus:
+      type: string
+      description: Derived and stored on the Course, recomputed at intake create/transition/delete rather than per-request.
+      enum: [COMING_SOON, OPEN, REOPENING_SOON]
+    EnrollmentRequestStatus:
+      type: string
+      enum: [PENDING, CONTACTED, ENROLLED, DECLINED]
     CourseInstanceKind:
       type: string
       enum: [SEASONAL, EVERGREEN]
@@ -2286,43 +2480,59 @@ components:
           enum: [sparkles, cpu, code2, workflow, calculator, atom, bar-chart3, terminal, git-branch, globe, languages]
         badgeLabel: { type: string, nullable: true }
         sortOrder: { type: integer, minimum: 0 }
-    CreateCourseGroupInput:
+    CreateCourseInput:
       type: object
-      required: [categoryId, title, slug, batchCodePrefix, certificateEnabled]
+      required: [categoryId, slug, title, summary, description, level, price, intakeCodePrefix, certificateEnabled]
       properties:
         categoryId: { type: string, format: uuid }
-        title: { type: string, minLength: 3, maxLength: 160 }
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
-        batchCodePrefix: { type: string, pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$" }
+        title: { type: string, minLength: 3, maxLength: 160 }
+        summary: { type: string, minLength: 10, maxLength: 300 }
+        description: { type: string, minLength: 20, maxLength: 5000 }
+        level:
+          $ref: "#/components/schemas/CourseLevel"
+        durationValue: { type: integer, minimum: 1, maximum: 999, nullable: true }
+        durationUnit:
+          allOf:
+            - $ref: "#/components/schemas/DurationUnit"
+          nullable: true
+        price: { type: number, minimum: 0, maximum: 99999999, description: "Must be 0 for a FREE learning service and greater than 0 for PAID." }
+        highlights:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        skills:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        prerequisites:
+          type: array
+          maxItems: 30
+          items: { type: string }
+        thumbnailUrl: { type: string, format: uri, nullable: true }
+        sortOrder: { type: integer, minimum: 0 }
+        intakeCodePrefix:
+          type: string
+          pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$"
+          description: Immutable. The server builds every intake's code from this prefix and its intake key.
         certificateEnabled:
           type: boolean
-          description: Immutable policy for every current and future course intake in this group.
+          description: Immutable policy shared by every current and future intake of this course.
         discountAmount:
           type: number
           minimum: 0
           default: 0
           description: >-
-            Flat discount (LKR) for paying a course's full price in one go,
-            immutable, applied to every course/intake in this group.
-            Irrelevant for FREE services.
-    UpdateCourseGroupInput:
+            Flat discount for paying an intake's full price in one go,
+            immutable, applied to every intake of this course. Irrelevant
+            for FREE services.
+    UpdateCourseInput:
       type: object
       minProperties: 1
+      description: Certificate policy, discount amount, intake code prefix, and category cannot be changed after creation.
       properties:
-        title: { type: string, minLength: 3, maxLength: 160 }
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
-        batchCodePrefix: { type: string, pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$" }
-    CreateCourseInput:
-      type: object
-      required: [courseGroupId, intakeKey]
-      properties:
-        courseGroupId: { type: string, format: uuid }
-        sourceCourseId: { type: string, format: uuid, description: Required after the first intake in a group. }
-        intakeKey: { type: string, pattern: "^[A-Z0-9]+(?:-[A-Z0-9]+)*$" }
-        startDate: { type: string, format: date-time, nullable: true }
-        expectedEndDate: { type: string, format: date-time, nullable: true }
-        timezone: { type: string, default: Asia/Colombo }
-        capacity: { type: integer, minimum: 1, maximum: 100000, nullable: true }
+        title: { type: string, minLength: 3, maxLength: 160 }
         summary: { type: string, minLength: 10, maxLength: 300 }
         description: { type: string, minLength: 20, maxLength: 5000 }
         level:
@@ -2347,14 +2557,36 @@ components:
           items: { type: string }
         thumbnailUrl: { type: string, format: uri, nullable: true }
         sortOrder: { type: integer, minimum: 0 }
-    UpdateCourseInput:
+    CreateIntakeInput:
+      type: object
+      description: Nearly everything is inherited from the parent Course or auto-suggested — see GET /courses/{courseId}/intakes/defaults.
+      properties:
+        intakeKey: { type: string, pattern: "^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$", description: "Auto-suggested ({year}-{ordinal}, e.g. 2026-1) if omitted." }
+        startDate: { type: string, format: date-time, nullable: true, description: Required together with expectedEndDate for a SEASONAL learning service; omitted for EVERGREEN. }
+        expectedEndDate: { type: string, format: date-time, nullable: true }
+        timezone: { type: string, description: Auto-suggested if omitted. }
+        capacity: { type: integer, minimum: 1, maximum: 100000, nullable: true }
+    UpdateIntakeInput:
       type: object
       minProperties: 1
+      description: Only dates, timezone, and capacity can be changed after intake creation.
       properties:
         startDate: { type: string, format: date-time, nullable: true }
         expectedEndDate: { type: string, format: date-time, nullable: true }
         timezone: { type: string }
         capacity: { type: integer, minimum: 1, maximum: 100000, nullable: true }
+    CreateEnrollmentRequestInput:
+      type: object
+      required: [contactPhone]
+      properties:
+        contactPhone: { type: string, minLength: 6, maxLength: 30 }
+    EnrollFromRequestInput:
+      type: object
+      description: Same payment-details shape the direct search-and-enroll flow uses (CreatePaidEnrollment) — the student and intake are already fixed by the request itself.
+      properties:
+        paymentStatus: { type: string, enum: [PARTIAL, COMPLETED], default: COMPLETED }
+        externalPaymentReference: { type: string, nullable: true }
+        paymentNote: { type: string, nullable: true }
     CreateSessionInput:
       type: object
       required: [title]
@@ -2394,9 +2626,9 @@ components:
           enum: [DRAFT, READY]
     CreateProjectInput:
       type: object
-      required: [courseId, enrollmentId, title]
+      required: [intakeId, enrollmentId, title]
       properties:
-        courseId: { type: string, format: uuid }
+        intakeId: { type: string, format: uuid }
         enrollmentId: { type: string, format: uuid }
         title: { type: string, minLength: 3 }
         description: { type: string, nullable: true }
