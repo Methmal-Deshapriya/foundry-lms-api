@@ -67,7 +67,13 @@ enum SessionStatus {
   ARCHIVED
 }
 
-enum CourseStatus {
+enum CourseEnrollmentStatus {
+  COMING_SOON // no intake exists yet
+  OPEN // has an OPEN_ACTIVE intake right now
+  REOPENING_SOON // has intake(s), none currently OPEN_ACTIVE
+}
+
+enum IntakeStatus {
   DRAFT
   OPEN_ACTIVE
   CLOSED_ACTIVE
@@ -96,9 +102,21 @@ enum EnrollmentStatus {
 
 enum PaymentStatus {
   NOT_REQUIRED
-  PENDING
   PARTIAL
   COMPLETED
+}
+
+enum PaymentType {
+  FULL // paid the full (discounted) price in one go at enrollment time
+  PARTIAL // paid half the full price at enrollment time
+  TOP_UP // paid the remaining half after being enrolled as PARTIAL
+}
+
+enum EnrollmentRequestStatus {
+  PENDING // just submitted, nobody's reached out yet
+  CONTACTED // admin has given the student payment instructions, awaiting payment
+  ENROLLED // converted — Enrollment + Payment now exist, linked via enrollmentId
+  DECLINED // admin closed the request without enrolling (stale/no-show)
 }
 
 enum CertificateStatus {
@@ -129,13 +147,16 @@ model User {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  enrollments         Enrollment[]         @relation("StudentEnrollments")
-  managedEnrollments  Enrollment[]         @relation("EnrollmentManager")
-  studentProjects     StudentProject[]
-  actorAuditLogs      AuditLog[]           @relation("ActorRelation")
-  passwordResetTokens PasswordResetToken[]
-  emailOtps           EmailOtp[]
-  loginChallenges     LoginChallenge[]
+  enrollments               Enrollment[]        @relation("StudentEnrollments")
+  managedEnrollments        Enrollment[]        @relation("EnrollmentManager")
+  recordedPayments          Payment[]
+  studentProjects           StudentProject[]
+  actorAuditLogs            AuditLog[]          @relation("ActorRelation")
+  passwordResetTokens       PasswordResetToken[]
+  emailOtps                 EmailOtp[]
+  loginChallenges           LoginChallenge[]
+  enrollmentRequests        EnrollmentRequest[] @relation("EnrollmentRequestStudent")
+  contactedEnrollmentRequests EnrollmentRequest[] @relation("EnrollmentRequestContactedBy")
 
   @@index([role, emailVerified, email, id])
   @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_first_name_trgm_idx")
@@ -225,84 +246,98 @@ model Category {
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  courseGroups CourseGroup[]
-  courses      Course[]
-  service      LearningService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  courses Course[]
+  intakes Intake[]
+  service LearningService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 
   @@unique([serviceId, slug])
   @@index([serviceId, status, sortOrder])
   @@map("categories")
 }
 
-model CourseGroup {
-  id                 String    @id @default(uuid())
-  categoryId         String    @map("category_id")
+/// The real-world program a student browses and enrolls in. Holds every piece of
+/// content that's identical across every run of the program — its content lives
+/// here, not on Intake, because it never varies between intakes (see the
+/// 2026-08-30 course-to-program-intake rename plan for the full reasoning).
+model Course {
+  id                 String                 @id @default(uuid())
+  categoryId         String                 @map("category_id")
   slug               String
   title              String
-  batchCodePrefix    String    @unique @map("batch_code_prefix")
-  certificateEnabled Boolean   @map("certificate_enabled")
-  archivedAt         DateTime? @map("archived_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+  summary            String
+  description        String
+  level              CourseLevel
+  durationValue      Int?                   @map("duration_value")
+  durationUnit       DurationUnit?          @map("duration_unit")
+  highlights         String[]               @default([])
+  skills             String[]               @default([])
+  prerequisites      String[]               @default([])
+  thumbnailUrl       String?                @map("thumbnail_url")
+  sortOrder          Int                    @default(0) @map("sort_order")
+  price              Decimal                @default(0) @db.Decimal(12, 2)
+  currency           String                 @default("LKR")
+  intakeCodePrefix   String                 @unique @map("intake_code_prefix")
+  certificateEnabled Boolean                @map("certificate_enabled")
+  discountAmount     Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
+  enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
+  archivedAt         DateTime?              @map("archived_at")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
 
-  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  courses  Course[]
+  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  intakes            Intake[]
+  payments           Payment[]
+  enrollments        Enrollment[]
+  enrollmentRequests EnrollmentRequest[]
 
   @@unique([id, categoryId])
   @@unique([categoryId, slug])
   @@index([categoryId, archivedAt, title])
-  @@map("course_groups")
+  @@index([categoryId, enrollmentStatus, sortOrder])
+  @@map("courses")
 }
 
-model Course {
-  id              String        @id @default(uuid())
-  courseGroupId   String        @map("course_group_id")
-  categoryId      String        @map("category_id")
-  slug            String
-  title           String
-  summary         String
-  description     String
-  level           CourseLevel
-  durationValue   Int?          @map("duration_value")
-  durationUnit    DurationUnit? @map("duration_unit")
-  highlights      String[]      @default([])
-  skills          String[]      @default([])
-  prerequisites   String[]      @default([])
-  thumbnailUrl    String?       @map("thumbnail_url")
-  sortOrder       Int           @default(0) @map("sort_order")
-  intakeKey       String        @map("intake_key")
-  code            String        @unique
-  startDate       DateTime?     @map("start_date") @db.Date
-  expectedEndDate DateTime?     @map("expected_end_date") @db.Date
-  timezone        String        @default("Asia/Colombo")
+/// One scheduled, enrollable run of a Course. Holds only what varies between
+/// runs — dates, timezone, capacity, lifecycle status — plus the sessions,
+/// enrollments, and projects that were always scoped to a single run.
+model Intake {
+  id              String       @id @default(uuid())
+  courseId        String       @map("course_id")
+  categoryId      String       @map("category_id") // denormalized off Course, same reasoning as Course.categoryId off Category
+  intakeKey       String       @map("intake_key")
+  code            String       @unique
+  startDate       DateTime?    @map("start_date") @db.Date
+  expectedEndDate DateTime?    @map("expected_end_date") @db.Date
+  timezone        String       @default("Asia/Colombo")
   capacity        Int?
-  price           Decimal       @default(0) @db.Decimal(12, 2)
-  currency        String        @default("LKR")
-  status          CourseStatus  @default(DRAFT)
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+  status          IntakeStatus @default(DRAFT)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at")
 
-  courseGroup     CourseGroup      @relation(fields: [courseGroupId, categoryId], references: [id, categoryId], onDelete: Restrict)
-  category        Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  enrollments     Enrollment[]
-  courseSessions  CourseSession[]
-  studentProjects StudentProject[]
+  course             Course              @relation(fields: [courseId, categoryId], references: [id, categoryId], onDelete: Restrict)
+  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  enrollments        Enrollment[]
+  courseSessions     CourseSession[]
+  studentProjects    StudentProject[]
+  payments           Payment[]
+  enrollmentRequests EnrollmentRequest[]
 
-  @@unique([courseGroupId, intakeKey])
-  @@index([courseGroupId, status, startDate])
-  @@index([categoryId, status, sortOrder])
-  @@index([categoryId, status, slug])
-  @@map("courses")
+  @@unique([courseId, intakeKey])
+  @@unique([id, courseId]) // lets Enrollment/Payment/EnrollmentRequest FK against (intakeId, courseId), guaranteeing the intake actually belongs to the course claimed
+  @@index([courseId, status, startDate])
+  @@index([categoryId, status])
+  @@map("intakes")
 }
 
 model Enrollment {
   id                       String           @id @default(uuid())
   userId                   String           @map("user_id")
-  courseId                 String           @map("course_id")
+  courseId                 String           @map("course_id") // -> Course.id — the program, any intake
+  intakeId                 String           @map("intake_id") // -> Intake.id — the specific run the student is in
   source                   EnrollmentSource
   enrolledByUserId         String?          @map("enrolled_by_user_id")
   status                   EnrollmentStatus @default(ACTIVE)
-  paymentStatus            PaymentStatus    @default(PENDING) @map("payment_status")
+  paymentStatus            PaymentStatus    @default(NOT_REQUIRED) @map("payment_status")
   paymentCompletedAt       DateTime?        @map("payment_completed_at")
   externalPaymentReference String?          @map("external_payment_reference")
   paymentNote              String?          @map("payment_note")
@@ -313,15 +348,18 @@ model Enrollment {
   user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Cascade)
   enrolledBy         User?               @relation("EnrollmentManager", fields: [enrolledByUserId], references: [id], onDelete: SetNull)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake             Intake              @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
   sessionCompletions SessionCompletion[]
   certificates       Certificate[]
   studentProjects    StudentProject[]
+  payments           Payment[]
+  enrollmentRequest  EnrollmentRequest?
 
-  @@unique([id, courseId])
-  @@unique([userId, courseId])
-  @@index([userId, status])
+  @@unique([id, intakeId]) // lets SessionCompletion/StudentProject FK against (enrollmentId, intakeId)
+  @@unique([userId, intakeId]) // a student can't be enrolled twice in the same intake (re-enrolling into a later intake of the same course is allowed)
   @@index([courseId, status])
-  @@index([courseId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([intakeId, status])
+  @@index([intakeId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([enrolledByUserId])
   @@map("enrollments")
 }
@@ -349,7 +387,7 @@ model Session {
 
 model CourseSession {
   id                   String                      @id @default(uuid())
-  courseId             String                      @map("course_id")
+  intakeId             String                      @map("intake_id")
   sessionId            String                      @map("session_id")
   orderIndex           Int?                        @map("order_index")
   deliveryStatus       CourseSessionDeliveryStatus @default(UNRELEASED) @map("delivery_status")
@@ -360,16 +398,16 @@ model CourseSession {
   createdAt            DateTime                    @default(now()) @map("created_at")
   updatedAt            DateTime                    @default(now()) @updatedAt @map("updated_at")
 
-  course      Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake      Intake              @relation(fields: [intakeId], references: [id], onDelete: Restrict)
   session     Session             @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   completions SessionCompletion[]
 
-  @@unique([id, courseId])
-  @@unique([courseId, sessionId])
-  @@unique([courseId, orderIndex])
+  @@unique([id, intakeId])
+  @@unique([intakeId, sessionId])
+  @@unique([intakeId, orderIndex])
   @@index([sessionId])
-  @@index([courseId, retiredAt, orderIndex])
-  @@index([courseId, deliveryStatus, availableAt])
+  @@index([intakeId, retiredAt, orderIndex])
+  @@index([intakeId, deliveryStatus, availableAt])
   @@map("course_sessions")
 }
 
@@ -377,18 +415,73 @@ model SessionCompletion {
   id              String   @id @default(uuid())
   courseSessionId String   @map("course_session_id")
   enrollmentId    String   @map("enrollment_id")
-  courseId        String   @map("course_id")
+  intakeId        String   @map("intake_id")
   completedAt     DateTime @default(now()) @map("completed_at")
   createdAt       DateTime @default(now()) @map("created_at")
 
-  courseSession CourseSession @relation(fields: [courseSessionId, courseId], references: [id, courseId], onDelete: Cascade)
-  enrollment    Enrollment    @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Cascade)
+  courseSession CourseSession @relation(fields: [courseSessionId, intakeId], references: [id, intakeId], onDelete: Cascade)
+  enrollment    Enrollment    @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
 
   @@unique([courseSessionId, enrollmentId])
   @@index([enrollmentId])
   @@index([courseSessionId])
-  @@index([courseId])
+  @@index([intakeId])
   @@map("session_completions")
+}
+
+model Payment {
+  id                String      @id @default(uuid())
+  enrollmentId      String      @map("enrollment_id")
+  courseId          String      @map("course_id") // -> Course.id, denormalized — program-level revenue rollups without a join
+  intakeId          String      @map("intake_id") // -> Intake.id, denormalized — per-intake ledger view
+  amount            Decimal     @db.Decimal(12, 2) // what was actually collected for this entry
+  discountAmount    Decimal     @default(0) @map("discount_amount") @db.Decimal(12, 2) // recorded explicitly rather than re-derived, so a later change to a course's discount policy never rewrites what old rows say happened
+  currency          String      @default("LKR")
+  type              PaymentType
+  externalReference String?     @map("external_reference")
+  note              String?
+  recordedByUserId  String?     @map("recorded_by_user_id")
+  createdAt         DateTime    @default(now()) @map("created_at")
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  recordedBy User?      @relation(fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  course     Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake     Intake     @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
+
+  @@index([courseId, createdAt])
+  @@index([intakeId, createdAt])
+  @@index([enrollmentId, createdAt])
+  @@map("payments")
+}
+
+/// The missing link between a PAID course's public "Enroll" button and the
+/// admin-mediated payment process: a visitor's request sits here until an admin
+/// contacts them and, once paid outside the system, converts it into a real
+/// Enrollment + Payment. FREE/evergreen intakes skip this — they self-enroll
+/// directly and never create one of these.
+model EnrollmentRequest {
+  id                String                  @id @default(uuid())
+  courseId          String                  @map("course_id")
+  intakeId          String                  @map("intake_id") // the OPEN_ACTIVE intake resolved at request time
+  studentUserId     String                  @map("student_user_id")
+  contactPhone      String                  @map("contact_phone") // captured on the request form
+  status            EnrollmentRequestStatus @default(PENDING)
+  contactedAt       DateTime?               @map("contacted_at")
+  contactedByUserId String?                 @map("contacted_by_user_id")
+  enrollmentId      String?                 @unique @map("enrollment_id") // set once converted — permanent audit trail
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @default(now()) @updatedAt @map("updated_at")
+
+  course      Course      @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake      Intake      @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
+  student     User        @relation("EnrollmentRequestStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  contactedBy User?       @relation("EnrollmentRequestContactedBy", fields: [contactedByUserId], references: [id], onDelete: SetNull)
+  enrollment  Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+
+  @@index([intakeId, status])
+  @@index([courseId, status])
+  @@index([studentUserId])
+  @@map("enrollment_requests")
 }
 
 model Certificate {
@@ -422,7 +515,7 @@ model Certificate {
 model StudentProject {
   id            String        @id @default(uuid())
   userId        String        @map("user_id")
-  courseId      String        @map("course_id")
+  intakeId      String        @map("intake_id")
   enrollmentId  String        @map("enrollment_id")
   title         String
   description   String?
@@ -442,10 +535,10 @@ model StudentProject {
   updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course     Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  enrollment Enrollment @relation(fields: [enrollmentId, courseId], references: [id, courseId], onDelete: Cascade)
+  intake     Intake     @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  enrollment Enrollment @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
 
-  @@index([courseId, status, isPublic])
+  @@index([intakeId, status, isPublic])
   @@index([userId, createdAt(sort: Desc)])
   @@index([enrollmentId])
   @@index([likeCount(sort: Desc), createdAt(sort: Desc)])

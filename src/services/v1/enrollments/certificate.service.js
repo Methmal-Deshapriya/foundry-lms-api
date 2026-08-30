@@ -90,7 +90,7 @@ export async function issueCertificateService(enrollmentId, data, actorId) {
   if (enrollment.status !== "COMPLETED") {
     throw new ValidationError("Enrollment must be marked as COMPLETED before issuing a certificate.");
   }
-  if (!enrollment.course.courseGroup.certificateEnabled) {
+  if (!enrollment.course.certificateEnabled) {
     throw new ValidationError("Certificates are not enabled for this course.");
   }
 
@@ -201,6 +201,12 @@ export async function getMyCertificatesService(userId, query = {}) {
   };
 }
 
+function toCertificateStatusSummary(statusCounts) {
+  const counts = { ISSUED: 0, REVOKED: 0 };
+  for (const row of statusCounts) counts[row.status] = row._count;
+  return { all: counts.ISSUED + counts.REVOKED, issued: counts.ISSUED, revoked: counts.REVOKED };
+}
+
 /**
  * Service: Get all certificates (Admin).
  */
@@ -211,6 +217,18 @@ export async function getAllCertificatesAdminService(query = {}) {
     throw new ValidationError(issue.message, issue.path[0]);
   }
   const filters = validation.data;
+
+  // Offset mode (the course workspace's Certificates tab): a real page/total.
+  if (filters.offset != null) {
+    const { certificates, total, statusCounts } = await certificateRepo.findAllAdmin(filters);
+    return {
+      certificates: certificates.map(transformCertificate),
+      summary: toCertificateStatusSummary(statusCounts),
+      pagination: { total, limit: filters.limit, offset: filters.offset, hasMore: filters.offset + certificates.length < total },
+    };
+  }
+
+  // Cursor mode (the global /admin/certificates page): unbounded keyset.
   let cursor = null;
   if (filters.cursor) {
     try {
@@ -220,7 +238,8 @@ export async function getAllCertificatesAdminService(query = {}) {
       if (!parsed.success) throw new Error("Invalid cursor payload.");
       if (
         parsed.data.q !== filters.q ||
-        parsed.data.status !== (filters.status ?? null)
+        parsed.data.status !== (filters.status ?? null) ||
+        parsed.data.intakeId !== (filters.intakeId ?? null)
       ) {
         throw new Error("Cursor does not match this certificate query.");
       }
@@ -230,12 +249,13 @@ export async function getAllCertificatesAdminService(query = {}) {
     }
   }
 
-  const rows = await certificateRepo.findAllAdmin({ ...filters, cursor });
+  const { certificates: rows, statusCounts } = await certificateRepo.findAllAdmin({ ...filters, cursor });
   const hasMore = rows.length > filters.limit;
   const certificates = rows.slice(0, filters.limit);
   const last = certificates.at(-1);
   return {
     certificates: certificates.map(transformCertificate),
+    summary: toCertificateStatusSummary(statusCounts),
     pagination: {
       limit: filters.limit,
       hasMore,
@@ -243,6 +263,7 @@ export async function getAllCertificatesAdminService(query = {}) {
         ? Buffer.from(JSON.stringify({
             q: filters.q,
             status: filters.status ?? null,
+            intakeId: filters.intakeId ?? null,
             createdAt: last.createdAt.toISOString(),
             id: last.id,
           })).toString("base64url")

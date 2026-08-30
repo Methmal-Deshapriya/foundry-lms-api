@@ -6,10 +6,12 @@ import {
   handlePrismaError,
 } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "./transactionLock.repository.js";
+import { hasLearningAccess } from "../../../utils/enrollmentAccessPolicy.js";
 
 const enrollmentInclude = {
   user: true,
-  course: { include: { category: { include: { service: true } }, courseGroup: true } },
+  course: true,
+  intake: { include: { category: { include: { service: true } } } },
 };
 
 const courseSessionInclude = (enrollmentId) => ({
@@ -28,10 +30,10 @@ export function findEnrollmentContext(enrollmentId) {
   });
 }
 
-export function findVisibleSessions(courseId, enrollmentId, now = new Date()) {
+export function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
   return prisma.courseSession.findMany({
     where: {
-      courseId,
+      intakeId,
       deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
       OR: [
         { deliveryStatus: "RELEASED" },
@@ -58,37 +60,37 @@ async function assertCompletionMutationAllowed(
   transaction,
   enrollmentId,
   courseSessionId,
-  courseId,
+  intakeId,
   now = new Date(),
 ) {
   const initial = await transaction.enrollment.findUnique({
     where: { id: enrollmentId },
     select: {
-      courseId: true,
-      course: { select: { category: { select: { serviceId: true } } } },
+      intakeId: true,
+      intake: { select: { category: { select: { serviceId: true } } } },
     },
   });
-  if (!initial || initial.courseId !== courseId) {
+  if (!initial || initial.intakeId !== intakeId) {
     throw new NotFoundError("Enrollment not found.");
   }
   await acquireTransactionLock(
     transaction,
-    `learning-service:${initial.course.category.serviceId}`,
+    `learning-service:${initial.intake.category.serviceId}`,
   );
-  await acquireTransactionLock(transaction, `course:${courseId}`);
+  await acquireTransactionLock(transaction, `intake:${intakeId}`);
   await acquireTransactionLock(transaction, `enrollment:${enrollmentId}`);
 
   const enrollment = await transaction.enrollment.findUnique({
     where: { id: enrollmentId },
     select: {
-      courseId: true,
+      intakeId: true,
       source: true,
       status: true,
       paymentStatus: true,
-      course: { select: { status: true, category: { select: { service: true } } } },
+      intake: { select: { status: true, category: { select: { service: true } } } },
     },
   });
-  if (!enrollment || enrollment.courseId !== courseId) {
+  if (!enrollment || enrollment.intakeId !== intakeId) {
     throw new NotFoundError("Enrollment not found.");
   }
   if (enrollment.status === "COMPLETED") throw new EnrollmentCompletedError();
@@ -97,23 +99,19 @@ async function assertCompletionMutationAllowed(
       "Session completion can be changed only for an active enrollment.",
     );
   }
-  if (!["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(enrollment.course.status)) {
+  if (!["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(enrollment.intake.status)) {
     throw new ConflictError(
-      "Learning progress can be changed only while the course is active.",
+      "Learning progress can be changed only while the intake is active.",
     );
   }
-  const validAccess =
-    enrollment.course.category.service.accessType === "FREE"
-      ? enrollment.source === "SELF" && enrollment.paymentStatus === "NOT_REQUIRED"
-      : enrollment.source === "ADMIN" && enrollment.paymentStatus === "COMPLETED";
-  if (!validAccess) {
+  if (!hasLearningAccess(enrollment, enrollment.intake.category.service)) {
     throw new ConflictError("The enrollment does not have valid learning access.");
   }
 
   const courseSession = await transaction.courseSession.findFirst({
     where: {
       id: courseSessionId,
-      courseId,
+      intakeId,
       deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
       OR: [
         { deliveryStatus: "RELEASED" },
@@ -128,17 +126,17 @@ async function assertCompletionMutationAllowed(
   }
 }
 
-export async function createCompletion(enrollmentId, courseSessionId, courseId) {
+export async function createCompletion(enrollmentId, courseSessionId, intakeId) {
   try {
     return await prisma.$transaction(async (transaction) => {
       await assertCompletionMutationAllowed(
         transaction,
         enrollmentId,
         courseSessionId,
-        courseId,
+        intakeId,
       );
       return transaction.sessionCompletion.create({
-        data: { enrollmentId, courseSessionId, courseId },
+        data: { enrollmentId, courseSessionId, intakeId },
       });
     });
   } catch (error) {
@@ -153,14 +151,14 @@ export async function createCompletion(enrollmentId, courseSessionId, courseId) 
   }
 }
 
-export async function removeCompletion(enrollmentId, courseSessionId, courseId) {
+export async function removeCompletion(enrollmentId, courseSessionId, intakeId) {
   try {
     return await prisma.$transaction(async (transaction) => {
       await assertCompletionMutationAllowed(
         transaction,
         enrollmentId,
         courseSessionId,
-        courseId,
+        intakeId,
       );
       return transaction.sessionCompletion.deleteMany({
         where: { enrollmentId, courseSessionId },

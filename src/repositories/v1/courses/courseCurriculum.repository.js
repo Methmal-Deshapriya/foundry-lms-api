@@ -9,46 +9,46 @@ const include = {
 
 export function findById(id) { return prisma.courseSession.findUnique({ where: { id }, include }); }
 
-export function findCurriculum(courseId, includeRetired = false) {
+export function findCurriculum(intakeId, includeRetired = false) {
   return prisma.courseSession.findMany({
-    where: { courseId, ...(includeRetired ? {} : { retiredAt: null }) },
+    where: { intakeId, ...(includeRetired ? {} : { retiredAt: null }) },
     orderBy: [{ retiredAt: "asc" }, { orderIndex: "asc" }, { historicalOrderIndex: "asc" }],
     include,
   });
 }
 
-async function lockCourse(transaction, courseId) {
-  const initial = await transaction.course.findUnique({
-    where: { id: courseId },
-    select: { categoryId: true, courseGroupId: true, category: { select: { serviceId: true } } },
+async function lockIntake(transaction, intakeId) {
+  const initial = await transaction.intake.findUnique({
+    where: { id: intakeId },
+    select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
   });
-  if (!initial) throw new NotFoundError("Course not found.");
+  if (!initial) throw new NotFoundError("Intake not found.");
   await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
   await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
-  await acquireTransactionLock(transaction, `course-group:${initial.courseGroupId}`);
-  await acquireTransactionLock(transaction, `course:${courseId}`);
-  const course = await transaction.course.findUnique({ where: { id: courseId }, include: { courseGroup: true, category: { include: { service: true } } } });
-  if (!course) throw new NotFoundError("Course not found.");
-  if (["COMPLETED", "CANCELLED", "ARCHIVED"].includes(course.status)) throw new ConflictError("Terminal courses have a frozen curriculum.");
-  if (course.category.service.status === "ARCHIVED" || course.courseGroup.archivedAt || course.category.status === "ARCHIVED") throw new ConflictError("Archived catalog setup is read-only.");
-  return course;
+  await acquireTransactionLock(transaction, `course:${initial.courseId}`);
+  await acquireTransactionLock(transaction, `intake:${intakeId}`);
+  const intake = await transaction.intake.findUnique({ where: { id: intakeId }, include: { course: true, category: { include: { service: true } } } });
+  if (!intake) throw new NotFoundError("Intake not found.");
+  if (["COMPLETED", "CANCELLED", "ARCHIVED"].includes(intake.status)) throw new ConflictError("Terminal intakes have a frozen curriculum.");
+  if (intake.category.service.status === "ARCHIVED" || intake.course.archivedAt || intake.category.status === "ARCHIVED") throw new ConflictError("Archived catalog setup is read-only.");
+  return intake;
 }
 
-async function compact(transaction, courseId) {
-  const active = await transaction.courseSession.findMany({ where: { courseId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true } });
+async function compact(transaction, intakeId) {
+  const active = await transaction.courseSession.findMany({ where: { intakeId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true } });
   if (active.length === 0) return;
-  await moveActiveOrderIndexesOutOfRange(transaction, courseId, active);
+  await moveActiveOrderIndexesOutOfRange(transaction, intakeId, active);
   for (const [orderIndex, item] of active.entries()) await transaction.courseSession.update({ where: { id: item.id }, data: { orderIndex } });
 }
 
-async function moveActiveOrderIndexesOutOfRange(transaction, courseId, active) {
+async function moveActiveOrderIndexesOutOfRange(transaction, intakeId, active) {
   const maxOrderIndex = active.reduce(
     (maximum, item) => Math.max(maximum, item.orderIndex ?? 0),
     0,
   );
   const offset = maxOrderIndex + active.length + 1;
   await transaction.courseSession.updateMany({
-    where: { courseId, retiredAt: null },
+    where: { intakeId, retiredAt: null },
     data: { orderIndex: { increment: offset } },
   });
 }
@@ -58,11 +58,11 @@ function isVisibleNow(item, now = new Date()) {
     (item.deliveryStatus === "SCHEDULED" && item.availableAt && item.availableAt <= now);
 }
 
-async function protectOpenFreeCurriculum(transaction, course, item, nextStatus = null, nextAvailableAt = null) {
+async function protectOpenFreeCurriculum(transaction, intake, item, nextStatus = null, nextAvailableAt = null) {
   if (
-    course.status !== "OPEN_ACTIVE" ||
-    course.category.service.courseMode !== "EVERGREEN" ||
-    course.category.service.accessType !== "FREE"
+    intake.status !== "OPEN_ACTIVE" ||
+    intake.category.service.courseMode !== "EVERGREEN" ||
+    intake.category.service.accessType !== "FREE"
   ) {
     return;
   }
@@ -73,7 +73,7 @@ async function protectOpenFreeCurriculum(transaction, course, item, nextStatus =
   if (!currentlyVisible || remainsVisible) return;
   const otherVisibleCount = await transaction.courseSession.count({
     where: {
-      courseId: course.id,
+      intakeId: intake.id,
       id: { not: item.id },
       retiredAt: null,
       OR: [
@@ -84,29 +84,29 @@ async function protectOpenFreeCurriculum(transaction, course, item, nextStatus =
   });
   if (otherVisibleCount === 0) {
     throw new ConflictError(
-      "An open Free Learning course must keep at least one visible session. Close or cancel the course first.",
-      "FREE_COURSE_REQUIRES_VISIBLE_SESSION",
+      "An open Free Learning intake must keep at least one visible session. Close or cancel the intake first.",
+      "FREE_INTAKE_REQUIRES_VISIBLE_SESSION",
     );
   }
 }
 
-export async function attach(courseId, sessionId, requestedIndex) {
+export async function attach(intakeId, sessionId, requestedIndex) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await lockCourse(transaction, courseId);
+      await lockIntake(transaction, intakeId);
       const session = await transaction.session.findUnique({ where: { id: sessionId } });
       if (!session) throw new NotFoundError("Session not found.");
       if (session.status !== "READY") throw new ConflictError("Only Ready sessions can be attached.");
-      const existing = await transaction.courseSession.findUnique({ where: { courseId_sessionId: { courseId, sessionId } } });
-      if (existing && !existing.retiredAt) throw new ConflictError("Session is already attached to this course.");
-      const active = await transaction.courseSession.findMany({ where: { courseId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true, orderIndex: true } });
+      const existing = await transaction.courseSession.findUnique({ where: { intakeId_sessionId: { intakeId, sessionId } } });
+      if (existing && !existing.retiredAt) throw new ConflictError("Session is already attached to this intake.");
+      const active = await transaction.courseSession.findMany({ where: { intakeId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true, orderIndex: true } });
       const index = Math.min(requestedIndex ?? active.length, active.length);
-      if (active.length > 0) await moveActiveOrderIndexesOutOfRange(transaction, courseId, active);
+      if (active.length > 0) await moveActiveOrderIndexesOutOfRange(transaction, intakeId, active);
       let relation;
       if (existing) {
         relation = await transaction.courseSession.update({ where: { id: existing.id }, data: { retiredAt: null, historicalOrderIndex: null, orderIndex: index, deliveryStatus: "WITHDRAWN", availableAt: null } });
       } else {
-        relation = await transaction.courseSession.create({ data: { courseId, sessionId, orderIndex: index } });
+        relation = await transaction.courseSession.create({ data: { intakeId, sessionId, orderIndex: index } });
       }
       const ids = active.map(({ id }) => id);
       ids.splice(index, 0, relation.id);
@@ -116,12 +116,12 @@ export async function attach(courseId, sessionId, requestedIndex) {
   } catch (error) { throw handlePrismaError(error); }
 }
 
-export async function reorder(courseId, items, acknowledgeSequenceRisk = false) {
+export async function reorder(intakeId, items, acknowledgeSequenceRisk = false) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      await lockCourse(transaction, courseId);
+      await lockIntake(transaction, intakeId);
       const active = await transaction.courseSession.findMany({
-        where: { courseId, retiredAt: null },
+        where: { intakeId, retiredAt: null },
         select: {
           id: true,
           orderIndex: true,
@@ -157,20 +157,20 @@ export async function reorder(courseId, items, acknowledgeSequenceRisk = false) 
           },
         );
       }
-      if (active.length > 0) await moveActiveOrderIndexesOutOfRange(transaction, courseId, active);
+      if (active.length > 0) await moveActiveOrderIndexesOutOfRange(transaction, intakeId, active);
       for (const item of items) await transaction.courseSession.update({ where: { id: item.id }, data: { orderIndex: item.orderIndex } });
       return true;
     });
   } catch (error) { throw handlePrismaError(error); }
 }
 
-export async function remove(courseId, courseSessionId) {
+export async function remove(intakeId, courseSessionId) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const course = await lockCourse(transaction, courseId);
-      const item = await transaction.courseSession.findFirst({ where: { id: courseSessionId, courseId, retiredAt: null }, include: { _count: { select: { completions: true } } } });
+      const intake = await lockIntake(transaction, intakeId);
+      const item = await transaction.courseSession.findFirst({ where: { id: courseSessionId, intakeId, retiredAt: null }, include: { _count: { select: { completions: true } } } });
       if (!item) throw new NotFoundError("Course session not found.");
-      await protectOpenFreeCurriculum(transaction, course, item);
+      await protectOpenFreeCurriculum(transaction, intake, item);
       const protectedHistory =
         Boolean(item.firstReleasedAt) ||
         item.deliveryStatus === "RELEASED" ||
@@ -191,23 +191,23 @@ export async function remove(courseId, courseSessionId) {
       } else {
         await transaction.courseSession.delete({ where: { id: item.id } });
       }
-      await compact(transaction, courseId);
+      await compact(transaction, intakeId);
       return { action: protectedHistory ? "RETIRED" : "DETACHED" };
     });
   } catch (error) { throw handlePrismaError(error); }
 }
 
-export async function updateDelivery(courseId, courseSessionId, input) {
+export async function updateDelivery(intakeId, courseSessionId, input) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const course = await lockCourse(transaction, courseId);
-      if (!["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(course.status)) throw new ConflictError("Session delivery is available only while the course is active.");
-      const item = await transaction.courseSession.findFirst({ where: { id: courseSessionId, courseId, retiredAt: null }, include: { session: true } });
+      const intake = await lockIntake(transaction, intakeId);
+      if (!["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(intake.status)) throw new ConflictError("Session delivery is available only while the intake is active.");
+      const item = await transaction.courseSession.findFirst({ where: { id: courseSessionId, intakeId, retiredAt: null }, include: { session: true } });
       if (!item) throw new NotFoundError("Course session not found.");
       if (["RELEASED", "SCHEDULED"].includes(input.status) && item.session.status !== "READY") throw new ConflictError("Archived sessions cannot be newly released or scheduled.");
       if (input.status === "SCHEDULED" && (!input.availableAt || input.availableAt <= new Date())) throw new ConflictError("Scheduled availability must be in the future.");
-      await protectOpenFreeCurriculum(transaction, course, item, input.status, input.availableAt);
-      const all = await transaction.courseSession.findMany({ where: { courseId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true, orderIndex: true, deliveryStatus: true, availableAt: true, session: { select: { title: true } } } });
+      await protectOpenFreeCurriculum(transaction, intake, item, input.status, input.availableAt);
+      const all = await transaction.courseSession.findMany({ where: { intakeId, retiredAt: null }, orderBy: { orderIndex: "asc" }, select: { id: true, orderIndex: true, deliveryStatus: true, availableAt: true, session: { select: { title: true } } } });
       const now = new Date();
       const isAvailableBy = (row, boundary) =>
         row.deliveryStatus === "RELEASED" ||

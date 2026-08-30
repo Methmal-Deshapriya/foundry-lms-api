@@ -61,7 +61,7 @@ export function transformPublicProject(project) {
     user: project.user
       ? { firstName: project.user.firstName, lastName: project.user.lastName }
       : undefined,
-    course: project.course ? { title: project.course.title } : undefined,
+    course: project.intake?.course ? { title: project.intake.course.title } : undefined,
   };
 }
 

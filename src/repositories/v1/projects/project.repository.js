@@ -6,6 +6,7 @@ import {
   handlePrismaError,
 } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
+import { hasLearningAccess } from "../../../utils/enrollmentAccessPolicy.js";
 
 /**
  * Student Project Repository
@@ -16,7 +17,7 @@ export async function findById(id) {
     where: { id },
     include: {
       user: true,
-      course: true,
+      intake: { include: { course: true } },
       enrollment: true,
     },
   });
@@ -38,7 +39,7 @@ const publicProjectSelect = {
   createdAt: true,
   updatedAt: true,
   user: { select: { firstName: true, lastName: true } },
-  course: { select: { title: true } },
+  intake: { select: { course: { select: { title: true } } } },
 };
 
 export async function findPublicById(id) {
@@ -58,7 +59,7 @@ export async function findByUserId(userId, { limit, cursor }) {
   const rows = await prisma.studentProject.findMany({
     where: { userId },
     include: {
-      course: true,
+      intake: { include: { course: true } },
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
@@ -67,17 +68,52 @@ export async function findByUserId(userId, { limit, cursor }) {
   return pageResult(rows, limit);
 }
 
-export async function findAllAdmin({ limit, cursor }) {
+function projectSharedWhere({ q = "", intakeId }) {
+  return {
+    ...(intakeId ? { intakeId } : {}),
+    ...(q
+      ? {
+          OR: [
+            { title: { contains: q, mode: "insensitive" } },
+            { user: { firstName: { contains: q, mode: "insensitive" } } },
+            { user: { lastName: { contains: q, mode: "insensitive" } } },
+            { user: { email: { contains: q, mode: "insensitive" } } },
+          ],
+        }
+      : {}),
+  };
+}
+
+// Two pagination modes, same shape as certificate.repository.js: cursor
+// (the global /admin/projects page) or offset (the intake workspace's
+// Projects tab — pass `offset` as a number, including 0, to select it).
+export async function findAllAdmin({ q = "", limit, cursor, offset = null, intakeId, status }) {
+  const sharedWhere = projectSharedWhere({ q, intakeId });
+  const where = { ...sharedWhere, ...(status ? { status } : {}) };
+  const statusCounts = await prisma.studentProject.groupBy({ by: ["status"], where: sharedWhere, _count: true });
+
+  if (offset != null) {
+    const [total, projects] = await Promise.all([
+      prisma.studentProject.count({ where }),
+      prisma.studentProject.findMany({
+        where,
+        include: { user: true, intake: { include: { course: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit,
+        skip: offset,
+      }),
+    ]);
+    return { mode: "offset", items: projects, total, statusCounts };
+  }
+
   const rows = await prisma.studentProject.findMany({
-    include: {
-      user: true,
-      course: true,
-    },
+    where,
+    include: { user: true, intake: { include: { course: true } } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
-  return pageResult(rows, limit);
+  return { mode: "cursor", ...pageResult(rows, limit), statusCounts };
 }
 
 export async function findPublicShowcase({ limit, cursor }) {
@@ -149,16 +185,16 @@ export async function createForEnrollment(requester, data) {
       const initial = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         select: {
-          courseId: true,
-          course: { select: { category: { select: { serviceId: true } } } },
+          intakeId: true,
+          intake: { select: { category: { select: { serviceId: true } } } },
         },
       });
       if (!initial) throw new NotFoundError("Enrollment not found.");
       await acquireTransactionLock(
         transaction,
-        `learning-service:${initial.course.category.serviceId}`,
+        `learning-service:${initial.intake.category.serviceId}`,
       );
-      await acquireTransactionLock(transaction, `course:${initial.courseId}`);
+      await acquireTransactionLock(transaction, `intake:${initial.intakeId}`);
       await acquireTransactionLock(
         transaction,
         `enrollment:${data.enrollmentId}`,
@@ -171,7 +207,7 @@ export async function createForEnrollment(requester, data) {
       const enrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         include: {
-          course: { include: { category: { include: { service: true } } } },
+          intake: { include: { category: { include: { service: true } } } },
         },
       });
       if (!user || user.role !== "STUDENT" || !user.emailVerified) {
@@ -182,27 +218,17 @@ export async function createForEnrollment(requester, data) {
       if (
         !enrollment ||
         enrollment.userId !== requester.id ||
-        enrollment.courseId !== data.courseId ||
+        enrollment.intakeId !== data.intakeId ||
         !["ACTIVE", "COMPLETED"].includes(enrollment.status)
       ) {
         throw new ForbiddenError(
           "The selected enrollment does not allow this project submission.",
         );
       }
-      if (!["OPEN_ACTIVE", "CLOSED_ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.course.status)) {
-        throw new ForbiddenError("The selected course does not currently allow project submission.");
+      if (!["OPEN_ACTIVE", "CLOSED_ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.intake.status)) {
+        throw new ForbiddenError("The selected intake does not currently allow project submission.");
       }
-      const policy = enrollment.course.category.service;
-      const validAccess = policy.accessType === "FREE"
-        ? policy.enrollmentMode === "SELF" &&
-          policy.paymentRequirement === "NOT_REQUIRED" &&
-          enrollment.source === "SELF" &&
-          enrollment.paymentStatus === "NOT_REQUIRED"
-        : policy.enrollmentMode === "ADMIN" &&
-          policy.paymentRequirement === "REQUIRED" &&
-          enrollment.source === "ADMIN" &&
-          enrollment.paymentStatus === "COMPLETED";
-      if (!validAccess) {
+      if (!hasLearningAccess(enrollment, enrollment.intake.category.service)) {
         throw new ForbiddenError(
           "The selected enrollment does not have valid learning access.",
         );

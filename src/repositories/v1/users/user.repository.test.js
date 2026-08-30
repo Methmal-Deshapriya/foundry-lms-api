@@ -23,7 +23,7 @@ describe("eligible student repository search", () => {
       where: expect.objectContaining({
         role: "STUDENT",
         emailVerified: true,
-        enrollments: { none: { courseId: "course-1" } },
+        enrollments: { none: { intakeId: "course-1" } },
         OR: expect.any(Array),
       }),
     }));

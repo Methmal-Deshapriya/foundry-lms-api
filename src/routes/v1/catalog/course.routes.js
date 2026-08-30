@@ -1,24 +1,29 @@
 import express from "express";
 import * as controller from "../../../controllers/v1/catalog/course.controller.js";
-import * as enrollmentController from "../../../controllers/v1/enrollments/enrollment.controller.js";
-import curriculumRoutes from "../courses/courseCurriculum.routes.js";
+import * as intakeController from "../../../controllers/v1/catalog/intake.controller.js";
+import * as enrollmentRequestController from "../../../controllers/v1/enrollments/enrollmentRequest.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
 import { requirePermission } from "../../../middlewares/requirePermission.js";
 import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 
 const router = express.Router();
 router.use(authenticate);
-router.use("/:courseId/curriculum", curriculumRoutes);
-router.post("/:courseId/enroll", requirePermission(PERMISSIONS.COURSES_SELF_ENROLL), enrollmentController.selfEnrollFreeCourseController);
-router.get("/:courseId/enrollments", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.getCourseEnrollmentsController);
-router.get("/:courseId/eligible-students", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.getEligibleStudentsForCourseController);
-router.post("/:courseId/enrollments", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.enrollStudentInCourseController);
-router.post("/:courseId/enrollments/bulk", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.bulkEnrollStudentsInCourseController);
-router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.getCoursesAdmin);
-router.get("/:id/deletion-impact", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.getCourseDeletionImpact);
-router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.getCourseAdmin);
-router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.createCourse);
-router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.updateCourse);
-router.patch("/:id/status", requirePermission(PERMISSIONS.COURSE_LIFECYCLE_MANAGE), controller.updateCourseStatus);
-router.delete("/:id", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.deleteCoursePermanently);
+
+// Intakes nested under their course — matches the /courses/:courseId/enrollments
+// nesting convention already used elsewhere in this codebase.
+router.get("/:courseId/intakes", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), intakeController.list);
+router.get("/:courseId/intakes/defaults", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), intakeController.defaults);
+router.post("/:courseId/intakes", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), intakeController.create);
+
+// A visitor clicking "Enroll" on a PAID course — see the rename plan §8a.
+router.post("/:courseId/enrollment-requests", requirePermission(PERMISSIONS.COURSES_SELF_ENROLL), enrollmentRequestController.create);
+
+router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.list);
+router.get("/:id/deletion-impact", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.deletionImpact);
+router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.get);
+router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.create);
+router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.update);
+router.patch("/:id/archive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), controller.archive);
+router.patch("/:id/unarchive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), controller.restore);
+router.delete("/:id", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.remove);
 export default router;

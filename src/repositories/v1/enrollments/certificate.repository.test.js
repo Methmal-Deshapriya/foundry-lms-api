@@ -26,14 +26,14 @@ import { createIssued, revokeIssued } from "./certificate.repository.js";
 
 const certificateId = "90000000-0000-4000-8000-000000000001";
 const enrollmentId = "90000000-0000-4000-8000-000000000002";
-const courseId = "90000000-0000-4000-8000-000000000003";
+const intakeId = "90000000-0000-4000-8000-000000000003";
 
 describe("certificate revocation transaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
     mocks.transaction.enrollment.findUnique.mockResolvedValue({
-      courseId,
+      intakeId,
     });
   });
 
@@ -44,7 +44,7 @@ describe("certificate revocation transaction", () => {
       status: "ISSUED",
       enrollment: {
         status: "COMPLETED",
-        course: {
+        intake: {
           status: "CLOSED_ACTIVE",
           category: { status: "PUBLISHED" },
         },
@@ -70,12 +70,12 @@ describe("certificate revocation transaction", () => {
     expect(
       mocks.transaction.$queryRawUnsafe.mock.calls.map(([, key]) => key),
     ).toEqual([
-      `course:${courseId}`,
+      `intake:${intakeId}`,
       `enrollment:${enrollmentId}`,
     ]);
     expect(result.lifecycleContext).toEqual({
       enrollmentStatus: "COMPLETED",
-      courseStatus: "CLOSED_ACTIVE",
+      intakeStatus: "CLOSED_ACTIVE",
       categoryStatus: "PUBLISHED",
     });
     expect(mocks.transaction.certificate.update).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe("certificate revocation transaction", () => {
         status: "REVOKED",
         enrollment: {
           status: "COMPLETED",
-          course: { status: "CLOSED_ACTIVE", category: { status: "PUBLISHED" } },
+          intake: { status: "CLOSED_ACTIVE", category: { status: "PUBLISHED" } },
         },
       });
 
@@ -104,10 +104,11 @@ describe("certificate issuance transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ courseId })
+      .mockResolvedValueOnce({ intakeId })
       .mockResolvedValue({
         status: "COMPLETED",
-        course: { courseGroup: { certificateEnabled: true } },
+        paymentStatus: "COMPLETED",
+        course: { certificateEnabled: true },
       });
     mocks.transaction.certificate.findFirst.mockResolvedValue(null);
     mocks.transaction.certificate.create.mockResolvedValue({
@@ -137,6 +138,22 @@ describe("certificate issuance transaction", () => {
     await expect(
       createIssued({ enrollmentId, certificateCode: "FND-20260814-DUPLICATE" }),
     ).rejects.toMatchObject({ code: "CERTIFICATE_ALREADY_ISSUED" });
+    expect(mocks.transaction.certificate.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects issuance for a partially paid enrollment, even once the intake itself is complete", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({ intakeId })
+      .mockResolvedValue({
+        status: "COMPLETED",
+        paymentStatus: "PARTIAL",
+        course: { certificateEnabled: true },
+      });
+
+    await expect(
+      createIssued({ enrollmentId, certificateCode: "FND-20260814-PARTIAL" }),
+    ).rejects.toMatchObject({ code: "CERTIFICATE_ISSUANCE_BLOCKED" });
     expect(mocks.transaction.certificate.create).not.toHaveBeenCalled();
   });
 });

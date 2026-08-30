@@ -10,7 +10,8 @@ const certificateInclude = {
   enrollment: {
     include: {
       user: true,
-      course: { include: { category: true } },
+      course: true,
+      intake: { include: { category: true } },
     },
   },
 };
@@ -39,9 +40,9 @@ export async function findCurrentByEnrollmentId(enrollmentId) {
   });
 }
 
-export async function findAllAdmin({ q = "", status, limit = 50, cursor = null }) {
-  const where = {
-    ...(status ? { status } : {}),
+function certificateSharedWhere({ q = "", intakeId }) {
+  return {
+    ...(intakeId ? { enrollment: { intakeId } } : {}),
     ...(q
       ? {
           OR: [
@@ -51,6 +52,37 @@ export async function findAllAdmin({ q = "", status, limit = 50, cursor = null }
           ],
         }
       : {}),
+  };
+}
+
+// Two pagination modes share this function: cursor (the global /admin
+// certificates page — unbounded, keyset) and offset (the intake
+// workspace's Certificates tab — one intake, bounded, wants a real
+// "page N of M" + total, same as Session Library). Offset mode is
+// selected by passing `offset` (a number, including 0); omit it entirely
+// for cursor mode. `summary` is cheap enough to compute either way.
+export async function findAllAdmin({ q = "", status, intakeId, limit = 50, cursor = null, offset = null }) {
+  const sharedWhere = certificateSharedWhere({ q, intakeId });
+  const where = { ...sharedWhere, ...(status ? { status } : {}) };
+
+  const statusCounts = await prisma.certificate.groupBy({ by: ["status"], where: sharedWhere, _count: true });
+
+  if (offset != null) {
+    const [total, certificates] = await Promise.all([
+      prisma.certificate.count({ where }),
+      prisma.certificate.findMany({
+        where,
+        include: certificateInclude,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit,
+        skip: offset,
+      }),
+    ]);
+    return { mode: "offset", certificates, total, statusCounts };
+  }
+
+  const cursorWhere = {
+    ...where,
     ...(cursor
       ? {
           AND: [
@@ -64,12 +96,13 @@ export async function findAllAdmin({ q = "", status, limit = 50, cursor = null }
         }
       : {}),
   };
-  return await prisma.certificate.findMany({
-    where,
+  const certificates = await prisma.certificate.findMany({
+    where: cursorWhere,
     include: certificateInclude,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
   });
+  return { mode: "cursor", certificates, statusCounts };
 }
 
 export async function findUserCertificates(userId, { limit, cursor }) {
@@ -97,19 +130,20 @@ export async function createIssued(data) {
     return await prisma.$transaction(async (transaction) => {
       const initialEnrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
-        select: { courseId: true },
+        select: { intakeId: true },
       });
       if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
       await acquireTransactionLock(
         transaction,
-        `course:${initialEnrollment.courseId}`,
+        `intake:${initialEnrollment.intakeId}`,
       );
       await acquireTransactionLock(transaction, `enrollment:${data.enrollmentId}`);
       const enrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         select: {
           status: true,
-          course: { select: { courseGroup: { select: { certificateEnabled: true } } } },
+          paymentStatus: true,
+          course: { select: { certificateEnabled: true } },
         },
       });
       if (!enrollment) throw new NotFoundError("Enrollment not found.");
@@ -119,7 +153,13 @@ export async function createIssued(data) {
           "CERTIFICATE_ISSUANCE_BLOCKED",
         );
       }
-      if (!enrollment.course.courseGroup.certificateEnabled) {
+      if (enrollment.paymentStatus !== "COMPLETED") {
+        throw new ConflictError(
+          "This student hasn't completed payment yet — record the remaining payment before issuing a certificate.",
+          "CERTIFICATE_ISSUANCE_BLOCKED",
+        );
+      }
+      if (!enrollment.course.certificateEnabled) {
         throw new ConflictError(
           "Certificates are not enabled for this course.",
           "CERTIFICATE_ISSUANCE_BLOCKED",
@@ -165,14 +205,14 @@ export async function revokeIssued(id, data) {
 
       const initialEnrollment = await transaction.enrollment.findUnique({
         where: { id: initial.enrollmentId },
-        select: { courseId: true },
+        select: { intakeId: true },
       });
       if (!initialEnrollment) throw new NotFoundError("Enrollment not found.");
-      // Use the global course -> enrollment order so revocation cannot race a
-      // course-completion readiness decision.
+      // Use the global intake -> enrollment order so revocation cannot race a
+      // completion readiness decision.
       await acquireTransactionLock(
         transaction,
-        `course:${initialEnrollment.courseId}`,
+        `intake:${initialEnrollment.intakeId}`,
       );
       await acquireTransactionLock(
         transaction,
@@ -189,8 +229,8 @@ export async function revokeIssued(id, data) {
 
       const lifecycleContext = {
         enrollmentStatus: current.enrollment.status,
-        courseStatus: current.enrollment.course.status,
-        categoryStatus: current.enrollment.course.category.status,
+        intakeStatus: current.enrollment.intake.status,
+        categoryStatus: current.enrollment.intake.category.status,
       };
       const certificate = await transaction.certificate.update({
         where: { id },

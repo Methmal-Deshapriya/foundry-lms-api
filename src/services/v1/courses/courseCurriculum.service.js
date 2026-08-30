@@ -1,5 +1,5 @@
 import * as repository from "../../../repositories/v1/courses/courseCurriculum.repository.js";
-import * as courseRepository from "../../../repositories/v1/catalog/course.repository.js";
+import * as intakeRepository from "../../../repositories/v1/catalog/intake.repository.js";
 import {
   attachCourseSessionSchema,
   courseCurriculumQuerySchema,
@@ -19,7 +19,7 @@ function parse(schema, value) {
 function response(item) {
   return {
     id: item.id,
-    courseId: item.courseId,
+    intakeId: item.intakeId,
     orderIndex: item.orderIndex,
     deliveryStatus: item.deliveryStatus,
     availableAt: item.availableAt,
@@ -31,42 +31,42 @@ function response(item) {
   };
 }
 
-async function requireCourse(id) { const course = await courseRepository.findById(id); if (!course) throw new NotFoundError("Course not found."); return course; }
+async function requireIntake(id) { const intake = await intakeRepository.findById(id); if (!intake) throw new NotFoundError("Intake not found."); return intake; }
 
-export async function getCourseCurriculumService(courseId, query = {}) {
+export async function getCourseCurriculumService(intakeId, query = {}) {
   const { includeRetired } = parse(courseCurriculumQuerySchema, query);
-  const course = await requireCourse(courseId);
-  const curriculum = await repository.findCurriculum(courseId, includeRetired);
-  return { course, curriculum: curriculum.map(response) };
+  const intake = await requireIntake(intakeId);
+  const curriculum = await repository.findCurriculum(intakeId, includeRetired);
+  return { intake, curriculum: curriculum.map(response) };
 }
 
-export async function attachCourseSessionService(courseId, data, actorId) {
+export async function attachCourseSessionService(intakeId, data, actorId) {
   const input = parse(attachCourseSessionSchema, data);
-  await requireCourse(courseId);
-  const item = await repository.attach(courseId, input.sessionId, input.orderIndex);
-  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_SESSION_ATTACHED, entityType: ENTITY_TYPES.COURSE_SESSION, entityId: item.id, description: `Session "${item.session.title}" attached to course ${courseId}.`, metadata: { courseId, sessionId: input.sessionId } });
+  await requireIntake(intakeId);
+  const item = await repository.attach(intakeId, input.sessionId, input.orderIndex);
+  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_SESSION_ATTACHED, entityType: ENTITY_TYPES.COURSE_SESSION, entityId: item.id, description: `Session "${item.session.title}" attached to intake ${intakeId}.`, metadata: { intakeId, sessionId: input.sessionId } });
   return { courseSession: response(item) };
 }
 
-export async function reorderCourseCurriculumService(courseId, data, actorId) {
+export async function reorderCourseCurriculumService(intakeId, data, actorId) {
   const input = parse(reorderCourseCurriculumSchema, data);
-  await requireCourse(courseId);
+  await requireIntake(intakeId);
   const sorted = [...input.courseSessions].sort((a, b) => a.orderIndex - b.orderIndex);
   if (sorted.some((item, index) => item.orderIndex !== index)) throw new ValidationError("Order indexes must be continuous from zero.", "courseSessions");
-  await repository.reorder(courseId, sorted, input.acknowledgeSequenceRisk);
-  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_CURRICULUM_REORDERED, entityType: ENTITY_TYPES.COURSE, entityId: courseId, description: `Course ${courseId} curriculum reordered.`, metadata: { courseSessionIds: sorted.map(({ id }) => id), sequenceRiskAcknowledged: input.acknowledgeSequenceRisk } });
+  await repository.reorder(intakeId, sorted, input.acknowledgeSequenceRisk);
+  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_CURRICULUM_REORDERED, entityType: ENTITY_TYPES.INTAKE, entityId: intakeId, description: `Intake ${intakeId} curriculum reordered.`, metadata: { courseSessionIds: sorted.map(({ id }) => id), sequenceRiskAcknowledged: input.acknowledgeSequenceRisk } });
   return { success: true };
 }
 
-export async function removeCourseSessionService(courseId, courseSessionId, actorId) {
-  const result = await repository.remove(courseId, courseSessionId);
-  recordActionService({ actorUserId: actorId, action: result.action === "RETIRED" ? AUDIT_ACTIONS.COURSE_SESSION_RETIRED : AUDIT_ACTIONS.COURSE_SESSION_DETACHED, entityType: ENTITY_TYPES.COURSE_SESSION, entityId: courseSessionId, description: `Course session ${result.action.toLowerCase()} from course ${courseId}.`, metadata: { courseId } });
+export async function removeCourseSessionService(intakeId, courseSessionId, actorId) {
+  const result = await repository.remove(intakeId, courseSessionId);
+  recordActionService({ actorUserId: actorId, action: result.action === "RETIRED" ? AUDIT_ACTIONS.COURSE_SESSION_RETIRED : AUDIT_ACTIONS.COURSE_SESSION_DETACHED, entityType: ENTITY_TYPES.COURSE_SESSION, entityId: courseSessionId, description: `Course session ${result.action.toLowerCase()} from intake ${intakeId}.`, metadata: { intakeId } });
   return result;
 }
 
-export async function updateCourseSessionDeliveryService(courseId, courseSessionId, data, actorId) {
+export async function updateCourseSessionDeliveryService(intakeId, courseSessionId, data, actorId) {
   const input = parse(updateCourseSessionDeliverySchema, data);
-  const item = await repository.updateDelivery(courseId, courseSessionId, input);
-  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_SESSION_DELIVERY_UPDATED, entityType: ENTITY_TYPES.COURSE_SESSION, entityId: courseSessionId, description: `Course session delivery changed to ${item.deliveryStatus}.`, metadata: { courseId, availableAt: item.availableAt, sequenceRiskAcknowledged: input.acknowledgeSequenceRisk } });
+  const item = await repository.updateDelivery(intakeId, courseSessionId, input);
+  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_SESSION_DELIVERY_UPDATED, entityType: ENTITY_TYPES.COURSE_SESSION, entityId: courseSessionId, description: `Course session delivery changed to ${item.deliveryStatus}.`, metadata: { intakeId, availableAt: item.availableAt, sequenceRiskAcknowledged: input.acknowledgeSequenceRisk } });
   return response(item);
 }

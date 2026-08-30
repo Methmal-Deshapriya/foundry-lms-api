@@ -12,13 +12,22 @@ const enrollmentId = "a0000000-0000-4000-8000-000000000001";
 const userId = "a0000000-0000-4000-8000-000000000002";
 const courseId = "a0000000-0000-4000-8000-000000000003";
 const courseSessionId = "a0000000-0000-4000-8000-000000000004";
+const intakeId = "a0000000-0000-4000-8000-000000000005";
+
+function servicePolicy(free) {
+  return { status: "ACTIVE", accessType: free ? "FREE" : "PAID", courseMode: free ? "EVERGREEN" : "SEASONAL", enrollmentMode: free ? "SELF" : "ADMIN", paymentRequirement: free ? "NOT_REQUIRED" : "REQUIRED" };
+}
 
 function course(free = false, overrides = {}) {
-  return { id: courseId, title: "Course", slug: "course", intakeKey: free ? "EVERGREEN" : "2026-B1", code: free ? "COURSE-EVERGREEN" : "COURSE-2026-B1", status: "OPEN_ACTIVE", summary: "Summary", level: "BEGINNER", durationValue: 1, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", courseGroup: { certificateEnabled: false }, category: { service: { status: "ACTIVE", accessType: free ? "FREE" : "PAID", courseMode: free ? "EVERGREEN" : "SEASONAL", enrollmentMode: free ? "SELF" : "ADMIN", paymentRequirement: free ? "NOT_REQUIRED" : "REQUIRED" } }, ...overrides };
+  return { id: courseId, title: "Course", slug: "course", summary: "Summary", level: "BEGINNER", durationValue: 1, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, category: { service: servicePolicy(free) }, ...overrides };
+}
+
+function intake(free = false, overrides = {}) {
+  return { id: intakeId, intakeKey: free ? "EVERGREEN" : "2026-B1", code: free ? "COURSE-EVERGREEN" : "COURSE-2026-B1", status: "OPEN_ACTIVE", category: { service: servicePolicy(free) }, ...overrides };
 }
 
 function enrollment(overrides = {}) {
-  return { id: enrollmentId, userId, courseId, source: "ADMIN", status: "ACTIVE", paymentStatus: "COMPLETED", user: { id: userId, emailVerified: true }, course: course(), ...overrides };
+  return { id: enrollmentId, userId, courseId, intakeId, source: "ADMIN", status: "ACTIVE", paymentStatus: "COMPLETED", user: { id: userId, emailVerified: true }, course: course(), intake: intake(), ...overrides };
 }
 
 function curriculumSession(completed = false, overrides = {}) {
@@ -29,17 +38,24 @@ describe("course classroom service", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("serves released course curriculum to a free self-enrollment", async () => {
-    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ source: "SELF", paymentStatus: "NOT_REQUIRED", course: course(true) }));
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ source: "SELF", paymentStatus: "NOT_REQUIRED", course: course(true), intake: intake(true) }));
     classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession(true), curriculumSession(false, { id: "second" })]);
     const result = await getClassroomService(enrollmentId, { id: userId, role: "STUDENT" });
     expect(result.enrollment.deliveryMode).toBe("FREE");
     expect(result.progress).toMatchObject({ completedCount: 1, availableSessionCount: 2, progressPercent: 50 });
-    expect(classroomRepository.findVisibleSessions).toHaveBeenCalledWith(courseId, enrollmentId);
+    expect(classroomRepository.findVisibleSessions).toHaveBeenCalledWith(intakeId, enrollmentId);
   });
 
-  it("blocks paid classroom access until payment is complete", async () => {
+  it("grants full classroom access to a partially paid enrollment, same as a fully paid one", async () => {
     classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ paymentStatus: "PARTIAL" }));
-    await expect(getClassroomService(enrollmentId, { id: userId, role: "STUDENT" })).rejects.toThrow(/payment must be completed/i);
+    classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession(true), curriculumSession(false, { id: "second" })]);
+    const result = await getClassroomService(enrollmentId, { id: userId, role: "STUDENT" });
+    expect(result.enrollment.deliveryMode).toBe("PAID");
+  });
+
+  it("blocks paid classroom access for an enrollment with no payment recorded at all (defense in depth — the DB's own check constraint should already prevent this state)", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ paymentStatus: "NOT_REQUIRED" }));
+    await expect(getClassroomService(enrollmentId, { id: userId, role: "STUDENT" })).rejects.toThrow(/payment must be recorded/i);
   });
 
   it("isolates one learner from another learner's enrollment", async () => {
@@ -53,12 +69,12 @@ describe("course classroom service", () => {
     await expect(getClassroomSessionService(enrollmentId, courseSessionId, { id: userId, role: "STUDENT" })).rejects.toThrow(/not available/i);
   });
 
-  it("creates completion idempotently in enrollment and course context", async () => {
+  it("creates completion idempotently in enrollment and intake context", async () => {
     classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment());
     classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession()]);
     classroomRepository.createCompletion.mockResolvedValue({ id: "completion", enrollmentId, courseSessionId });
     await expect(completeClassroomSessionService(enrollmentId, courseSessionId, { id: userId, role: "STUDENT" })).resolves.toMatchObject({ created: true });
-    expect(classroomRepository.createCompletion).toHaveBeenCalledWith(enrollmentId, courseSessionId, courseId);
+    expect(classroomRepository.createCompletion).toHaveBeenCalledWith(enrollmentId, courseSessionId, intakeId);
 
     classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession(true)]);
     await expect(completeClassroomSessionService(enrollmentId, courseSessionId, { id: userId, role: "STUDENT" })).resolves.toMatchObject({ created: false });
@@ -66,7 +82,7 @@ describe("course classroom service", () => {
   });
 
   it("keeps completed enrollment learning history readable", async () => {
-    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ status: "COMPLETED", course: course(false, { status: "COMPLETED" }) }));
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ status: "COMPLETED", intake: intake(false, { status: "COMPLETED" }) }));
     classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession(true)]);
     const result = await getClassroomService(enrollmentId, { id: userId, role: "STUDENT" });
     expect(result.enrollment.status).toBe("COMPLETED");

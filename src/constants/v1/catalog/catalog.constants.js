@@ -12,13 +12,18 @@ export const COURSE_LEVELS = Object.freeze([
   "ADVANCED",
 ]);
 
-export const COURSE_STATUSES = Object.freeze([
+export const INTAKE_STATUSES = Object.freeze([
   "DRAFT",
   "OPEN_ACTIVE",
   "CLOSED_ACTIVE",
   "COMPLETED",
   "CANCELLED",
   "ARCHIVED",
+]);
+export const COURSE_ENROLLMENT_STATUSES = Object.freeze([
+  "COMING_SOON",
+  "OPEN",
+  "REOPENING_SOON",
 ]);
 export const COURSE_SESSION_DELIVERY_STATUSES = Object.freeze([
   "UNRELEASED",

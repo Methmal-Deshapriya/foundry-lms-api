@@ -60,4 +60,15 @@ router.patch(
   enrollmentController.updateEnrollmentController
 );
 
+/**
+ * @route   POST /v1/enrollments/:id/complete-payment
+ * @desc    Record the remaining half-payment for a PARTIAL enrollment
+ * @access  Private (ADMIN, SUPER_ADMIN only)
+ */
+router.post(
+  "/:id/complete-payment",
+  requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE),
+  enrollmentController.completePaymentController
+);
+
 export default router;

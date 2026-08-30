@@ -1611,6 +1611,32 @@
           }
         },
         {
+          "name": "[ADMIN + SUPER ADMIN] Get enrollment, revenue, district, and engagement analytics for a course intake",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "analytics"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nPowers the course workspace's Overview tab and KPI row. Revenue and payment breakdowns read the payment ledger directly (SUM of actual Payment rows) — not an estimate. successRate.completedPct is null until at least one enrollment has completed or cancelled, since a course with only active enrollments hasn't produced an outcome yet.\n\nOperation ID: getCourseAnalytics"
+          }
+        },
+        {
           "name": "[ADMIN + SUPER ADMIN] Transition the course-intake lifecycle",
           "request": {
             "method": "PATCH",
@@ -1713,7 +1739,7 @@
                 }
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/session-library permission required. Supports lifecycle, search, pagination, and course-attachability filters. Every session is reusable across courses.\n\nOperation ID: listSessionLibrary"
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/session-library permission required. Supports lifecycle, search, pagination, and course-attachability filters. Every session is reusable across courses. The response includes a `summary` object ({ all, ready, draft, archive }) counting sessions by status under the current search/tag filters, independent of the status filter itself — used to drive status filter pills.\n\nOperation ID: listSessionLibrary"
           }
         },
         {
@@ -2405,7 +2431,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"ACTIVE\",\n  \"paymentStatus\": \"COMPLETED\",\n  \"externalPaymentReference\": \"PAY-2026-0001\"\n}",
+              "raw": "{\n  \"status\": \"ACTIVE\",\n  \"externalPaymentReference\": \"PAY-2026-0001\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2425,6 +2451,32 @@
               ]
             },
             "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/enrollment-management permission required. Active may move to Completed or Cancelled. Cancelled paid/admin enrollment may return to Active; cancelled self-enrollment is reactivated only by its student enrollment endpoint. Completed is terminal and cannot be reopened or cancelled through this operation. Status writes are serialized with student completion mutations.\n\nOperation ID: updateEnrollment"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Record the remaining half-payment for a partially paid enrollment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/complete-payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "complete-payment"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/enrollment-management permission required. Only a PARTIAL enrollment can be completed this way — records a TOP_UP payment ledger entry for the other half of the course price (never discounted, unlike a one-time full payment) and moves paymentStatus to COMPLETED.\n\nOperation ID: completeEnrollmentPayment"
           }
         },
         {
@@ -2777,6 +2829,12 @@
                   "disabled": true
                 },
                 {
+                  "key": "courseId",
+                  "value": "{{courseId}}",
+                  "description": "Scope the list to one course intake — used by the course workspace's Certificates and Projects tabs.",
+                  "disabled": true
+                },
+                {
                   "key": "limit",
                   "value": "50",
                   "description": "",
@@ -3103,6 +3161,18 @@
                 "all"
               ],
               "query": [
+                {
+                  "key": "courseId",
+                  "value": "{{courseId}}",
+                  "description": "Scope the list to one course intake — used by the course workspace's Certificates and Projects tabs.",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "",
+                  "disabled": true
+                },
                 {
                   "key": "limit",
                   "value": "50",

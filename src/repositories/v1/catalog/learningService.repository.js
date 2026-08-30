@@ -55,33 +55,37 @@ export async function findAdminSummaries(serviceIds) {
       GROUP BY category.service_id
     ),
     course_stats AS (
+      -- Lifecycle status lives on Intake, not the new Course/program table —
+      -- see the 2026-08-30 rename plan. Column names in this CTE stay
+      -- "course_*" since they're only ever consumed as the courseTotal/
+      -- courseDraft/etc. fields below, unchanged for existing consumers.
       SELECT
         category.service_id,
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE course.status = 'DRAFT')::int AS draft,
-        COUNT(*) FILTER (WHERE course.status = 'OPEN_ACTIVE')::int AS open_active,
-        COUNT(*) FILTER (WHERE course.status = 'CLOSED_ACTIVE')::int AS closed_active,
-        COUNT(*) FILTER (WHERE course.status = 'COMPLETED')::int AS completed,
-        COUNT(*) FILTER (WHERE course.status = 'ARCHIVED')::int AS archived,
+        COUNT(*) FILTER (WHERE intake.status = 'DRAFT')::int AS draft,
+        COUNT(*) FILTER (WHERE intake.status = 'OPEN_ACTIVE')::int AS open_active,
+        COUNT(*) FILTER (WHERE intake.status = 'CLOSED_ACTIVE')::int AS closed_active,
+        COUNT(*) FILTER (WHERE intake.status = 'COMPLETED')::int AS completed,
+        COUNT(*) FILTER (WHERE intake.status = 'ARCHIVED')::int AS archived,
         COUNT(*) FILTER (
-          WHERE course.status <> 'ARCHIVED'
+          WHERE intake.status <> 'ARCHIVED'
             AND NOT EXISTS (
               SELECT 1 FROM course_sessions course_session
-              WHERE course_session.course_id = course.id
+              WHERE course_session.intake_id = intake.id
                 AND course_session.retired_at IS NULL
             )
         )::int AS without_sessions
-      FROM courses course
-      JOIN categories category ON category.id = course.category_id
+      FROM intakes intake
+      JOIN categories category ON category.id = intake.category_id
       WHERE category.service_id = ANY(${serviceIds}::text[])
       GROUP BY category.service_id
     ),
     curriculum_stats AS (
       SELECT category.service_id,
         COUNT(course_session.id) FILTER (WHERE course_session.retired_at IS NULL)::int AS attachment_count
-      FROM courses course
-      JOIN categories category ON category.id = course.category_id
-      LEFT JOIN course_sessions course_session ON course_session.course_id = course.id
+      FROM intakes intake
+      JOIN categories category ON category.id = intake.category_id
+      LEFT JOIN course_sessions course_session ON course_session.intake_id = intake.id
       WHERE category.service_id = ANY(${serviceIds}::text[])
       GROUP BY category.service_id
     ),
@@ -90,13 +94,16 @@ export async function findAdminSummaries(serviceIds) {
         COUNT(DISTINCT enrollment.user_id) FILTER (WHERE enrollment.status = 'ACTIVE')::int AS active_unique,
         COUNT(DISTINCT enrollment.user_id)::int AS total_unique,
         COUNT(*) FILTER (WHERE enrollment.status = 'ACTIVE')::int AS active_enrollments,
+        -- PENDING no longer exists on PaymentStatus (removed by the payment
+        -- ledger migration) — PARTIAL is the only remaining "not yet fully
+        -- paid" state left to flag here.
         COUNT(*) FILTER (
           WHERE enrollment.status = 'ACTIVE'
-            AND enrollment.payment_status IN ('PENDING', 'PARTIAL')
+            AND enrollment.payment_status = 'PARTIAL'
         )::int AS payment_attention
       FROM enrollments enrollment
-      JOIN courses course ON course.id = enrollment.course_id
-      JOIN categories category ON category.id = course.category_id
+      JOIN intakes intake ON intake.id = enrollment.intake_id
+      JOIN categories category ON category.id = intake.category_id
       WHERE category.service_id = ANY(${serviceIds}::text[])
       GROUP BY category.service_id
     )
@@ -155,8 +162,8 @@ export async function transitionStatus(id, expectedStatus, status) {
       if (!current) throw new NotFoundError("Learning service not found.");
       if (current.status !== expectedStatus) throw new ConflictError("Learning service status changed. Refresh and try again.", "STALE_LEARNING_SERVICE_STATUS");
       if (status === "ARCHIVED") {
-        const activeCourses = await transaction.course.count({ where: { category: { serviceId: id }, status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] } } });
-        if (activeCourses > 0) throw new ConflictError("Complete or cancel every active course before archiving this learning service.", "LEARNING_SERVICE_ARCHIVE_BLOCKED");
+        const activeIntakes = await transaction.intake.count({ where: { category: { serviceId: id }, status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] } } });
+        if (activeIntakes > 0) throw new ConflictError("Complete or cancel every active intake before archiving this learning service.", "LEARNING_SERVICE_ARCHIVE_BLOCKED");
       }
       return transaction.learningService.update({ where: { id }, data: { status }, include });
     });
@@ -168,7 +175,7 @@ export async function findDeletionImpact(id) {
     where: { id },
     include: {
       _count: { select: { categories: true } },
-      categories: { select: { _count: { select: { courses: true, courseGroups: true } } } },
+      categories: { select: { _count: { select: { courses: true, intakes: true } } } },
     },
   });
   if (!service) return null;
@@ -178,7 +185,7 @@ export async function findDeletionImpact(id) {
     resourceStatus: service.status,
     categories: service._count.categories,
     courses: service.categories.reduce((sum, category) => sum + category._count.courses, 0),
-    courseGroups: service.categories.reduce((sum, category) => sum + category._count.courseGroups, 0),
+    intakes: service.categories.reduce((sum, category) => sum + category._count.intakes, 0),
     deletable: service.status === "ARCHIVED" && service._count.categories === 0,
   };
 }

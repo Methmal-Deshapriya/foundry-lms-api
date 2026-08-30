@@ -9,9 +9,10 @@ import {
   NotFoundError,
 } from "../../../utils/Errors.js";
 import { recordActionService } from "../audit/audit.service.js";
+import { hasLearningAccess, hasSufficientPayment } from "../../../utils/enrollmentAccessPolicy.js";
 
 const ACCESSIBLE_ENROLLMENT_STATUSES = ["ACTIVE", "COMPLETED"];
-const ACCESSIBLE_COURSE_STATUSES = [
+const ACCESSIBLE_INTAKE_STATUSES = [
   "OPEN_ACTIVE",
   "CLOSED_ACTIVE",
   "COMPLETED",
@@ -41,28 +42,24 @@ export async function requireEnrollmentAccessService(
   if (!ACCESSIBLE_ENROLLMENT_STATUSES.includes(enrollment.status)) {
     throw new ForbiddenError("This enrollment does not have classroom access.");
   }
-  if (!ACCESSIBLE_COURSE_STATUSES.includes(enrollment.course.status)) {
+  if (!ACCESSIBLE_INTAKE_STATUSES.includes(enrollment.intake.status)) {
     throw new ForbiddenError("This course is not currently accessible.");
   }
 
-  const policy = enrollment.course.category.service;
-  const isFree = policy.accessType === "FREE";
-  const accessIsValid = isFree
-    ? policy.enrollmentMode === "SELF" && policy.paymentRequirement === "NOT_REQUIRED" && enrollment.source === "SELF" && enrollment.paymentStatus === "NOT_REQUIRED"
-    : policy.enrollmentMode === "ADMIN" && policy.paymentRequirement === "REQUIRED" && enrollment.source === "ADMIN" && enrollment.paymentStatus === "COMPLETED";
-  if (!accessIsValid) {
-    if (!isFree && enrollment.paymentStatus !== "COMPLETED") {
-      throw new ForbiddenError("Payment must be completed before classroom access.");
+  const policy = enrollment.intake.category.service;
+  if (!hasLearningAccess(enrollment, policy)) {
+    if (policy.accessType !== "FREE" && !hasSufficientPayment(enrollment.paymentStatus)) {
+      throw new ForbiddenError("Payment must be recorded before classroom access.");
     }
     throw new ConflictError("Invalid enrollment access configuration.");
   }
 
-  return { enrollment, deliveryMode: isFree ? "FREE" : "PAID" };
+  return { enrollment, deliveryMode: policy.accessType === "FREE" ? "FREE" : "PAID" };
 }
 
 async function visibleSessions(context) {
   return classroomRepo.findVisibleSessions(
-    context.enrollment.courseId,
+    context.enrollment.intakeId,
     context.enrollment.id,
   );
 }
@@ -88,7 +85,7 @@ function toSessionResponse(courseSession) {
   };
 }
 
-function progressFromRows(enrollmentId, courseId, rows) {
+function progressFromRows(enrollmentId, courseId, intakeId, rows) {
   const completedCount = rows.filter(
     ({ completions }) => completions?.length > 0,
   ).length;
@@ -96,6 +93,7 @@ function progressFromRows(enrollmentId, courseId, rows) {
   return {
     enrollmentId,
     courseId,
+    intakeId,
     completedCount,
     availableSessionCount,
     progressPercent:
@@ -116,15 +114,16 @@ export async function getClassroomService(enrollmentId, requester) {
       deliveryMode: context.deliveryMode,
       course: {
         ...toPublicCourseCard(context.enrollment.course),
-        intakeKey: context.enrollment.course.intakeKey,
-        code: context.enrollment.course.code,
-        instanceKind: context.enrollment.course.category.service.courseMode,
+        intakeKey: context.enrollment.intake.intakeKey,
+        code: context.enrollment.intake.code,
+        instanceKind: context.enrollment.intake.category.service.courseMode,
       },
     },
     sessions: rows.map(toSessionResponse),
     progress: progressFromRows(
       context.enrollment.id,
       context.enrollment.courseId,
+      context.enrollment.intakeId,
       rows,
     ),
   };
@@ -173,7 +172,7 @@ export async function completeClassroomSessionService(enrollmentId, courseSessio
     completion = await classroomRepo.createCompletion(
       enrollmentId,
       courseSessionId,
-      context.enrollment.courseId,
+      context.enrollment.intakeId,
     );
   } catch (error) {
     if (!(error instanceof ConflictError)) throw error;
@@ -187,7 +186,7 @@ export async function completeClassroomSessionService(enrollmentId, courseSessio
     entityType: ENTITY_TYPES.COURSE_SESSION,
     entityId: courseSessionId,
     description: `Session completed for enrollment ${enrollmentId}.`,
-    metadata: { enrollmentId, courseId: context.enrollment.courseId },
+    metadata: { enrollmentId, intakeId: context.enrollment.intakeId },
   });
   return { ...completion, created: true };
 }
@@ -202,7 +201,7 @@ export async function uncompleteClassroomSessionService(enrollmentId, courseSess
   const result = await classroomRepo.removeCompletion(
     enrollmentId,
     courseSessionId,
-    context.enrollment.courseId,
+    context.enrollment.intakeId,
   );
   if (result.count > 0) {
     recordActionService({
@@ -211,7 +210,7 @@ export async function uncompleteClassroomSessionService(enrollmentId, courseSess
       entityType: ENTITY_TYPES.COURSE_SESSION,
       entityId: courseSessionId,
       description: `Session completion removed for enrollment ${enrollmentId}.`,
-      metadata: { enrollmentId, courseId: context.enrollment.courseId },
+      metadata: { enrollmentId, intakeId: context.enrollment.intakeId },
     });
   }
   return { success: true, removed: result.count > 0 };
@@ -220,5 +219,5 @@ export async function uncompleteClassroomSessionService(enrollmentId, courseSess
 export async function getProgressService(enrollmentId, requester) {
   const context = await requireEnrollmentAccessService(enrollmentId, requester);
   const rows = await visibleSessions(context);
-  return progressFromRows(context.enrollment.id, context.enrollment.courseId, rows);
+  return progressFromRows(context.enrollment.id, context.enrollment.courseId, context.enrollment.intakeId, rows);
 }

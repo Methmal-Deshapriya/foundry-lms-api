@@ -45,11 +45,11 @@ describe("project repository security boundaries", () => {
       id: true,
       title: true,
       user: { select: { firstName: true, lastName: true } },
-      course: { select: { title: true } },
+      intake: { select: { course: { select: { title: true } } } },
     });
     for (const privateField of [
       "userId",
-      "courseId",
+      "intakeId",
       "enrollmentId",
       "reviewedBy",
       "adminFeedback",
@@ -97,15 +97,15 @@ describe("project repository security boundaries", () => {
 
   it("locks and rechecks enrollment ownership before project submission", async () => {
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ courseId: "course-1", course: { category: { serviceId: "service-paid" } } })
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { category: { serviceId: "service-paid" } } })
       .mockResolvedValue({
         id: "enrollment-1",
         userId: "student-1",
-        courseId: "course-1",
+        intakeId: "intake-1",
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        course: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({
       id: "student-1",
@@ -118,7 +118,7 @@ describe("project repository security boundaries", () => {
       { id: "student-1", role: "STUDENT" },
       {
         enrollmentId: "enrollment-1",
-        courseId: "course-1",
+        intakeId: "intake-1",
         userId: "student-1",
         title: "Project",
       },
@@ -129,22 +129,54 @@ describe("project repository security boundaries", () => {
     );
     expect(lockKeys).toEqual([
       "learning-service:service-paid",
-      "course:course-1",
+      "intake:intake-1",
       "enrollment:enrollment-1",
     ]);
     expect(mocks.transaction.studentProject.create).toHaveBeenCalledTimes(1);
   });
 
+  it("allows project submission for a partially paid enrollment, same as a fully paid one", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { category: { serviceId: "service-paid" } } })
+      .mockResolvedValue({
+        id: "enrollment-1",
+        userId: "student-1",
+        intakeId: "intake-1",
+        source: "ADMIN",
+        status: "ACTIVE",
+        paymentStatus: "PARTIAL",
+        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+      });
+    mocks.transaction.user.findUnique.mockResolvedValue({
+      id: "student-1",
+      role: "STUDENT",
+      emailVerified: true,
+    });
+    mocks.transaction.studentProject.create.mockResolvedValue({ id: "project-1" });
+
+    await createForEnrollment(
+      { id: "student-1", role: "STUDENT" },
+      {
+        enrollmentId: "enrollment-1",
+        intakeId: "intake-1",
+        userId: "student-1",
+        title: "Project",
+      },
+    );
+
+    expect(mocks.transaction.studentProject.create).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects submission when cancellation won the enrollment lock", async () => {
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ courseId: "course-1", course: { category: { serviceId: "service-free" } } })
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { category: { serviceId: "service-free" } } })
       .mockResolvedValue({
         userId: "student-1",
-        courseId: "course-1",
+        intakeId: "intake-1",
         source: "SELF",
         status: "CANCELLED",
         paymentStatus: "NOT_REQUIRED",
-        course: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({
       id: "student-1",
@@ -157,7 +189,7 @@ describe("project repository security boundaries", () => {
         { id: "student-1", role: "STUDENT" },
         {
           enrollmentId: "enrollment-1",
-          courseId: "course-1",
+          intakeId: "intake-1",
           userId: "student-1",
           title: "Project",
         },

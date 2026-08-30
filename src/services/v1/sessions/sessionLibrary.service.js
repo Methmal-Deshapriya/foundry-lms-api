@@ -28,20 +28,21 @@ function parse(schema, data) {
 function toSessionLibraryResponse(session) {
   const courseUsages = session.courseSessions ?? [];
   const usage = {
-    courseCount: courseUsages.length,
-    activeCourseCount: courseUsages.filter(({ retiredAt }) => !retiredAt).length,
-    courseGroupCount: new Set(courseUsages.map(({ course }) => course?.courseGroupId)).size,
+    intakeCount: courseUsages.length,
+    activeIntakeCount: courseUsages.filter(({ retiredAt }) => !retiredAt).length,
+    courseCount: new Set(courseUsages.map(({ intake }) => intake?.courseId)).size,
+    // categoryId/serviceSlug are kept only to build the click-through link to
+    // the intake's workspace — the parent hierarchy names (course, category,
+    // service) aren't displayed anywhere, so they're deliberately not
+    // joined/selected here at all.
     courses: courseUsages.map((courseSession) => ({
       courseSessionId: courseSession.id,
-      courseId: courseSession.courseId,
-      courseTitle: courseSession.course?.title,
-      courseCode: courseSession.course?.code,
-      courseGroupId: courseSession.course?.courseGroupId,
-      courseGroupTitle: courseSession.course?.courseGroup?.title,
-      categoryId: courseSession.course?.categoryId,
-      categoryTitle: courseSession.course?.category?.title,
-      serviceSlug: courseSession.course?.category?.service?.slug,
-      serviceTitle: courseSession.course?.category?.service?.title,
+      intakeId: courseSession.intakeId,
+      courseId: courseSession.intake?.courseId,
+      courseTitle: courseSession.intake?.course?.title,
+      intakeCode: courseSession.intake?.code,
+      categoryId: courseSession.intake?.categoryId,
+      serviceSlug: courseSession.intake?.category?.service?.slug,
       orderIndex: courseSession.orderIndex,
       retiredAt: courseSession.retiredAt,
       deliveryStatus: courseSession.deliveryStatus,
@@ -55,12 +56,26 @@ function toSessionLibraryResponse(session) {
   };
 }
 
+function toStatusSummary(statusCounts) {
+  const counts = { DRAFT: 0, READY: 0, ARCHIVED: 0 };
+  for (const row of statusCounts) {
+    counts[row.status] = row._count;
+  }
+  return {
+    all: counts.DRAFT + counts.READY + counts.ARCHIVED,
+    ready: counts.READY,
+    draft: counts.DRAFT,
+    archive: counts.ARCHIVED,
+  };
+}
+
 export async function listSessionLibraryService(query) {
   const filters = parse(sessionLibraryFiltersSchema, query);
   const { limit, offset, ...where } = filters;
   const result = await sessionRepo.findAdmin(where, limit, offset);
   return {
     sessions: result.sessions.map(toSessionLibraryResponse),
+    summary: toStatusSummary(result.statusCounts),
     pagination: {
       total: result.total,
       limit,
@@ -103,8 +118,8 @@ export async function updateSessionLibraryItemService(id, data, actorId) {
     description: `Session "${current.title}" updated in the library.`,
     metadata: {
       changedFields,
-      affectedCourses: current.courseSessions.length,
-      affectedCourseGroups: new Set(current.courseSessions.map(({ course }) => course?.courseGroupId)).size,
+      affectedIntakes: current.courseSessions.length,
+      affectedCourses: new Set(current.courseSessions.map(({ intake }) => intake?.courseId)).size,
     },
   });
   return toSessionLibraryResponse(updated);
@@ -121,8 +136,8 @@ export async function archiveSessionLibraryItemService(id, actorId) {
     entityId: id,
     description: `Session "${current.title}" archived. Existing delivery access is preserved.`,
     metadata: {
-      affectedCourses: current.courseSessions.length,
-      affectedCourseGroups: new Set(current.courseSessions.map(({ course }) => course?.courseGroupId)).size,
+      affectedIntakes: current.courseSessions.length,
+      affectedCourses: new Set(current.courseSessions.map(({ intake }) => intake?.courseId)).size,
     },
   });
   return toSessionLibraryResponse(session);

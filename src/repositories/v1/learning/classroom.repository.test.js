@@ -23,20 +23,20 @@ vi.mock("../../../utils/prisma.js", () => ({
 import { createCompletion, removeCompletion } from "./classroom.repository.js";
 
 const enrollmentId = "a0000000-0000-4000-8000-000000000001";
-const courseId = "a0000000-0000-4000-8000-000000000002";
+const intakeId = "a0000000-0000-4000-8000-000000000002";
 const courseSessionId = "a0000000-0000-4000-8000-000000000003";
 
 describe("classroom completion repository", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
       .mockResolvedValue({
-        courseId,
+        intakeId,
         source: "SELF",
         status: "ACTIVE",
         paymentStatus: "NOT_REQUIRED",
-        course: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE" } } },
+        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
       });
     mocks.transaction.courseSession.findFirst.mockResolvedValue({ id: courseSessionId });
   });
@@ -48,7 +48,7 @@ describe("classroom completion repository", () => {
     const result = await createCompletion(
       enrollmentId,
       courseSessionId,
-      courseId,
+      intakeId,
     );
 
     expect(mocks.transaction.$queryRawUnsafe).toHaveBeenCalledWith(
@@ -56,9 +56,30 @@ describe("classroom completion repository", () => {
       `enrollment:${enrollmentId}`,
     );
     expect(mocks.transaction.sessionCompletion.create).toHaveBeenCalledWith({
-      data: { enrollmentId, courseSessionId, courseId },
+      data: { enrollmentId, courseSessionId, intakeId },
     });
     expect(result).toBe(completion);
+  });
+
+  it("allows marking completion for a partially paid enrollment, same as a fully paid one", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
+      .mockResolvedValue({
+        intakeId,
+        source: "ADMIN",
+        status: "ACTIVE",
+        paymentStatus: "PARTIAL",
+        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+      });
+    mocks.transaction.courseSession.findFirst.mockResolvedValue({ id: courseSessionId });
+    mocks.transaction.sessionCompletion.create.mockResolvedValue({ id: "completion-id" });
+
+    await createCompletion(enrollmentId, courseSessionId, intakeId);
+
+    expect(mocks.transaction.sessionCompletion.create).toHaveBeenCalledWith({
+      data: { enrollmentId, courseSessionId, intakeId },
+    });
   });
 
   it.each([createCompletion, removeCompletion])(
@@ -66,17 +87,17 @@ describe("classroom completion repository", () => {
     async (mutate) => {
       mocks.transaction.enrollment.findUnique
         .mockReset()
-        .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
+        .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
         .mockResolvedValue({
-          courseId,
+          intakeId,
           source: "SELF",
           status: "COMPLETED",
           paymentStatus: "NOT_REQUIRED",
-          course: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE" } } },
+          intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
         });
 
       await expect(
-        mutate(enrollmentId, courseSessionId, courseId),
+        mutate(enrollmentId, courseSessionId, intakeId),
       ).rejects.toMatchObject({
         statusCode: 409,
         code: "ENROLLMENT_COMPLETED",
@@ -92,7 +113,7 @@ describe("classroom completion repository", () => {
     const result = await removeCompletion(
       enrollmentId,
       courseSessionId,
-      courseId,
+      intakeId,
     );
 
     expect(mocks.transaction.sessionCompletion.deleteMany).toHaveBeenCalledWith({
@@ -101,21 +122,21 @@ describe("classroom completion repository", () => {
     expect(result).toEqual({ count: 1 });
   });
 
-  it("rejects completion after the locked course delivery has been withdrawn", async () => {
+  it("rejects completion after the locked intake delivery has been withdrawn", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
       .mockResolvedValue({
-        courseId,
+        intakeId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        course: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID" } } },
+        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
       });
     mocks.transaction.courseSession.findFirst.mockResolvedValue(null);
 
     await expect(
-      createCompletion(enrollmentId, courseSessionId, courseId),
+      createCompletion(enrollmentId, courseSessionId, intakeId),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
 
     expect(mocks.transaction.sessionCompletion.create).not.toHaveBeenCalled();
@@ -124,18 +145,18 @@ describe("classroom completion repository", () => {
   it("keeps archived history readable but rejects progress changes", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ courseId, course: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
       .mockResolvedValue({
-        courseId,
+        intakeId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        course: { status: "ARCHIVED", category: { service: { accessType: "PAID" } } },
+        intake: { status: "ARCHIVED", category: { service: { accessType: "PAID" } } },
       });
 
     await expect(
-      createCompletion(enrollmentId, courseSessionId, courseId),
-    ).rejects.toThrow(/while the course is active/i);
+      createCompletion(enrollmentId, courseSessionId, intakeId),
+    ).rejects.toThrow(/while the intake is active/i);
     expect(mocks.transaction.sessionCompletion.create).not.toHaveBeenCalled();
   });
 });

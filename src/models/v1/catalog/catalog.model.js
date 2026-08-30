@@ -42,7 +42,7 @@ export function toPublicCategory(category) {
 }
 
 export function toPublicCourseCard(course) {
-  const service = course.category?.service ?? course.courseGroup?.category?.service;
+  const service = course.category?.service;
   return {
     id: course.id,
     slug: course.slug,
@@ -57,11 +57,13 @@ export function toPublicCourseCard(course) {
     instanceKind: service?.courseMode,
     price: Number(course.price),
     currency: course.currency,
-    certificateEnabled: course.courseGroup?.certificateEnabled,
+    certificateEnabled: course.certificateEnabled,
+    enrollmentStatus: course.enrollmentStatus,
   };
 }
 
 export function toPublicCourseDetail(course) {
+  const openIntake = course.intakes?.[0];
   return {
     ...toPublicCourseCard(course),
     description: course.description,
@@ -70,6 +72,14 @@ export function toPublicCourseDetail(course) {
     prerequisites: course.prerequisites,
     thumbnailUrl: course.thumbnailUrl,
     category: toPublicCategory(course.category),
+    openIntake: openIntake
+      ? {
+          id: openIntake.id,
+          startDate: openIntake.startDate,
+          expectedEndDate: openIntake.expectedEndDate,
+          capacity: openIntake.capacity,
+        }
+      : null,
   };
 }
 
@@ -77,33 +87,38 @@ export function toAdminCategory(category) {
   return {
     ...category,
     courseCount: category._count?.courses ?? 0,
+    intakeCount: category._count?.intakes ?? 0,
     courses: undefined,
     _count: undefined,
   };
 }
 
-export function toAdminCourse(course) {
-  const service = course.category?.service ?? course.courseGroup?.category?.service;
+export function toAdminIntake(intake) {
+  const service = intake.category?.service;
   return {
-    ...course,
+    ...intake,
     accessType: service?.accessType,
     instanceKind: service?.courseMode,
-    price: Number(course.price),
-    certificateEnabled: course.courseGroup?.certificateEnabled,
-    sessionCount: course._count?.courseSessions ?? 0,
-    enrollmentCount: course._count?.enrollments ?? 0,
-    projectCount: course._count?.studentProjects ?? 0,
+    certificateEnabled: intake.course?.certificateEnabled,
+    course: intake.course
+      ? { ...intake.course, discountAmount: Number(intake.course.discountAmount), price: Number(intake.course.price) }
+      : intake.course,
+    sessionCount: intake._count?.courseSessions ?? 0,
+    enrollmentCount: intake._count?.enrollments ?? 0,
+    projectCount: intake._count?.studentProjects ?? 0,
     _count: undefined,
   };
 }
 
-export function toAdminCourseGroup(group) {
+export function toAdminCourse(course) {
   return {
-    ...group,
-    courses: Array.isArray(group.courses)
-      ? group.courses.map(toAdminCourse)
+    ...course,
+    price: Number(course.price),
+    discountAmount: Number(course.discountAmount),
+    intakes: Array.isArray(course.intakes)
+      ? course.intakes.map(toAdminIntake)
       : [],
-    courseCount: group._count?.courses ?? group.courses?.length ?? 0,
+    intakeCount: course._count?.intakes ?? course.intakes?.length ?? 0,
     _count: undefined,
   };
 }

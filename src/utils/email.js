@@ -101,6 +101,24 @@ export const sendLoginChallengeEmail = async (to, code) => {
   });
 };
 
+/**
+ * Notify an admin/super-admin that a visitor requested to enroll in a PAID
+ * course, linking straight to that request in the intake workspace. See the
+ * 2026-08-30 rename plan §8a.
+ */
+export const sendEnrollmentRequestNotificationEmail = async (to, { courseTitle, intakeCode, studentName, requestUrl }) => {
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  await getTransporter().sendMail({
+    from,
+    to,
+    subject: `New enrollment request: ${courseTitle}`,
+    html: `
+      <p>${studentName} requested to enroll in <strong>${courseTitle}</strong> (intake ${intakeCode}).</p>
+      <p><a href="${requestUrl}">Open the request</a> to contact the student and record payment once they've paid.</p>
+    `,
+  });
+};
+
 export const sendPasswordChangedEmail = async (to) => {
   const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
   await getTransporter().sendMail({

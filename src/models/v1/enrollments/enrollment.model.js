@@ -17,6 +17,7 @@ function commonFields(enrollment) {
     id: enrollment.id,
     userId: enrollment.userId,
     courseId: enrollment.courseId,
+    intakeId: enrollment.intakeId,
     source: enrollment.source,
     status: enrollment.status,
     paymentStatus: enrollment.paymentStatus,
@@ -29,23 +30,30 @@ function commonFields(enrollment) {
   };
 }
 
+// The program (title, summary, price, ...) comes from Course; the specific
+// run's own facts (code, dates, timezone, lifecycle status) come from
+// Intake. See the 2026-08-30 rename plan §6 — Enrollment carries both.
+function toEnrollmentCourseSummary(enrollment) {
+  if (!enrollment.course) return null;
+  const publicCourse = toPublicCourseCard(enrollment.course);
+  const intake = enrollment.intake;
+  return {
+    ...publicCourse,
+    intakeId: enrollment.intakeId,
+    intakeKey: intake?.intakeKey,
+    code: intake?.code,
+    startDate: intake?.startDate,
+    expectedEndDate: intake?.expectedEndDate,
+    timezone: intake?.timezone,
+    intakeStatus: intake?.status,
+  };
+}
+
 export function toMyEnrollmentResponse(enrollment) {
   if (!enrollment) return null;
-  const publicCourse = enrollment.course ? toPublicCourseCard(enrollment.course) : null;
   return {
     ...commonFields(enrollment),
-    course: publicCourse
-      ? {
-          ...publicCourse,
-          intakeKey: enrollment.course.intakeKey,
-          code: enrollment.course.code,
-          instanceKind: publicCourse.instanceKind,
-          startDate: enrollment.course.startDate,
-          expectedEndDate: enrollment.course.expectedEndDate,
-          timezone: enrollment.course.timezone,
-          courseStatus: enrollment.course.status,
-        }
-      : null,
+    course: toEnrollmentCourseSummary(enrollment),
   };
 }
 
@@ -60,18 +68,7 @@ export function toAdminEnrollmentResponse(enrollment) {
     enrolledBy: enrollment.enrolledBy
       ? toAdminUserResponse(enrollment.enrolledBy)
       : null,
-    course: enrollment.course
-      ? {
-          ...toPublicCourseCard(enrollment.course),
-          intakeKey: enrollment.course.intakeKey,
-          code: enrollment.course.code,
-          instanceKind: enrollment.course.category?.service?.courseMode,
-          startDate: enrollment.course.startDate,
-          expectedEndDate: enrollment.course.expectedEndDate,
-          timezone: enrollment.course.timezone,
-          courseStatus: enrollment.course.status,
-        }
-      : null,
+    course: toEnrollmentCourseSummary(enrollment),
   };
 }
 
@@ -81,5 +78,5 @@ export const toMyEnrollmentListResponse = (enrollments) =>
 export const toAdminEnrollmentListResponse = (enrollments) =>
   Array.isArray(enrollments) ? enrollments.map(toAdminEnrollmentResponse) : [];
 
-// Compatibility alias for course-wide admin roster consumers.
+// Compatibility alias for intake-wide admin roster consumers.
 export const toCourseStudentListResponse = toAdminEnrollmentListResponse;

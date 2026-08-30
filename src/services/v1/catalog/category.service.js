@@ -124,14 +124,14 @@ export async function archiveCategoryService(id, actorId) {
   if (current.status === CATALOG_STATUSES.ARCHIVED) return toAdminCategory(current);
   const result = await categoryRepo.archiveSafely(id);
   if (!result) throw new NotFoundError("Category not found.");
-  const { category, archivedCourseGroupCount } = result;
+  const { category, archivedCourseCount } = result;
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.CATEGORY_ARCHIVED,
     entityType: ENTITY_TYPES.CATEGORY,
     entityId: id,
-    description: `Category "${category.title}" and its course groups archived.`,
-    metadata: { archivedCourseGroupCount },
+    description: `Category "${category.title}" and its courses archived.`,
+    metadata: { archivedCourseCount },
   });
   if (current.status === CATALOG_STATUSES.PUBLISHED) {
     await revalidatePublicCatalogCache();

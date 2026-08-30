@@ -20,14 +20,14 @@ function cookieFor(role) {
 describe("Enrollment route access", () => {
   it("requires authentication for a course roster", async () => {
     const response = await request(app).get(
-      "/api/v1/courses/90000000-0000-4000-8000-000000000005/enrollments",
+      "/api/v1/intakes/90000000-0000-4000-8000-000000000005/enrollments",
     );
     expect(response.status).toBe(401);
   });
 
   it("does not allow students to manually enroll another student", async () => {
     const response = await request(app)
-      .post("/api/v1/courses/90000000-0000-4000-8000-000000000005/enrollments")
+      .post("/api/v1/intakes/90000000-0000-4000-8000-000000000005/enrollments")
       .set("Cookie", cookieFor("STUDENT"))
       .send({ userId: "invalid" });
     expect(response.status).toBe(403);
@@ -35,7 +35,7 @@ describe("Enrollment route access", () => {
 
   it("allows admins through authorization before request validation", async () => {
     const response = await request(app)
-      .post("/api/v1/courses/90000000-0000-4000-8000-000000000005/enrollments")
+      .post("/api/v1/intakes/90000000-0000-4000-8000-000000000005/enrollments")
       .set("Cookie", cookieFor("ADMIN"))
       .send({ userId: "invalid" });
     expect(response.status).toBe(400);

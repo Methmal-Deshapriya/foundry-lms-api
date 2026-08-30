@@ -47,7 +47,7 @@ function enrollmentFixture() {
       title: "Machine Learning",
       slug: "machine-learning",
       skills: ["Python"],
-      courseGroup: { certificateEnabled: true },
+      certificateEnabled: true,
     },
   };
 }

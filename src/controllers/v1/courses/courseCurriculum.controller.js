@@ -5,7 +5,7 @@ export async function getCurriculum(req, res, next) {
   try {
     return ApiResponse.send(
       res,
-      await curriculumService.getCourseCurriculumService(req.params.courseId, req.query),
+      await curriculumService.getCourseCurriculumService(req.params.intakeId, req.query),
       "Course curriculum fetched successfully",
     );
   } catch (error) {
@@ -18,7 +18,7 @@ export async function attachSession(req, res, next) {
     return ApiResponse.send(
       res,
       await curriculumService.attachCourseSessionService(
-        req.params.courseId,
+        req.params.intakeId,
         req.body,
         req.user.id,
       ),
@@ -35,7 +35,7 @@ export async function reorderCurriculum(req, res, next) {
     return ApiResponse.send(
       res,
       await curriculumService.reorderCourseCurriculumService(
-        req.params.courseId,
+        req.params.intakeId,
         req.body,
         req.user.id,
       ),
@@ -51,7 +51,7 @@ export async function removeSession(req, res, next) {
     return ApiResponse.send(
       res,
       await curriculumService.removeCourseSessionService(
-        req.params.courseId,
+        req.params.intakeId,
         req.params.courseSessionId,
         req.user.id,
       ),
@@ -67,7 +67,7 @@ export async function updateDelivery(req, res, next) {
     return ApiResponse.send(
       res,
       await curriculumService.updateCourseSessionDeliveryService(
-        req.params.courseId,
+        req.params.intakeId,
         req.params.courseSessionId,
         req.body,
         req.user.id,

@@ -10,7 +10,7 @@ import {
  */
 
 export const createProjectSchema = z.object({
-  courseId: z.string().uuid("Invalid Course ID format"),
+  intakeId: z.string().uuid("Invalid Intake ID format"),
   enrollmentId: z.string().uuid("Invalid Enrollment ID format"),
   title: z.string().trim().min(3, "Title must be at least 3 characters long").max(180),
   description: z.string().trim().max(10000).optional().nullable(),

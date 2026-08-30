@@ -49,7 +49,7 @@ function sessionFixture(overrides = {}) {
 describe("Session Library service", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns paginated sessions with course and group impact counts", async () => {
+  it("returns paginated sessions with intake and course impact counts", async () => {
     sessionRepo.findAdmin.mockResolvedValue({
       total: 1,
       sessions: [
@@ -57,23 +57,28 @@ describe("Session Library service", () => {
           courseSessions: [
             {
               id: "course-session-1",
-              courseId: "course-1",
+              intakeId: "intake-1",
               orderIndex: 0,
               retiredAt: null,
-              course: { title: "ML 1", courseGroupId: "group-1" },
+              intake: { code: "ML-2026-1", courseId: "group-1", course: { title: "ML 1" } },
             },
           ],
         }),
+      ],
+      statusCounts: [
+        { status: "READY", _count: 1 },
+        { status: "DRAFT", _count: 2 },
       ],
     });
 
     const result = await listSessionLibraryService({ limit: "20", offset: "0" });
 
     expect(result.sessions[0].usage).toMatchObject({
+      intakeCount: 1,
+      activeIntakeCount: 1,
       courseCount: 1,
-      activeCourseCount: 1,
-      courseGroupCount: 1,
     });
+    expect(result.summary).toEqual({ all: 3, ready: 1, draft: 2, archive: 0 });
     expect(result.pagination).toEqual({
       total: 1,
       limit: 20,
@@ -82,18 +87,18 @@ describe("Session Library service", () => {
     });
   });
 
-  it("passes the course attachability filter to the repository", async () => {
-    const attachableCourseId = "20000000-0000-4000-8000-000000000002";
-    sessionRepo.findAdmin.mockResolvedValue({ total: 0, sessions: [] });
+  it("passes the intake attachability filter to the repository", async () => {
+    const attachableIntakeId = "20000000-0000-4000-8000-000000000002";
+    sessionRepo.findAdmin.mockResolvedValue({ total: 0, sessions: [], statusCounts: [] });
 
     await listSessionLibraryService({
       status: "READY",
-      attachableCourseId,
+      attachableIntakeId,
       limit: "100",
     });
 
     expect(sessionRepo.findAdmin).toHaveBeenCalledWith(
-      { status: "READY", attachableCourseId },
+      { status: "READY", attachableIntakeId },
       100,
       0,
     );
@@ -147,7 +152,7 @@ describe("Session Library service", () => {
 
   it("archives without removing usage relationships", async () => {
     const current = sessionFixture({
-      courseSessions: [{ course: { courseGroupId: "group-1" } }],
+      courseSessions: [{ intake: { courseId: "group-1" } }],
     });
     sessionRepo.archiveSafely.mockResolvedValue({
       previous: current,
@@ -164,7 +169,7 @@ describe("Session Library service", () => {
     );
 
     expect(result.status).toBe("ARCHIVED");
-    expect(result.usage).toMatchObject({ courseCount: 1, courseGroupCount: 1 });
+    expect(result.usage).toMatchObject({ intakeCount: 1, courseCount: 1 });
     expect(sessionRepo.archiveSafely).toHaveBeenCalledWith(current.id);
   });
 
@@ -172,7 +177,7 @@ describe("Session Library service", () => {
     sessionRepo.findById.mockResolvedValue(
       sessionFixture({
         status: "ARCHIVED",
-        courseSessions: [{ course: { courseGroupId: "group-1" } }],
+        courseSessions: [{ intake: { courseId: "group-1" } }],
       }),
     );
 

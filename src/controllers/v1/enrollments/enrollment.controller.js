@@ -4,7 +4,7 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
 export async function enrollStudentInCourseController(req, res, next) {
   try {
     const enrollment = await enrollmentService.enrollStudentInCourseService(
-      req.params.courseId,
+      req.params.intakeId,
       req.body,
       req.user.id,
     );
@@ -17,7 +17,7 @@ export async function enrollStudentInCourseController(req, res, next) {
 export async function bulkEnrollStudentsInCourseController(req, res, next) {
   try {
     const result = await enrollmentService.bulkEnrollStudentsInCourseService(
-      req.params.courseId,
+      req.params.intakeId,
       req.body,
       req.user.id,
     );
@@ -30,7 +30,7 @@ export async function bulkEnrollStudentsInCourseController(req, res, next) {
 export async function selfEnrollFreeCourseController(req, res, next) {
   try {
     const result = await enrollmentService.selfEnrollFreeCourseService(
-      req.params.courseId,
+      req.params.intakeId,
       req.user,
     );
     return ApiResponse.send(
@@ -61,6 +61,18 @@ export async function updateEnrollmentController(req, res, next) {
   }
 }
 
+export async function completePaymentController(req, res, next) {
+  try {
+    const enrollment = await enrollmentService.completePaymentService(
+      req.params.id,
+      req.user.id,
+    );
+    return ApiResponse.send(res, enrollment, "Remaining payment recorded");
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getMyEnrollmentsController(req, res, next) {
   try {
     const enrollments = await enrollmentService.getMyEnrollmentsService(
@@ -76,7 +88,7 @@ export async function getMyEnrollmentsController(req, res, next) {
 export async function getCourseEnrollmentsController(req, res, next) {
   try {
     const enrollments = await enrollmentService.getCourseEnrollmentsService(
-      req.params.courseId,
+      req.params.intakeId,
       req.query,
     );
     return ApiResponse.send(res, enrollments, "Course roster fetched successfully");
@@ -88,7 +100,7 @@ export async function getCourseEnrollmentsController(req, res, next) {
 export async function getCourseStudentsController(req, res, next) {
   try {
     const students = await enrollmentService.getCourseStudentsService(
-      req.params.courseId,
+      req.params.intakeId,
       req.query,
     );
     return ApiResponse.send(res, students, "Course enrollment list fetched successfully");
@@ -100,7 +112,7 @@ export async function getCourseStudentsController(req, res, next) {
 export async function getEligibleStudentsForCourseController(req, res, next) {
   try {
     const students = await enrollmentService.getEligibleStudentsForCourseService(
-      req.params.courseId,
+      req.params.intakeId,
       req.query,
     );
     return ApiResponse.send(res, students, "Eligible students fetched successfully");

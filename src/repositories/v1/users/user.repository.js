@@ -35,6 +35,15 @@ export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
   return { total, users };
 }
 
+/** Every admin/super-admin email — used to notify staff of a new enrollment request. */
+export async function findAdminEmails() {
+  const admins = await prisma.user.findMany({
+    where: { role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+    select: { email: true },
+  });
+  return admins.map(({ email }) => email);
+}
+
 export async function findVerifiedStudentsByIds(ids) {
   if (!Array.isArray(ids) || ids.length === 0) return [];
   return prisma.user.findMany({

@@ -12,21 +12,19 @@ const usageInclude = {
     orderBy: [{ retiredAt: "asc" }, { createdAt: "asc" }],
     select: {
       id: true,
-      courseId: true,
+      intakeId: true,
       orderIndex: true,
       deliveryStatus: true,
       retiredAt: true,
-      course: {
+      intake: {
         select: {
-          title: true,
           code: true,
-          courseGroupId: true,
+          courseId: true,
           categoryId: true,
-          courseGroup: { select: { title: true } },
+          course: { select: { title: true } },
           category: {
             select: {
-              title: true,
-              service: { select: { slug: true, title: true } },
+              service: { select: { slug: true } },
             },
           },
         },
@@ -36,12 +34,12 @@ const usageInclude = {
 };
 
 export async function findAdmin(filters, limit, offset) {
-  const attachabilityConditions = filters.attachableCourseId
+  const attachabilityConditions = filters.attachableIntakeId
     ? [
         {
           courseSessions: {
             none: {
-              courseId: filters.attachableCourseId,
+              intakeId: filters.attachableIntakeId,
             },
           },
         },
@@ -61,12 +59,10 @@ export async function findAdmin(filters, limit, offset) {
       ).map((row) => row.id)
     : null;
 
-  const where = {
-    ...(filters.attachableCourseId
-      ? { status: "READY" }
-      : filters.status
-        ? { status: filters.status }
-        : {}),
+  // Shared with everything except the status pill itself, so the per-status
+  // counts below reflect the current search/tag/attachability filters while
+  // still counting every status (not just whichever one is selected).
+  const sharedConditions = {
     ...(filters.q
       ? {
           OR: [
@@ -81,7 +77,16 @@ export async function findAdmin(filters, limit, offset) {
       : {}),
   };
 
-  const [total, sessions] = await Promise.all([
+  const where = {
+    ...(filters.attachableIntakeId
+      ? { status: "READY" }
+      : filters.status
+        ? { status: filters.status }
+        : {}),
+    ...sharedConditions,
+  };
+
+  const [total, sessions, statusCounts] = await Promise.all([
     prisma.session.count({ where }),
     prisma.session.findMany({
       where,
@@ -90,9 +95,14 @@ export async function findAdmin(filters, limit, offset) {
       skip: offset,
       include: usageInclude,
     }),
+    prisma.session.groupBy({
+      by: ["status"],
+      where: sharedConditions,
+      _count: true,
+    }),
   ]);
 
-  return { total, sessions };
+  return { total, sessions, statusCounts };
 }
 
 export async function findById(id) {
@@ -114,16 +124,16 @@ async function lockSessionContext(transaction, id) {
   const initial = await transaction.session.findUnique({
     where: { id },
     select: {
-      courseSessions: { select: { courseId: true } },
+      courseSessions: { select: { intakeId: true } },
     },
   });
   if (!initial) throw new NotFoundError("Session not found.");
 
-  const courseIds = [
-    ...new Set(initial.courseSessions.map(({ courseId }) => courseId)),
+  const intakeIds = [
+    ...new Set(initial.courseSessions.map(({ intakeId }) => intakeId)),
   ].sort();
-  for (const courseId of courseIds) {
-    await acquireTransactionLock(transaction, `course:${courseId}`);
+  for (const intakeId of intakeIds) {
+    await acquireTransactionLock(transaction, `intake:${intakeId}`);
   }
   await acquireTransactionLock(transaction, `session:${id}`);
 
