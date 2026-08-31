@@ -10,6 +10,7 @@ import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { COURSE_CURRENCY } from "../../../constants/v1/catalog/catalog.constants.js";
 import { toAdminCourse } from "../../../models/v1/catalog/catalog.model.js";
+import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
 
 function parse(schema, value) {
   const result = schema.safeParse(value);
@@ -59,6 +60,9 @@ export async function createCourseService(data, actorId) {
     description: `Course "${course.title}" created.`,
     metadata: { categoryId: course.categoryId, intakeCodePrefix: course.intakeCodePrefix },
   });
+  // A Course is always publicly served once it exists (COMING_SOON at
+  // minimum) — see the 2026-08-30 system guide/audit, Finding B.
+  await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }
 
@@ -69,6 +73,7 @@ export async function updateCourseService(id, data, actorId) {
   if (input.price !== undefined) validatePricingPolicy(current.category, input.price);
   const course = await repository.update(id, input);
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_UPDATED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" updated.`, metadata: { changedFields: Object.keys(input) } });
+  await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }
 
@@ -76,6 +81,7 @@ export async function setCourseArchivedService(id, archived, actorId) {
   const course = await repository.setArchived(id, archived);
   if (!course) throw new NotFoundError("Course not found.");
   recordActionService({ actorUserId: actorId, action: archived ? AUDIT_ACTIONS.COURSE_ARCHIVED : AUDIT_ACTIONS.COURSE_UNARCHIVED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" ${archived ? "archived" : "restored"}.` });
+  await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }
 

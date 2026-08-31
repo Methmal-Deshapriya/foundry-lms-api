@@ -3,7 +3,10 @@ import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
 const include = {
-  course: true,
+  // category/service nested so the admin notification email can build a
+  // real deep link (needs the service slug) — see Finding A of the
+  // 2026-08-30 system guide/audit.
+  course: { include: { category: { include: { service: true } } } },
   intake: true,
   student: true,
   contactedBy: true,
@@ -60,6 +63,10 @@ export async function findForIntake(intakeId, filters) {
 export async function create(courseId, studentUserId, contactPhone) {
   try {
     return await prisma.$transaction(async (transaction) => {
+      // Serializes concurrent submissions from the same student for the same
+      // course so two near-simultaneous requests can't both pass the
+      // "no existing open request" check below before either commits.
+      await acquireTransactionLock(transaction, `enrollment-request:${courseId}:${studentUserId}`);
       const course = await transaction.course.findUnique({
         where: { id: courseId },
         include: { intakes: { where: { status: "OPEN_ACTIVE" }, take: 1 } },
@@ -111,4 +118,18 @@ export async function markEnrolled(transaction, id, enrollmentId) {
     data: { status: "ENROLLED", enrollmentId },
     include,
   });
+}
+
+/**
+ * Re-points a request at a different (currently open) intake of the same
+ * course, when the intake it was originally filed against has since closed
+ * — see Finding I of the 2026-08-30 system guide/audit. courseId is
+ * unchanged, so the compound (intakeId, courseId) FK still holds.
+ */
+export async function retarget(id, intakeId) {
+  try {
+    return await prisma.enrollmentRequest.update({ where: { id }, data: { intakeId }, include });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
 }

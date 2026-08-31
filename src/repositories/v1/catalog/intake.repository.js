@@ -11,6 +11,7 @@ export const intakeInclude = {
       courseSessions: { where: { retiredAt: null } },
       enrollments: true,
       studentProjects: true,
+      enrollmentRequests: true,
     },
   },
 };
@@ -307,12 +308,19 @@ export async function removePermanently(id) {
       await acquireTransactionLock(transaction, `intake:${id}`);
       const intake = await transaction.intake.findUnique({
         where: { id },
-        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true } } },
+        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true, enrollmentRequests: true } } },
       });
       if (!intake) return null;
       if (intake.status !== "ARCHIVED") throw new ConflictError("Archive the intake first.");
       if (intake._count.enrollments || intake._count.courseSessions || intake._count.studentProjects) {
         throw new ConflictError("An intake with curriculum or learner history cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
+      }
+      // EnrollmentRequest.intake is a Restrict FK — even a DECLINED/terminal
+      // request would otherwise fail the delete below with a raw, unfriendly
+      // constraint error instead of this clean one. See Finding C of the
+      // 2026-08-30 system guide/audit.
+      if (intake._count.enrollmentRequests) {
+        throw new ConflictError("An intake with enrollment request history cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
       }
       await transaction.intake.delete({ where: { id } });
       await recomputeCourseEnrollmentStatus(transaction, intake.courseId);

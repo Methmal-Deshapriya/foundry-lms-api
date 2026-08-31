@@ -1281,9 +1281,13 @@ paths:
     patch:
       tags: [10 Enrollment Requests]
       operationId: updateEnrollmentRequestStatus
-      summary: Mark an enrollment request Contacted or Declined
+      summary: Mark an enrollment request Contacted or Declined, or reopen a Declined one
       x-access: ADMIN
-      description: Only a Pending or Contacted request may transition. Enrolled is reached only through POST .../enroll, never through this endpoint.
+      description: >-
+        Allowed transitions: PENDING -> CONTACTED | DECLINED, CONTACTED ->
+        DECLINED, DECLINED -> PENDING (reopen, in place of forcing the
+        student to resubmit). Enrolled is reached only through POST
+        .../enroll, never through this endpoint.
       parameters:
         - $ref: "#/components/parameters/EnrollmentRequestId"
       requestBody:
@@ -2055,7 +2059,10 @@ components:
             type: object
             required: [status]
             properties:
-              status: { type: string, enum: [CONTACTED, DECLINED] }
+              status:
+                type: string
+                enum: [PENDING, CONTACTED, DECLINED]
+                description: PENDING is only valid as a target when the request is currently DECLINED — it reopens it rather than requiring a fresh resubmission.
           example:
             status: CONTACTED
     EnrollFromRequest:

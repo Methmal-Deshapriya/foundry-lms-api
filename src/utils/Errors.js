@@ -172,6 +172,19 @@ export function handlePrismaError(prismaError) {
   if (prismaError?.code === "P2025") {
     return new NotFoundError("Record not found");
   }
+  if (prismaError?.code === "P2003") {
+    // A Restrict/NoAction foreign key still has dependent rows. Every
+    // call site that can hit this deliberately checks for its own
+    // dependents first and throws a specific, friendly ConflictError before
+    // reaching Prisma — this is the fallback for any dependent relation an
+    // app-level check doesn't yet know to look for, so it degrades to a
+    // clean 409 instead of the generic 500 below. See Finding C of the
+    // 2026-08-30 system guide/audit.
+    return new ConflictError(
+      "This record still has other data depending on it and cannot be deleted.",
+      "CATALOG_DELETION_BLOCKED",
+    );
+  }
   // The raw Prisma message (query dumps, schema field names, internal
   // argument shape) must never reach the client. Keep it only on
   // `originalError` for server-side logging; the public message stays generic.

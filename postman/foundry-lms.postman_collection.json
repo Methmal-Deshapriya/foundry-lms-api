@@ -2907,7 +2907,7 @@
           }
         },
         {
-          "name": "[ADMIN + SUPER ADMIN] Mark an enrollment request Contacted or Declined",
+          "name": "[ADMIN + SUPER ADMIN] Mark an enrollment request Contacted or Declined, or reopen a Declined one",
           "request": {
             "method": "PATCH",
             "header": [
@@ -2942,7 +2942,7 @@
                 "status"
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nOnly a Pending or Contacted request may transition. Enrolled is reached only through POST .../enroll, never through this endpoint.\n\nOperation ID: updateEnrollmentRequestStatus"
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAllowed transitions: PENDING -> CONTACTED | DECLINED, CONTACTED -> DECLINED, DECLINED -> PENDING (reopen, in place of forcing the student to resubmit). Enrolled is reached only through POST .../enroll, never through this endpoint.\n\nOperation ID: updateEnrollmentRequestStatus"
           }
         },
         {

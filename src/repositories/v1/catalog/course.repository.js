@@ -34,7 +34,11 @@ export function findPublicDetail(serviceId, categorySlug, courseSlug) {
       category: { serviceId, slug: categorySlug, status: "PUBLISHED", service: { status: "ACTIVE" } },
     },
     include: {
-      intakes: { where: { status: "OPEN_ACTIVE" }, take: 1 },
+      intakes: {
+        where: { status: "OPEN_ACTIVE" },
+        take: 1,
+        include: { _count: { select: { enrollments: { where: { status: { not: "CANCELLED" } } } } } },
+      },
       category: {
         include: {
           service: true,
@@ -216,4 +220,15 @@ export async function recomputeCourseEnrollmentStatus(transaction, courseId) {
   const enrollmentStatus = openIntake ? "OPEN" : anyIntake ? "REOPENING_SOON" : "COMING_SOON";
   await transaction.course.update({ where: { id: courseId }, data: { enrollmentStatus } });
   return enrollmentStatus;
+}
+
+/**
+ * Resolves a course's currently OPEN_ACTIVE intake id, or null if none is
+ * open right now. Used both when a visitor files an enrollment request and
+ * when an admin later converts a stale one whose original intake has since
+ * closed — see Finding I of the 2026-08-30 system guide/audit.
+ */
+export async function findCurrentOpenIntakeId(courseId) {
+  const intake = await prisma.intake.findFirst({ where: { courseId, status: "OPEN_ACTIVE" }, select: { id: true } });
+  return intake?.id ?? null;
 }

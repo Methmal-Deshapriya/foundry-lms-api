@@ -78,6 +78,14 @@ export function toPublicCourseDetail(course) {
           startDate: openIntake.startDate,
           expectedEndDate: openIntake.expectedEndDate,
           capacity: openIntake.capacity,
+          // null capacity means unlimited — seatsRemaining stays null too so
+          // the public page can tell "unlimited" apart from "0 left" (Finding
+          // G of the 2026-08-30 system guide/audit). Never negative even if
+          // capacity was lowered below the current enrolled count.
+          seatsRemaining:
+            openIntake.capacity == null
+              ? null
+              : Math.max(openIntake.capacity - (openIntake._count?.enrollments ?? 0), 0),
         }
       : null,
   };

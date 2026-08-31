@@ -75,6 +75,10 @@ export async function createIntakeService(courseId, data, actorId) {
     description: `Intake "${intake.code}" created as Draft under course "${course.title}".`,
     metadata: { courseId, intakeKey: intake.intakeKey },
   });
+  // A course's first intake flips its public enrollmentStatus from
+  // COMING_SOON to REOPENING_SOON — see Finding B of the 2026-08-30 system
+  // guide/audit.
+  await revalidatePublicCatalogCache();
   return toAdminIntake(await intakeRepository.findById(intake.id));
 }
 
@@ -186,11 +190,16 @@ export async function getIntakeDeletionImpactService(id) {
     curriculumLinks: intake._count.courseSessions,
     enrollments: intake._count.enrollments,
     projects: intake._count.studentProjects,
+    // enrollmentRequests counted too — EnrollmentRequest.intake is a
+    // Restrict FK, so even a DECLINED/terminal request blocks the delete at
+    // the DB level. See Finding C of the 2026-08-30 system guide/audit.
+    enrollmentRequests: intake._count.enrollmentRequests,
     deletable:
       intake.status === "ARCHIVED" &&
       intake._count.courseSessions === 0 &&
       intake._count.enrollments === 0 &&
-      intake._count.studentProjects === 0,
+      intake._count.studentProjects === 0 &&
+      intake._count.enrollmentRequests === 0,
   };
 }
 
@@ -199,5 +208,8 @@ export async function deleteIntakePermanentlyService(id, actorId) {
   if (!current) throw new NotFoundError("Intake not found.");
   const result = await intakeRepository.removePermanently(id);
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.INTAKE_DELETED_PERMANENTLY, entityType: ENTITY_TYPES.INTAKE, entityId: id, description: `Unused intake ${current.code} permanently deleted.` });
+  // Deleting the course's only remaining intake can flip its public
+  // enrollmentStatus back to COMING_SOON — see Finding B.
+  await revalidatePublicCatalogCache();
   return result;
 }

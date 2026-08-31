@@ -5,9 +5,11 @@ vi.mock("../../../repositories/v1/catalog/course.repository.js", () => ({
   create: vi.fn(), findById: vi.fn(), update: vi.fn(), setArchived: vi.fn(), remove: vi.fn(), findDeletionImpact: vi.fn(),
 }));
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
+vi.mock("./publicCatalogCache.service.js", () => ({ revalidatePublicCatalogCache: vi.fn() }));
 
 import * as categoryRepository from "../../../repositories/v1/catalog/category.repository.js";
 import * as courseRepository from "../../../repositories/v1/catalog/course.repository.js";
+import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
 import { createCourseService, updateCourseService } from "./course.service.js";
 
 const actorId = "90000000-0000-4000-8000-000000000001";
@@ -52,6 +54,9 @@ describe("course service", () => {
     const result = await createCourseService(createInput, actorId);
     expect(courseRepository.create).toHaveBeenCalledWith(expect.objectContaining({ categoryId, title: "AI/ML Ignition Program", currency: "LKR" }));
     expect(result.title).toBe("AI/ML Ignition Program");
+    // A Course is always publicly served once it exists — see Finding B of
+    // the 2026-08-30 system guide/audit.
+    expect(revalidatePublicCatalogCache).toHaveBeenCalled();
   });
 
   it("rejects a paid course with a zero price", async () => {
