@@ -45,6 +45,52 @@ export async function getCourseDeletionImpactService(id) {
   return impact;
 }
 
+function countByKey(groups, key, value) {
+  return groups.find((row) => row[key] === value)?._count ?? 0;
+}
+
+function paymentTypeBreakdown(groups, type) {
+  const row = groups.find((entry) => entry.type === type);
+  return { count: row?._count ?? 0, amount: row ? Number(row._sum.amount ?? 0) : 0 };
+}
+
+/**
+ * Cross-intake rollup for the course detail page — total revenue,
+ * enrollment outcomes, and certificates across every intake this program
+ * has ever run. See the 2026-08-31 course detail page improvement plan §4.
+ */
+export async function getCourseAnalyticsService(courseId) {
+  const data = await repository.getAnalytics(courseId);
+  if (!data) throw new NotFoundError("Course not found.");
+  const { course, statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount } = data;
+
+  const active = countByKey(statusGroups, "status", "ACTIVE");
+  const completed = countByKey(statusGroups, "status", "COMPLETED");
+  const cancelled = countByKey(statusGroups, "status", "CANCELLED");
+  const successRateDenominator = active + completed + cancelled;
+  const hasSettledOutcome = completed + cancelled > 0;
+
+  return {
+    enrollments: { active, completed, cancelled },
+    payments: {
+      full: paymentTypeBreakdown(paymentTypeGroups, "FULL"),
+      partial: paymentTypeBreakdown(paymentTypeGroups, "PARTIAL"),
+      topUp: paymentTypeBreakdown(paymentTypeGroups, "TOP_UP"),
+    },
+    revenue: { total: Number(revenueAgg._sum.amount ?? 0), currency: course.currency },
+    successRate: {
+      completedPct: hasSettledOutcome ? Math.round((completed / successRateDenominator) * 1000) / 10 : null,
+      certificatesIssued: certificatesIssuedCount,
+      certificateEligible: course.certificateEnabled ? completed : 0,
+    },
+    projects: {
+      pending: countByKey(projectGroups, "status", "PENDING"),
+      approved: countByKey(projectGroups, "status", "APPROVED"),
+      rejected: countByKey(projectGroups, "status", "REJECTED"),
+    },
+  };
+}
+
 export async function createCourseService(data, actorId) {
   const input = parse(createCourseSchema, data);
   const category = await categoryRepository.findById(input.categoryId);

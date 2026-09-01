@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../repositories/v1/catalog/category.repository.js", () => ({ findById: vi.fn() }));
 vi.mock("../../../repositories/v1/catalog/course.repository.js", () => ({
-  create: vi.fn(), findById: vi.fn(), update: vi.fn(), setArchived: vi.fn(), remove: vi.fn(), findDeletionImpact: vi.fn(),
+  create: vi.fn(), findById: vi.fn(), update: vi.fn(), setArchived: vi.fn(), remove: vi.fn(), findDeletionImpact: vi.fn(), getAnalytics: vi.fn(),
 }));
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
 vi.mock("./publicCatalogCache.service.js", () => ({ revalidatePublicCatalogCache: vi.fn() }));
@@ -10,7 +10,7 @@ vi.mock("./publicCatalogCache.service.js", () => ({ revalidatePublicCatalogCache
 import * as categoryRepository from "../../../repositories/v1/catalog/category.repository.js";
 import * as courseRepository from "../../../repositories/v1/catalog/course.repository.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
-import { createCourseService, updateCourseService } from "./course.service.js";
+import { createCourseService, getCourseAnalyticsService, updateCourseService } from "./course.service.js";
 
 const actorId = "90000000-0000-4000-8000-000000000001";
 const categoryId = "90000000-0000-4000-8000-000000000003";
@@ -74,5 +74,74 @@ describe("course service", () => {
     courseRepository.findById.mockResolvedValue(courseFixture());
     await expect(updateCourseService(courseId, { certificateEnabled: false }, actorId)).rejects.toMatchObject({ statusCode: 400 });
     expect(courseRepository.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("course analytics service", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function analyticsFixture(overrides = {}) {
+    return {
+      course: { currency: "LKR", certificateEnabled: true },
+      statusGroups: [
+        { status: "ACTIVE", _count: 60 },
+        { status: "COMPLETED", _count: 30 },
+        { status: "CANCELLED", _count: 10 },
+      ],
+      revenueAgg: { _sum: { amount: 4500000 } },
+      paymentTypeGroups: [
+        { type: "FULL", _count: 80, _sum: { amount: 4000000 } },
+        { type: "PARTIAL", _count: 15, _sum: { amount: 400000 } },
+        { type: "TOP_UP", _count: 5, _sum: { amount: 100000 } },
+      ],
+      projectGroups: [
+        { status: "PENDING", _count: 4 },
+        { status: "APPROVED", _count: 20 },
+        { status: "REJECTED", _count: 2 },
+      ],
+      certificatesIssuedCount: 28,
+      ...overrides,
+    };
+  }
+
+  it("rolls up enrollments, revenue, and outcomes across every intake of the course", async () => {
+    courseRepository.getAnalytics.mockResolvedValue(analyticsFixture());
+    const result = await getCourseAnalyticsService(courseId);
+
+    expect(courseRepository.getAnalytics).toHaveBeenCalledWith(courseId);
+    expect(result.enrollments).toEqual({ active: 60, completed: 30, cancelled: 10 });
+    expect(result.payments).toEqual({
+      full: { count: 80, amount: 4000000 },
+      partial: { count: 15, amount: 400000 },
+      topUp: { count: 5, amount: 100000 },
+    });
+    expect(result.revenue).toEqual({ total: 4500000, currency: "LKR" });
+    expect(result.successRate).toEqual({ completedPct: 30, certificatesIssued: 28, certificateEligible: 30 });
+    expect(result.projects).toEqual({ pending: 4, approved: 20, rejected: 2 });
+    // Course-level rollup intentionally has no districts/sessionEngagement —
+    // curricula can differ between intakes. See §4 of the 2026-08-31 plan.
+    expect(result.districts).toBeUndefined();
+    expect(result.sessionEngagement).toBeUndefined();
+  });
+
+  it("reports certificateEligible as 0 when the course doesn't issue certificates", async () => {
+    courseRepository.getAnalytics.mockResolvedValue(
+      analyticsFixture({ course: { currency: "LKR", certificateEnabled: false } }),
+    );
+    const result = await getCourseAnalyticsService(courseId);
+    expect(result.successRate.certificateEligible).toBe(0);
+  });
+
+  it("reports a null success rate before any enrollment has settled", async () => {
+    courseRepository.getAnalytics.mockResolvedValue(
+      analyticsFixture({ statusGroups: [{ status: "ACTIVE", _count: 12 }] }),
+    );
+    const result = await getCourseAnalyticsService(courseId);
+    expect(result.successRate.completedPct).toBeNull();
+  });
+
+  it("throws NotFoundError for a course that doesn't exist", async () => {
+    courseRepository.getAnalytics.mockResolvedValue(null);
+    await expect(getCourseAnalyticsService(courseId)).rejects.toMatchObject({ statusCode: 404 });
   });
 });

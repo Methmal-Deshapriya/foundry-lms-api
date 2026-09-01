@@ -669,6 +669,24 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/courses/{courseId}/analytics:
+    get:
+      tags: [05 Courses]
+      operationId: getCourseAnalytics
+      summary: Get cross-intake enrollment, revenue, and outcome analytics for a course
+      x-access: ADMIN
+      description: >-
+        Powers the course detail page's KPI row — the same shape as
+        GET /intakes/{intakeId}/analytics but rolled up across every intake
+        this course has ever run (grouped by courseId instead of intakeId).
+        Districts and per-session engagement are intake-workspace-only and
+        are not included here, since curricula can differ between intakes.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
   /api/v1/courses/{courseId}/archive:
     patch:
       tags: [05 Courses]

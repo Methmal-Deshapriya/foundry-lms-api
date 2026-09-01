@@ -232,3 +232,31 @@ export async function findCurrentOpenIntakeId(courseId) {
   const intake = await prisma.intake.findFirst({ where: { courseId, status: "OPEN_ACTIVE" }, select: { id: true } });
   return intake?.id ?? null;
 }
+
+/**
+ * Course-level (cross-intake) rollup — total revenue, enrollment outcomes,
+ * and certificates for every intake this program has ever run. Mirrors
+ * intake.repository.js's getAnalytics() but filters on courseId instead of
+ * intakeId; the dual-key design on Enrollment/Payment (see the 2026-08-30
+ * system guide/audit §1.6) exists specifically so this needs no join.
+ * Districts and per-session engagement are intake-workspace-only — they
+ * don't aggregate meaningfully across intakes that may each run different
+ * curricula — see the 2026-08-31 course detail page improvement plan §4.
+ */
+export async function getAnalytics(courseId) {
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { currency: true, certificateEnabled: true },
+  });
+  if (!course) return null;
+
+  const [statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount] = await Promise.all([
+    prisma.enrollment.groupBy({ by: ["status"], where: { courseId }, _count: true }),
+    prisma.payment.aggregate({ where: { courseId }, _sum: { amount: true } }),
+    prisma.payment.groupBy({ by: ["type"], where: { courseId }, _sum: { amount: true }, _count: true }),
+    prisma.studentProject.groupBy({ by: ["status"], where: { intake: { courseId } }, _count: true }),
+    prisma.certificate.count({ where: { enrollment: { courseId }, status: "ISSUED" } }),
+  ]);
+
+  return { course, statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount };
+}

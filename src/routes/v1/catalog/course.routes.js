@@ -20,6 +20,7 @@ router.post("/:courseId/enrollment-requests", requirePermission(PERMISSIONS.COUR
 
 router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.list);
 router.get("/:id/deletion-impact", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.deletionImpact);
+router.get("/:id/analytics", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.analytics);
 router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.get);
 router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.create);
 router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.update);

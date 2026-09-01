@@ -1326,6 +1326,32 @@
           }
         },
         {
+          "name": "[ADMIN + SUPER ADMIN] Get cross-intake enrollment, revenue, and outcome analytics for a course",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "analytics"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nPowers the course detail page's KPI row — the same shape as GET /intakes/{intakeId}/analytics but rolled up across every intake this course has ever run (grouped by courseId instead of intakeId). Districts and per-session engagement are intake-workspace-only and are not included here, since curricula can differ between intakes.\n\nOperation ID: getCourseAnalytics"
+          }
+        },
+        {
           "name": "[SUPER ADMIN ONLY] Archive an inactive course",
           "request": {
             "method": "PATCH",
