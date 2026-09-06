@@ -34,6 +34,20 @@ export async function getAllUsersController(req, res, next) {
 }
 
 /**
+ * Controller: Get one user's full profile and activity summary.
+ * GET /v1/users/:id
+ */
+export async function getOneUserController(req, res, next) {
+  try {
+    const { id } = req.params;
+    const user = await userService.getUserDetailService(id);
+    return ApiResponse.send(res, user, "User detail fetched successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Controller: Promote a user to ADMIN.
  * PATCH /v1/users/:id/promote
  */

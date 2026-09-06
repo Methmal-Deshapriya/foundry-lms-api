@@ -35,6 +35,18 @@ router.get(
 );
 
 /**
+ * @route   GET /v1/users/:id
+ * @desc    Get one user's full profile and activity summary
+ * @access  Private (ADMIN or SUPER_ADMIN)
+ */
+router.get(
+  "/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.USERS_VIEW),
+  userController.getOneUserController,
+);
+
+/**
  * @route   PATCH /v1/users/:id/promote
  * @desc    Promote a user to ADMIN
  * @access  Private (SUPER_ADMIN only)

@@ -172,8 +172,35 @@ export async function findCourseEnrollments(intakeId, { q = "", status, limit = 
 }
 
 export function searchEligibleStudents(intakeId, q, limit, cursor) {
+  // The search and cursor conditions each need their own OR group. Spreading
+  // both into one object under the same "OR" key would let the second
+  // silently overwrite the first, dropping the search filter on any page
+  // past the first — so each becomes its own entry under AND instead.
+  const conditions = [];
+  if (q) {
+    conditions.push({
+      OR: [
+        { email: { contains: q, mode: "insensitive" } },
+        { firstName: { contains: q, mode: "insensitive" } },
+        { lastName: { contains: q, mode: "insensitive" } },
+      ],
+    });
+  }
+  if (cursor) {
+    conditions.push({
+      OR: [
+        { email: { gt: cursor.email } },
+        { email: cursor.email, id: { gt: cursor.id } },
+      ],
+    });
+  }
   return prisma.user.findMany({
-    where: { role: "STUDENT", emailVerified: true, enrollments: { none: { intakeId } }, ...(q ? { OR: [{ email: { contains: q, mode: "insensitive" } }, { firstName: { contains: q, mode: "insensitive" } }, { lastName: { contains: q, mode: "insensitive" } }] } : {}), ...(cursor ? { OR: [{ email: { gt: cursor.email } }, { email: cursor.email, id: { gt: cursor.id } }] } : {}) },
+    where: {
+      role: "STUDENT",
+      emailVerified: true,
+      enrollments: { none: { intakeId } },
+      ...(conditions.length ? { AND: conditions } : {}),
+    },
     orderBy: [{ email: "asc" }, { id: "asc" }],
     take: limit + 1,
     select: { id: true, firstName: true, lastName: true, email: true },

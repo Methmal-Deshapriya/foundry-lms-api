@@ -7,6 +7,15 @@ import {
 } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
+function valuesEqual(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const arrA = Array.isArray(a) ? a : [];
+    const arrB = Array.isArray(b) ? b : [];
+    return arrA.length === arrB.length && arrA.every((value, index) => value === arrB[index]);
+  }
+  return a === b;
+}
+
 const usageInclude = {
   courseSessions: {
     orderBy: [{ retiredAt: "asc" }, { createdAt: "asc" }],
@@ -179,7 +188,7 @@ export async function updateSafely(id, data) {
       }
 
       const changedFields = Object.keys(data).filter(
-        (field) => (current[field] ?? null) !== (data[field] ?? null),
+        (field) => !valuesEqual(current[field] ?? null, data[field] ?? null),
       );
       if (changedFields.length === 0) {
         return { previous: current, session: current, changedFields };

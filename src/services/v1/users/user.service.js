@@ -1,4 +1,5 @@
 import * as userRepo from "../../../repositories/v1/users/user.repository.js";
+import * as userActivityRepo from "../../../repositories/v1/users/userActivity.repository.js";
 import * as userModel from "../../../models/v1/users/user.model.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import {
@@ -75,6 +76,54 @@ export async function getAllUsersService(query = {}) {
       hasMore: Number(offset) + sanitizedUsers.length < total,
     },
   };
+}
+
+/**
+ * Service: Get one user's full profile plus a bounded, recent view of their
+ * activity across the system, for the admin user detail view.
+ * @param {string} id - The UUID of the user to fetch.
+ */
+export async function getUserDetailService(id) {
+  const parsedId = userIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    throw new ValidationError(parsedId.error.issues[0].message, "id");
+  }
+
+  const user = await userRepo.findUserById(id);
+  if (!user) {
+    throw new NotFoundError("User not found.");
+  }
+
+  const [
+    enrollments,
+    managedEnrollments,
+    paymentsRecorded,
+    paymentsMade,
+    certificates,
+    studentProjects,
+    enrollmentRequests,
+    auditActions,
+  ] = await Promise.all([
+    userActivityRepo.findEnrollmentsForUser(id),
+    userActivityRepo.findManagedEnrollmentsForUser(id),
+    userActivityRepo.findPaymentsRecordedByUser(id),
+    userActivityRepo.findPaymentsForUser(id),
+    userActivityRepo.findCertificatesForUser(id),
+    userActivityRepo.findStudentProjectsForUser(id),
+    userActivityRepo.findEnrollmentRequestsForUser(id),
+    userActivityRepo.findAuditLogsForActor(id),
+  ]);
+
+  return userModel.toAdminUserDetailResponse(user, {
+    enrollments,
+    managedEnrollments,
+    paymentsRecorded,
+    paymentsMade,
+    certificates,
+    studentProjects,
+    enrollmentRequests,
+    auditActions,
+  });
 }
 
 /**
