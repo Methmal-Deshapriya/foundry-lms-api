@@ -25,6 +25,7 @@ import enrollmentRoutes from "./routes/v1/enrollments/enrollment.routes.js";
 import enrollmentRequestRoutes from "./routes/v1/enrollments/enrollmentRequest.routes.js";
 import projectRoutes from "./routes/v1/projects/project.routes.js";
 import auditRoutes from "./routes/v1/audit/audit.routes.js";
+import dashboardRoutes from "./routes/v1/dashboard/dashboard.routes.js";
 import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
 import { requestContext } from "./middlewares/requestContext.js";
 
@@ -74,6 +75,7 @@ app.use("/api/v1/enrollments", enrollmentRoutes);
 app.use("/api/v1/enrollment-requests", enrollmentRequestRoutes);
 app.use("/api/v1/projects", projectRoutes);
 app.use("/api/v1/audit", auditRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/postman", apiArtifactRoutes);
 
 // 5. Health Check

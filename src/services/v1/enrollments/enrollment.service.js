@@ -92,7 +92,8 @@ export async function completePaymentService(id, actorId) {
 
 export async function getMyEnrollmentsService(userId, query = {}) {
   const filters = parse(selfHistoryPageSchema, query); const rows = await repository.findUserEnrollments(userId, filters); const hasMore = rows.length > filters.limit; const page = rows.slice(0, filters.limit);
-  return { enrollments: model.toMyEnrollmentListResponse(page), pagination: { limit: filters.limit, hasMore, nextCursor: hasMore ? page.at(-1)?.id ?? null : null } };
+  const progressByEnrollment = await repository.findProgressForEnrollments(page);
+  return { enrollments: model.toMyEnrollmentListResponse(page, progressByEnrollment), pagination: { limit: filters.limit, hasMore, nextCursor: hasMore ? page.at(-1)?.id ?? null : null } };
 }
 
 function toEnrollmentStatusSummary(statusCounts) {

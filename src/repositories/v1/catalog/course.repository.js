@@ -50,6 +50,57 @@ export function findPublicDetail(serviceId, categorySlug, courseSlug) {
   });
 }
 
+/**
+ * Public "Explore" listing — every published course across every active
+ * service, flattened into one filterable/searchable list. Unlike the
+ * per-category browse path, callers only ever know slugs (never ids), so
+ * every filter here is slug-based.
+ */
+export async function findPublicExplore(filters, limit, offset) {
+  const where = {
+    archivedAt: null,
+    ...(filters.level ? { level: filters.level } : {}),
+    ...(filters.minPrice != null || filters.maxPrice != null
+      ? {
+          price: {
+            ...(filters.minPrice != null ? { gte: filters.minPrice } : {}),
+            ...(filters.maxPrice != null ? { lte: filters.maxPrice } : {}),
+          },
+        }
+      : {}),
+    ...(filters.q
+      ? {
+          OR: [
+            { title: { contains: filters.q, mode: "insensitive" } },
+            { summary: { contains: filters.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    category: {
+      status: "PUBLISHED",
+      ...(filters.category ? { slug: filters.category } : {}),
+      service: {
+        status: "ACTIVE",
+        ...(filters.service ? { slug: filters.service } : {}),
+        ...(filters.accessType ? { accessType: filters.accessType } : {}),
+      },
+    },
+  };
+
+  const [total, courses] = await Promise.all([
+    prisma.course.count({ where }),
+    prisma.course.findMany({
+      where,
+      include: { category: { include: { service: true } } },
+      orderBy: [{ category: { sortOrder: "asc" } }, { sortOrder: "asc" }, { title: "asc" }],
+      take: limit,
+      skip: offset,
+    }),
+  ]);
+
+  return { total, courses };
+}
+
 export async function findAdmin(filters, limit, offset) {
   const where = {
     ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),

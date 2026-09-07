@@ -12,6 +12,10 @@ const enrollmentInclude = {
   user: true,
   course: true,
   intake: { include: { category: { include: { service: true } } } },
+  // Not filtered to ISSUED: mirrors enrollment.repository.js's own
+  // enrollmentInclude so the classroom can tell "revoked" apart from "never
+  // issued" the same way the My Courses list already does.
+  certificates: { orderBy: { issuedDate: "desc" }, take: 1 },
 };
 
 const courseSessionInclude = (enrollmentId) => ({

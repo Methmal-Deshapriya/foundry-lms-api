@@ -1,5 +1,6 @@
 import * as classroomRepo from "../../../repositories/v1/learning/classroom.repository.js";
 import { toPublicCourseCard } from "../../../models/v1/catalog/catalog.model.js";
+import { toCertificateSummary } from "../../../models/v1/enrollments/enrollment.model.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
 import {
@@ -106,24 +107,41 @@ function progressFromRows(enrollmentId, courseId, intakeId, rows) {
 export async function getClassroomService(enrollmentId, requester) {
   const context = await requireEnrollmentAccessService(enrollmentId, requester);
   const rows = await visibleSessions(context);
+  const { enrollment } = context;
+  const { course, intake } = enrollment;
   return {
     enrollment: {
-      id: context.enrollment.id,
-      status: context.enrollment.status,
-      source: context.enrollment.source,
+      id: enrollment.id,
+      status: enrollment.status,
+      source: enrollment.source,
       deliveryMode: context.deliveryMode,
+      enrolledAt: enrollment.createdAt,
+      paymentStatus: enrollment.paymentStatus,
+      paymentCompletedAt: enrollment.paymentCompletedAt,
+      certificate: toCertificateSummary(enrollment.certificates?.[0] ?? null),
       course: {
-        ...toPublicCourseCard(context.enrollment.course),
-        intakeKey: context.enrollment.intake.intakeKey,
-        code: context.enrollment.intake.code,
-        instanceKind: context.enrollment.intake.category.service.courseMode,
+        ...toPublicCourseCard(course),
+        description: course.description,
+        highlights: course.highlights,
+        skills: course.skills,
+        prerequisites: course.prerequisites,
+        thumbnailUrl: course.thumbnailUrl,
+        categoryTitle: intake.category.title,
+        categoryVisualKey: intake.category.visualKey,
+        serviceTitle: intake.category.service.title,
+        intakeKey: intake.intakeKey,
+        code: intake.code,
+        instanceKind: intake.category.service.courseMode,
+        startDate: intake.startDate,
+        expectedEndDate: intake.expectedEndDate,
+        timezone: intake.timezone,
       },
     },
     sessions: rows.map(toSessionResponse),
     progress: progressFromRows(
-      context.enrollment.id,
-      context.enrollment.courseId,
-      context.enrollment.intakeId,
+      enrollment.id,
+      enrollment.courseId,
+      enrollment.intakeId,
       rows,
     ),
   };

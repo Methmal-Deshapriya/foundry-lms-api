@@ -5,6 +5,16 @@ const setPublicCache = (res) => {
   res.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
 };
 
+export async function getPublicExplore(req, res, next) {
+  try {
+    const data = await catalogService.getPublicExploreService(req.query);
+    setPublicCache(res);
+    return ApiResponse.send(res, data, "Courses fetched successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getPublicCategories(req, res, next) {
   try {
     const data = await catalogService.getPublicCategoriesService(req.params.serviceSlug);

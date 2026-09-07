@@ -62,6 +62,21 @@ export function toPublicCourseCard(course) {
   };
 }
 
+// The flat cross-service Explore listing needs to link/label each card on
+// its own, since (unlike the per-category browse path) the page doesn't
+// already know which service/category a given card belongs to.
+export function toPublicExploreCourseCard(course) {
+  return {
+    ...toPublicCourseCard(course),
+    thumbnailUrl: course.thumbnailUrl,
+    categorySlug: course.category?.slug,
+    categoryTitle: course.category?.title,
+    categoryVisualKey: course.category?.visualKey,
+    serviceSlug: course.category?.service?.slug,
+    serviceTitle: course.category?.service?.title,
+  };
+}
+
 export function toPublicCourseDetail(course) {
   const openIntake = course.intakes?.[0];
   return {

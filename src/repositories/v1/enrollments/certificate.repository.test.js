@@ -141,6 +141,25 @@ describe("certificate issuance transaction", () => {
     expect(mocks.transaction.certificate.create).not.toHaveBeenCalled();
   });
 
+  it("allows issuance for a free enrollment (payment NOT_REQUIRED, not COMPLETED)", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({ intakeId })
+      .mockResolvedValue({
+        status: "COMPLETED",
+        paymentStatus: "NOT_REQUIRED",
+        course: { certificateEnabled: true },
+      });
+
+    const result = await createIssued({
+      enrollmentId,
+      certificateCode: "FND-20260814-FREE",
+    });
+
+    expect(result.status).toBe("ISSUED");
+    expect(mocks.transaction.certificate.create).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects issuance for a partially paid enrollment, even once the intake itself is complete", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()

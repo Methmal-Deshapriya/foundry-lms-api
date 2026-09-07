@@ -153,7 +153,10 @@ export async function createIssued(data) {
           "CERTIFICATE_ISSUANCE_BLOCKED",
         );
       }
-      if (enrollment.paymentStatus !== "COMPLETED") {
+      // NOT_REQUIRED covers free enrollments, which never transition to
+      // COMPLETED since there's no payment to complete — without this they
+      // could never receive a certificate at all.
+      if (enrollment.paymentStatus !== "COMPLETED" && enrollment.paymentStatus !== "NOT_REQUIRED") {
         throw new ConflictError(
           "This student hasn't completed payment yet — record the remaining payment before issuing a certificate.",
           "CERTIFICATE_ISSUANCE_BLOCKED",

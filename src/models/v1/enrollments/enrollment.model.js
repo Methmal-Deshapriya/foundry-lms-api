@@ -1,7 +1,7 @@
 import { toPublicCourseCard } from "../catalog/catalog.model.js";
 import { toAdminUserResponse } from "../users/user.model.js";
 
-function toCertificateSummary(certificate) {
+export function toCertificateSummary(certificate) {
   if (!certificate) return null;
   return {
     id: certificate.id,
@@ -39,6 +39,8 @@ function toEnrollmentCourseSummary(enrollment) {
   const intake = enrollment.intake;
   return {
     ...publicCourse,
+    thumbnailUrl: enrollment.course.thumbnailUrl,
+    categoryVisualKey: enrollment.course.category?.visualKey,
     intakeId: enrollment.intakeId,
     intakeKey: intake?.intakeKey,
     code: intake?.code,
@@ -49,11 +51,12 @@ function toEnrollmentCourseSummary(enrollment) {
   };
 }
 
-export function toMyEnrollmentResponse(enrollment) {
+export function toMyEnrollmentResponse(enrollment, progress = null) {
   if (!enrollment) return null;
   return {
     ...commonFields(enrollment),
     course: toEnrollmentCourseSummary(enrollment),
+    progress: progress ?? null,
   };
 }
 
@@ -72,8 +75,10 @@ export function toAdminEnrollmentResponse(enrollment) {
   };
 }
 
-export const toMyEnrollmentListResponse = (enrollments) =>
-  Array.isArray(enrollments) ? enrollments.map(toMyEnrollmentResponse) : [];
+export const toMyEnrollmentListResponse = (enrollments, progressByEnrollment = null) =>
+  Array.isArray(enrollments)
+    ? enrollments.map((enrollment) => toMyEnrollmentResponse(enrollment, progressByEnrollment?.get(enrollment.id) ?? null))
+    : [];
 
 export const toAdminEnrollmentListResponse = (enrollments) =>
   Array.isArray(enrollments) ? enrollments.map(toAdminEnrollmentResponse) : [];

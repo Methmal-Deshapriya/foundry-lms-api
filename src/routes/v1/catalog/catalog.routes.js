@@ -5,6 +5,7 @@ import { listPublic as listPublicLearningServices } from "../../../controllers/v
 const router = express.Router();
 
 router.get("/services", listPublicLearningServices);
+router.get("/explore", catalogController.getPublicExplore);
 router.get("/:serviceSlug/categories", catalogController.getPublicCategories);
 router.get("/:serviceSlug/categories/:categorySlug", catalogController.getPublicCategory);
 router.get(

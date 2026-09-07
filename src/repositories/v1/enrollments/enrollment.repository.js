@@ -27,7 +27,11 @@ const enrollmentInclude = {
   enrolledBy: true,
   course: { include: { category: { include: { service: true } } } },
   intake: true,
-  certificates: { where: { status: "ISSUED" }, orderBy: { issuedDate: "desc" }, take: 1 },
+  // Not filtered to ISSUED: the roster/detail views need to tell "revoked"
+  // apart from "never issued" (a REVOKED certificate doesn't block issuing a
+  // new one — see certificate.repository.js's findCurrentByEnrollmentId,
+  // which does filter to ISSUED for that eligibility check).
+  certificates: { orderBy: { issuedDate: "desc" }, take: 1 },
 };
 
 export function findById(id) { return prisma.enrollment.findUnique({ where: { id }, include: enrollmentInclude }); }
@@ -148,6 +152,64 @@ export async function update(id, expected, data) {
 
 export function findUserEnrollments(userId, { limit, cursor }) {
   return prisma.enrollment.findMany({ where: { userId }, include: enrollmentInclude, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+}
+
+// Batched session-progress lookup for a page of enrollments, mirroring
+// classroom.service.js's progressFromRows without the N+1 of calling the
+// per-enrollment classroom endpoint once per card on the My Courses list.
+// "Visible" mirrors classroom.repository.js's findVisibleSessions exactly
+// (released, or scheduled-and-due, with a ready/archived session) so the
+// count here always matches what a student would see in the classroom.
+export async function findProgressForEnrollments(enrollments) {
+  const progress = new Map();
+  if (enrollments.length === 0) return progress;
+
+  const now = new Date();
+  const intakeIds = [...new Set(enrollments.map(({ intakeId }) => intakeId))];
+  const visibleSessions = await prisma.courseSession.findMany({
+    where: {
+      intakeId: { in: intakeIds },
+      deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
+      OR: [
+        { deliveryStatus: "RELEASED" },
+        { deliveryStatus: "SCHEDULED", availableAt: { lte: now } },
+      ],
+      session: { status: { in: ["READY", "ARCHIVED"] } },
+    },
+    select: { id: true, intakeId: true },
+  });
+
+  const visibleCountByIntake = new Map();
+  const visibleSessionIds = [];
+  for (const session of visibleSessions) {
+    visibleSessionIds.push(session.id);
+    visibleCountByIntake.set(session.intakeId, (visibleCountByIntake.get(session.intakeId) ?? 0) + 1);
+  }
+
+  const completions = visibleSessionIds.length > 0
+    ? await prisma.sessionCompletion.findMany({
+        where: {
+          enrollmentId: { in: enrollments.map(({ id }) => id) },
+          courseSessionId: { in: visibleSessionIds },
+        },
+        select: { enrollmentId: true },
+      })
+    : [];
+  const completedCountByEnrollment = new Map();
+  for (const { enrollmentId } of completions) {
+    completedCountByEnrollment.set(enrollmentId, (completedCountByEnrollment.get(enrollmentId) ?? 0) + 1);
+  }
+
+  for (const enrollment of enrollments) {
+    const availableSessionCount = visibleCountByIntake.get(enrollment.intakeId) ?? 0;
+    const completedCount = completedCountByEnrollment.get(enrollment.id) ?? 0;
+    progress.set(enrollment.id, {
+      completedCount,
+      availableSessionCount,
+      progressPercent: availableSessionCount > 0 ? Math.round((completedCount / availableSessionCount) * 100) : 0,
+    });
+  }
+  return progress;
 }
 
 function rosterWhere(intakeId, q) {

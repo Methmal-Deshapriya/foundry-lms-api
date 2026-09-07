@@ -5,6 +5,7 @@ import {
   DURATION_UNITS,
 } from "./catalog.constants.js";
 import { nullableSecureHttpUrlSchema } from "../shared/url.schema.js";
+import { LEARNING_ACCESS_TYPES } from "./learningService.schema.js";
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CODE_PREFIX_REGEX = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
@@ -70,3 +71,24 @@ export const courseAdminFiltersSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+// The public, cross-service "Explore" page — every published course across
+// every active service, filterable by slug (not id, since this is public
+// and callers only ever know slugs) rather than courseAdminFiltersSchema's
+// internal ids.
+export const publicExploreFiltersSchema = z
+  .object({
+    service: z.string().trim().min(1).max(100).optional(),
+    category: z.string().trim().min(1).max(100).optional(),
+    level: z.enum(COURSE_LEVELS).optional(),
+    accessType: z.enum(LEARNING_ACCESS_TYPES).optional(),
+    minPrice: z.coerce.number().min(0).max(99999999).optional(),
+    maxPrice: z.coerce.number().min(0).max(99999999).optional(),
+    q: z.string().trim().max(100).optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+    offset: z.coerce.number().int().min(0).max(10_000).default(0),
+  })
+  .refine((data) => data.minPrice == null || data.maxPrice == null || data.minPrice <= data.maxPrice, {
+    message: "Minimum price must not exceed maximum price.",
+    path: ["minPrice"],
+  });
