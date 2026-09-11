@@ -17,7 +17,8 @@
     "test:database-timeout": "vitest run src/integration/databaseTimeout.integration.test.js",
     "api:postman": "node scripts/check-api-contract.js && node scripts/generate-postman.js",
     "api:contract:check": "node scripts/check-api-contract.js",
-    "api:artifacts:check": "node scripts/check-api-contract.js && node scripts/generate-postman.js --check"
+    "api:artifacts:check": "node scripts/check-api-contract.js && node scripts/generate-postman.js --check",
+    "postinstall": "prisma generate"
   },
   "keywords": [
     "lms",
