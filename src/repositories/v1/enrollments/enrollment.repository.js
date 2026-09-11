@@ -3,6 +3,23 @@ import prisma from "../../../utils/prisma.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 import { CourseCapacityReachedError, ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 
+// Shared "visible session" criteria — mirrors classroom.repository.js's
+// findVisibleSessions exactly (released, or scheduled-and-due, with a
+// ready/archived session) so every count/backfill derived from it always
+// matches what a student would actually see in the classroom.
+// `intakeIdFilter` is a raw Prisma filter value, e.g. a single id or `{ in: [...] }`.
+function visibleCourseSessionWhere(intakeIdFilter, now) {
+  return {
+    intakeId: intakeIdFilter,
+    deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
+    OR: [
+      { deliveryStatus: "RELEASED" },
+      { deliveryStatus: "SCHEDULED", availableAt: { lte: now } },
+    ],
+    session: { status: { in: ["READY", "ARCHIVED"] } },
+  };
+}
+
 // The initial Payment row an enrollment gets at creation time. A FULL
 // payment earns its course's fixed one-time-payment discount; a PARTIAL
 // payment is exactly half the undiscounted price and never discounted, even
@@ -145,6 +162,33 @@ export async function update(id, expected, data) {
       if (nextStatus === "COMPLETED" && !["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(current.intake.status)) throw new ConflictError("Enrollment can be completed only while learning is active.");
       if (current.source === "ADMIN" && nextStatus === "COMPLETED" && nextPayment !== "COMPLETED") throw new ConflictError("Paid enrollment requires completed payment.");
       if (current.status === "CANCELLED" && nextStatus === "ACTIVE" && (current.intake.status !== "OPEN_ACTIVE" || !current.user.emailVerified || current.user.role !== "STUDENT")) throw new ConflictError("Enrollment is no longer eligible for reactivation.");
+
+      // An admin closing out an enrollment is a terminal, authoritative
+      // "this run is done" signal — backfill any session the student never
+      // got around to checking off themselves, since completion history
+      // becomes read-only the moment this transaction commits (see
+      // classroom.repository.js's assertCompletionMutationAllowed) and
+      // would otherwise be permanently stuck below 100% for no fixable
+      // reason.
+      if (nextStatus === "COMPLETED" && current.status !== "COMPLETED") {
+        const now = new Date();
+        const visibleSessions = await transaction.courseSession.findMany({
+          where: visibleCourseSessionWhere(current.intakeId, now),
+          select: { id: true },
+        });
+        if (visibleSessions.length > 0) {
+          await transaction.sessionCompletion.createMany({
+            data: visibleSessions.map(({ id: courseSessionId }) => ({
+              enrollmentId: id,
+              courseSessionId,
+              intakeId: current.intakeId,
+              completedAt: now,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
       return transaction.enrollment.update({ where: { id }, data, include: enrollmentInclude });
     });
   } catch (error) { if (error instanceof ConflictError || error instanceof NotFoundError) throw error; throw handlePrismaError(error); }
@@ -167,15 +211,7 @@ export async function findProgressForEnrollments(enrollments) {
   const now = new Date();
   const intakeIds = [...new Set(enrollments.map(({ intakeId }) => intakeId))];
   const visibleSessions = await prisma.courseSession.findMany({
-    where: {
-      intakeId: { in: intakeIds },
-      deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
-      OR: [
-        { deliveryStatus: "RELEASED" },
-        { deliveryStatus: "SCHEDULED", availableAt: { lte: now } },
-      ],
-      session: { status: { in: ["READY", "ARCHIVED"] } },
-    },
+    where: visibleCourseSessionWhere({ in: intakeIds }, now),
     select: { id: true, intakeId: true },
   });
 
