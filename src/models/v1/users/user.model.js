@@ -13,11 +13,49 @@ export function toAdminUserResponse(user) {
 
   return {
     id: user.id,
-    name: user.name,
+    firstName: user.firstName,
+    lastName: user.lastName,
     email: user.email,
     role: user.role,
+    emailVerified: user.emailVerified,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+  };
+}
+
+/**
+ * Transform a raw database user, plus its pre-fetched activity sections,
+ * into the full admin user-detail response. Every section is shaped
+ * { total, items } — see userActivity.repository.js for how each is bounded.
+ * @param {object} user - The raw user object from Prisma.
+ * @param {object} sections - The eight activity sections for this user.
+ * @returns {object|null} The sanitized user-detail object or null.
+ */
+export function toAdminUserDetailResponse(user, sections) {
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    role: user.role,
+    phone: user.phone,
+    address: user.address,
+    district: user.district,
+    dateOfBirth: user.dateOfBirth,
+    alStream: user.alStream,
+    emailVerified: user.emailVerified,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    enrollments: sections.enrollments,
+    managedEnrollments: sections.managedEnrollments,
+    paymentsRecorded: sections.paymentsRecorded,
+    paymentsMade: sections.paymentsMade,
+    certificates: sections.certificates,
+    studentProjects: sections.studentProjects,
+    enrollmentRequests: sections.enrollmentRequests,
+    auditActions: sections.auditActions,
   };
 }
 

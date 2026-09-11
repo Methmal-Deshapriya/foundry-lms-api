@@ -42,8 +42,8 @@ export class UnauthorizedError extends CustomError {
  * 403 Forbidden — Use when the user is logged in but lacks permissions.
  */
 export class ForbiddenError extends CustomError {
-  constructor(message = "Forbidden") {
-    super(message, 403, "FORBIDDEN");
+  constructor(message = "Forbidden", code = "FORBIDDEN") {
+    super(message, 403, code);
   }
 }
 
@@ -60,8 +60,62 @@ export class NotFoundError extends CustomError {
  * 409 Conflict — Use for duplicate records or resource state conflicts.
  */
 export class ConflictError extends CustomError {
-  constructor(message = "Resource already exists") {
-    super(message, 409, "CONFLICT");
+  constructor(message = "Resource already exists", code = "CONFLICT") {
+    super(message, 409, code);
+  }
+}
+
+/**
+ * 409 used when a capacity check executed under the course-enrollment lock
+ * proves that no additional learner can be inserted.
+ */
+export class CourseCapacityReachedError extends ConflictError {
+  constructor() {
+    super(
+      "This course intake has reached its enrollment capacity.",
+      "COURSE_CAPACITY_REACHED",
+    );
+  }
+}
+
+/**
+ * 409 used when a student attempts to mutate frozen learning history after
+ * the administrator has completed the enrollment.
+ */
+export class EnrollmentCompletedError extends CustomError {
+  constructor() {
+    super(
+      "This enrollment is completed. Session completion history is read-only.",
+      409,
+      "ENROLLMENT_COMPLETED",
+    );
+  }
+}
+
+/**
+ * 409 used when permanent catalog deletion would destroy operational delivery
+ * or learner history. The structured impact is safe to show in an admin
+ * confirmation dialog.
+ */
+export class CatalogDeletionBlockedError extends CustomError {
+  constructor(details) {
+    super(
+      "Permanent deletion is blocked because this catalog item contains operational delivery or learner history.",
+      409,
+      "CATALOG_DELETION_BLOCKED",
+    );
+    this.details = details;
+  }
+}
+
+/**
+ * 409 used when an operation would break the intended curriculum sequence.
+ * The client may retry only after an explicit, audited acknowledgement.
+ */
+export class SequenceRiskError extends CustomError {
+  constructor(message, details) {
+    super(message, 409, "SEQUENCE_RISK_CONFIRMATION_REQUIRED");
+    this.details = details;
   }
 }
 
@@ -108,14 +162,34 @@ export class DatabaseError extends CustomError {
  * @returns {CustomError} A mapped error or generic DatabaseError.
  */
 export function handlePrismaError(prismaError) {
+  // Repository catch blocks also receive deliberate application errors thrown
+  // from inside interactive transactions. Preserve their status/code instead
+  // of disguising them as generic database failures.
+  if (prismaError instanceof CustomError) return prismaError;
   if (prismaError?.code === "P2002") {
     return new ConflictError("A record with this value already exists");
   }
   if (prismaError?.code === "P2025") {
     return new NotFoundError("Record not found");
   }
+  if (prismaError?.code === "P2003") {
+    // A Restrict/NoAction foreign key still has dependent rows. Every
+    // call site that can hit this deliberately checks for its own
+    // dependents first and throws a specific, friendly ConflictError before
+    // reaching Prisma — this is the fallback for any dependent relation an
+    // app-level check doesn't yet know to look for, so it degrades to a
+    // clean 409 instead of the generic 500 below. See Finding C of the
+    // 2026-08-30 system guide/audit.
+    return new ConflictError(
+      "This record still has other data depending on it and cannot be deleted.",
+      "CATALOG_DELETION_BLOCKED",
+    );
+  }
+  // The raw Prisma message (query dumps, schema field names, internal
+  // argument shape) must never reach the client. Keep it only on
+  // `originalError` for server-side logging; the public message stays generic.
   return new DatabaseError(
-    prismaError?.message || "Database operation failed",
+    "A database error occurred. Please try again.",
     prismaError
   );
 }

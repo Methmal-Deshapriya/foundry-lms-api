@@ -4,20 +4,30 @@
  */
 const Logger = {
   info: (message, meta = {}) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [INFO]: ${message}`, Object.keys(meta).length ? meta : "");
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "INFO",
+      message,
+      ...meta,
+    }));
   },
   error: (message, error = {}) => {
-    const timestamp = new Date().toISOString();
-    console.error(`[${timestamp}] [ERROR]: ${message}`, {
-      message: error.message,
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "ERROR",
+      message,
+      errorMessage: error.message,
       stack: error.stack,
-      ...error
-    });
+      ...error,
+    }));
   },
   warn: (message, meta = {}) => {
-    const timestamp = new Date().toISOString();
-    console.warn(`[${timestamp}] [WARN]: ${message}`, meta);
+    console.warn(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "WARN",
+      message,
+      ...meta,
+    }));
   }
 };
 

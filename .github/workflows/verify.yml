@@ -1,0 +1,91 @@
+name: Verify API
+
+on:
+  pull_request:
+  push:
+    branches: [main, development]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: prisma+postgres://accelerate.prisma-data.net/?api_key=ci-placeholder
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Check OpenAPI and generated Postman artifacts
+        run: npm run api:artifacts:check
+
+  learning-pipeline-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry_pipeline_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry_pipeline_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_pipeline_test
+      DIRECT_DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_pipeline_test
+      JWT_SECRET: foundry-pipeline-ci-secret
+      RUN_DATABASE_INTEGRATION: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Apply migrations to disposable PostgreSQL
+        run: npx prisma migrate deploy
+
+      - name: Run populated learning pipeline
+        run: npm run test:pipeline
+
+      - name: Prove PostgreSQL statement timeout upper bound
+        env:
+          DB_STATEMENT_TIMEOUT_MS: "1500"
+        run: npm run test:database-timeout

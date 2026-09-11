@@ -7,14 +7,47 @@ import { handlePrismaError } from "../../../utils/Errors.js";
  */
 
 /**
- * Fetch all users from the database.
- * @returns {Promise<Array>} Array of all user objects.
+ * Fetch users from the database with optional role filtering and pagination.
+ * @param {object} filters - Supported filters for the user list.
+ * @param {number} limit - Number of records to return.
+ * @param {number} offset - Number of records to skip.
+ * @returns {Promise<object>} { total, users }
  */
-export async function findAllUsers() {
-  return await prisma.user.findMany({
-    orderBy: {
-      createdAt: "desc", // Newest users first
-    },
+export async function findAndCountUsers(filters = {}, limit = 10, offset = 0) {
+  const where = {};
+
+  if (filters.role) {
+    where.role = filters.role;
+  }
+
+  const [total, users] = await prisma.$transaction([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      orderBy: {
+        createdAt: "desc", // Newest users first
+      },
+      take: Number(limit),
+      skip: Number(offset),
+    }),
+  ]);
+
+  return { total, users };
+}
+
+/** Every admin/super-admin email — used to notify staff of a new enrollment request. */
+export async function findAdminEmails() {
+  const admins = await prisma.user.findMany({
+    where: { role: { in: ["ADMIN", "SUPER_ADMIN"] } },
+    select: { email: true },
+  });
+  return admins.map(({ email }) => email);
+}
+
+export async function findVerifiedStudentsByIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  return prisma.user.findMany({
+    where: { id: { in: ids }, role: "STUDENT", emailVerified: true },
   });
 }
 
@@ -40,13 +73,25 @@ export async function findUserById(id) {
  * @returns {Promise<object>} The updated user object.
  */
 export async function updateUserRole(id, role) {
+  return await updateUser(id, {
+    role,
+    securityVersion: { increment: 1 },
+  });
+}
+
+/**
+ * Update a user record.
+ * @param {string} id - The UUID of the user.
+ * @param {object} data - The fields to update.
+ * @returns {Promise<object>} The updated user.
+ */
+export async function updateUser(id, data) {
   try {
     return await prisma.user.update({
       where: { id },
-      data: { role },
+      data,
     });
   } catch (error) {
-    // Translates Prisma errors (like user not found) into CustomErrors
     throw handlePrismaError(error);
   }
 }

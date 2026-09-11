@@ -1,0 +1,289 @@
+import * as certificateRepo from "../../../repositories/v1/enrollments/certificate.repository.js";
+import * as enrollmentRepo from "../../../repositories/v1/enrollments/enrollment.repository.js";
+import {
+  certificateAdminCursorSchema,
+  certificateAdminFiltersSchema,
+  issueCertificateSchema,
+  revokeCertificateSchema,
+} from "../../../constants/v1/enrollments/certificate.schema.js";
+import { generateCertificateCode } from "../../../utils/certificateUtils.js";
+import { ValidationError, NotFoundError, ConflictError, ForbiddenError } from "../../../utils/Errors.js";
+import { transformCertificate } from "../../../utils/transformers.js";
+import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
+import { recordActionService } from "../audit/audit.service.js";
+import { selfHistoryPageSchema } from "../../../constants/v1/shared/pagination.schema.js";
+
+const CERTIFICATE_CODE_ATTEMPTS = 5;
+
+async function createCertificateWithUniqueCode(enrollment, certificateInput) {
+  const publicAppUrl = process.env.CLIENT_URL?.replace(/\/$/, "");
+  if (!publicAppUrl) {
+    throw new Error("CLIENT_URL is required to issue publicly verifiable certificates.");
+  }
+
+  for (let attempt = 1; attempt <= CERTIFICATE_CODE_ATTEMPTS; attempt += 1) {
+    const certificateCode = generateCertificateCode();
+    try {
+      const certificate = await certificateRepo.createIssued({
+        enrollmentId: enrollment.id,
+        certificateCode,
+        studentName: `${enrollment.user.firstName} ${enrollment.user.lastName}`,
+        courseName: enrollment.course.title,
+        description: certificateInput.description,
+        issuedDate: certificateInput.issuedDate
+          ? new Date(certificateInput.issuedDate)
+          : new Date(),
+        status: "ISSUED",
+        certificateData: {
+          skills: enrollment.course.skills,
+          studentEmail: enrollment.user.email,
+          courseSlug: enrollment.course.slug,
+        },
+        snapshotUrl: `${publicAppUrl}/certificates/verify/${certificateCode}`,
+      });
+      return { certificate, certificateCode };
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+
+      if (error.code === "CERTIFICATE_ALREADY_ISSUED") throw error;
+
+      // A create conflict may also mean another request issued a certificate
+      // for this enrollment. Retry only when this exact random code exists.
+      const collidedCode = await certificateRepo.findByCode(certificateCode);
+      if (!collidedCode) throw error;
+      if (attempt === CERTIFICATE_CODE_ATTEMPTS) {
+        throw new ConflictError(
+          "Could not generate a unique certificate code after several attempts. Please retry.",
+          "CERTIFICATE_CODE_GENERATION_FAILED",
+        );
+      }
+    }
+  }
+
+  throw new ConflictError(
+    "Could not generate a unique certificate code.",
+    "CERTIFICATE_CODE_GENERATION_FAILED",
+  );
+}
+
+/**
+ * Certificate Service
+ */
+
+/**
+ * Service: Issue a certificate (Admin).
+ */
+export async function issueCertificateService(enrollmentId, data, actorId) {
+  // 1. Validation
+  const validation = issueCertificateSchema.safeParse(data);
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  // 2. Enrollment Checks
+  const enrollment = await enrollmentRepo.findById(enrollmentId);
+  if (!enrollment) {
+    throw new NotFoundError("Enrollment not found.");
+  }
+
+  if (enrollment.status !== "COMPLETED") {
+    throw new ValidationError("Enrollment must be marked as COMPLETED before issuing a certificate.");
+  }
+  if (!enrollment.course.certificateEnabled) {
+    throw new ValidationError("Certificates are not enabled for this course.");
+  }
+
+  // 3. Duplicate Check
+  const existing = await certificateRepo.findCurrentByEnrollmentId(enrollmentId);
+  if (existing) {
+    throw new ConflictError(
+      "A current certificate has already been issued for this enrollment.",
+      "CERTIFICATE_ALREADY_ISSUED",
+    );
+  }
+
+  // 4. Action: Prepare snapshot and create with bounded random-code retry.
+  const { certificate, certificateCode } =
+    await createCertificateWithUniqueCode(enrollment, validation.data);
+
+  // 5. Audit
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.CERTIFICATE_ISSUED,
+    entityType: ENTITY_TYPES.CERTIFICATE,
+    entityId: certificate.id,
+    description: `Certificate ${certificateCode} issued to student ${enrollment.user.email} for "${enrollment.course.title}"`,
+    metadata: { enrollmentId, certificateCode }
+  });
+
+  return transformCertificate(certificate);
+}
+
+/**
+ * Service: Revoke a certificate (Admin).
+ */
+export async function revokeCertificateService(id, data, actorId) {
+  // 1. Validation
+  const validation = revokeCertificateSchema.safeParse(data);
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  // 2. Action. The repository locks and rechecks both the credential and its
+  // enrollment lifecycle before writing, preventing concurrent double revoke
+  // or a stale lifecycle snapshot.
+  const { certificate: updated, lifecycleContext } =
+    await certificateRepo.revokeIssued(id, {
+      status: "REVOKED",
+      revokedAt: new Date(),
+      revokedBy: actorId,
+      revocationReason: validation.data.revocationReason,
+    });
+
+  // 3. Audit
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.CERTIFICATE_REVOKED,
+    entityType: ENTITY_TYPES.CERTIFICATE,
+    entityId: id,
+    description: `Certificate ${updated.certificateCode} revoked by Admin ${actorId}`,
+    metadata: {
+      reason: validation.data.revocationReason,
+      ...lifecycleContext,
+    },
+  });
+
+  return transformCertificate(updated);
+}
+
+/**
+ * Service: Verify a certificate (Public).
+ */
+export async function verifyCertificateService(certificateCode) {
+  const certificate = await certificateRepo.findByCode(certificateCode);
+  
+  if (!certificate) {
+    throw new NotFoundError("Invalid certificate code.");
+  }
+
+  return {
+    studentName: certificate.studentName,
+    courseName: certificate.courseName,
+    issuedDate: certificate.issuedDate,
+    certificateCode: certificate.certificateCode,
+    status: certificate.status,
+    skills: certificate.certificateData.skills,
+  };
+}
+
+/**
+ * Service: Get my certificates (Student).
+ */
+export async function getMyCertificatesService(userId, query = {}) {
+  const validation = selfHistoryPageSchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path[0]);
+  }
+  const filters = validation.data;
+  const rows = await certificateRepo.findUserCertificates(userId, filters);
+  const hasMore = rows.length > filters.limit;
+  const pageRows = rows.slice(0, filters.limit);
+  return {
+    certificates: pageRows.map(transformCertificate),
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore ? pageRows.at(-1)?.id ?? null : null,
+    },
+  };
+}
+
+function toCertificateStatusSummary(statusCounts) {
+  const counts = { ISSUED: 0, REVOKED: 0 };
+  for (const row of statusCounts) counts[row.status] = row._count;
+  return { all: counts.ISSUED + counts.REVOKED, issued: counts.ISSUED, revoked: counts.REVOKED };
+}
+
+/**
+ * Service: Get all certificates (Admin).
+ */
+export async function getAllCertificatesAdminService(query = {}) {
+  const validation = certificateAdminFiltersSchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path[0]);
+  }
+  const filters = validation.data;
+
+  // Offset mode (the course workspace's Certificates tab): a real page/total.
+  if (filters.offset != null) {
+    const { certificates, total, statusCounts } = await certificateRepo.findAllAdmin(filters);
+    return {
+      certificates: certificates.map(transformCertificate),
+      summary: toCertificateStatusSummary(statusCounts),
+      pagination: { total, limit: filters.limit, offset: filters.offset, hasMore: filters.offset + certificates.length < total },
+    };
+  }
+
+  // Cursor mode (the global /admin/certificates page): unbounded keyset.
+  let cursor = null;
+  if (filters.cursor) {
+    try {
+      const parsed = certificateAdminCursorSchema.safeParse(
+        JSON.parse(Buffer.from(filters.cursor, "base64url").toString("utf8")),
+      );
+      if (!parsed.success) throw new Error("Invalid cursor payload.");
+      if (
+        parsed.data.q !== filters.q ||
+        parsed.data.status !== (filters.status ?? null) ||
+        parsed.data.intakeId !== (filters.intakeId ?? null)
+      ) {
+        throw new Error("Cursor does not match this certificate query.");
+      }
+      cursor = { ...parsed.data, createdAt: new Date(parsed.data.createdAt) };
+    } catch {
+      throw new ValidationError("Invalid certificate cursor.", "cursor");
+    }
+  }
+
+  const { certificates: rows, statusCounts } = await certificateRepo.findAllAdmin({ ...filters, cursor });
+  const hasMore = rows.length > filters.limit;
+  const certificates = rows.slice(0, filters.limit);
+  const last = certificates.at(-1);
+  return {
+    certificates: certificates.map(transformCertificate),
+    summary: toCertificateStatusSummary(statusCounts),
+    pagination: {
+      limit: filters.limit,
+      hasMore,
+      nextCursor: hasMore && last
+        ? Buffer.from(JSON.stringify({
+            q: filters.q,
+            status: filters.status ?? null,
+            intakeId: filters.intakeId ?? null,
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+          })).toString("base64url")
+        : null,
+    },
+  };
+}
+
+/**
+ * Service: Get single certificate details.
+ */
+export async function getCertificateDetailsService(id, userId, isAdmin = false) {
+  const certificate = await certificateRepo.findById(id);
+  if (!certificate) {
+    throw new NotFoundError("Certificate not found.");
+  }
+
+  if (!isAdmin && certificate.enrollment.userId !== userId) {
+    throw new ForbiddenError("Access denied.");
+  }
+
+  return transformCertificate(certificate);
+}

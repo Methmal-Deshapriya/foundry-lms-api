@@ -1,59 +1,87 @@
-import { toPublicBootcampResponse } from "../bootcamps/bootcamp.model.js";
+import { toPublicCourseCard } from "../catalog/catalog.model.js";
 import { toAdminUserResponse } from "../users/user.model.js";
 
-/**
- * Enrollment Model - The "Relationship Mask"
- * Defines the shape of student-bootcamp connections.
- */
-
-/**
- * Transform an enrollment record for the Student's "My Courses" view.
- * Includes details about the bootcamp itself.
- * 
- * @param {object} enrollment - The raw enrollment record with bootcamp included.
- * @returns {object} The sanitized enrollment with bootcamp details.
- */
-export function toMyEnrollmentResponse(enrollment) {
-  if (!enrollment) return null;
-
+export function toCertificateSummary(certificate) {
+  if (!certificate) return null;
   return {
-    id: enrollment.id,
-    enrolledAt: enrollment.createdAt,
-    // Flatten or include the bootcamp details using our existing bootcamp model
-    bootcamp: enrollment.bootcamp ? toPublicBootcampResponse(enrollment.bootcamp) : null,
+    id: certificate.id,
+    certificateCode: certificate.certificateCode,
+    status: certificate.status,
+    issuedDate: certificate.issuedDate,
   };
 }
 
-/**
- * Transform an enrollment record for the Admin's "Class List" view.
- * Includes details about the student.
- * 
- * @param {object} enrollment - The raw enrollment record with user included.
- * @returns {object} The sanitized enrollment with student details.
- */
-export function toBootcampStudentResponse(enrollment) {
-  if (!enrollment) return null;
-
+function commonFields(enrollment) {
+  const currentCertificate = enrollment.certificates?.[0] ?? null;
   return {
     id: enrollment.id,
+    userId: enrollment.userId,
+    courseId: enrollment.courseId,
+    intakeId: enrollment.intakeId,
+    source: enrollment.source,
+    status: enrollment.status,
+    paymentStatus: enrollment.paymentStatus,
+    paymentCompletedAt: enrollment.paymentCompletedAt,
+    completedAt: enrollment.completedAt,
     enrolledAt: enrollment.createdAt,
-    // Include user details using our existing user model
-    student: enrollment.user ? toAdminUserResponse(enrollment.user) : null,
+    createdAt: enrollment.createdAt,
+    updatedAt: enrollment.updatedAt,
+    certificate: toCertificateSummary(currentCertificate),
   };
 }
 
-/**
- * Transform an array of enrollments for the student view.
- */
-export function toMyEnrollmentListResponse(enrollments) {
-  if (!enrollments || !Array.isArray(enrollments)) return [];
-  return enrollments.map((e) => toMyEnrollmentResponse(e));
+// The program (title, summary, price, ...) comes from Course; the specific
+// run's own facts (code, dates, timezone, lifecycle status) come from
+// Intake. See the 2026-08-30 rename plan §6 — Enrollment carries both.
+function toEnrollmentCourseSummary(enrollment) {
+  if (!enrollment.course) return null;
+  const publicCourse = toPublicCourseCard(enrollment.course);
+  const intake = enrollment.intake;
+  return {
+    ...publicCourse,
+    thumbnailUrl: enrollment.course.thumbnailUrl,
+    categoryVisualKey: enrollment.course.category?.visualKey,
+    intakeId: enrollment.intakeId,
+    intakeKey: intake?.intakeKey,
+    code: intake?.code,
+    startDate: intake?.startDate,
+    expectedEndDate: intake?.expectedEndDate,
+    timezone: intake?.timezone,
+    intakeStatus: intake?.status,
+  };
 }
 
-/**
- * Transform an array of enrollments for the admin view.
- */
-export function toBootcampStudentListResponse(enrollments) {
-  if (!enrollments || !Array.isArray(enrollments)) return [];
-  return enrollments.map((e) => toBootcampStudentResponse(e));
+export function toMyEnrollmentResponse(enrollment, progress = null) {
+  if (!enrollment) return null;
+  return {
+    ...commonFields(enrollment),
+    course: toEnrollmentCourseSummary(enrollment),
+    progress: progress ?? null,
+  };
 }
+
+export function toAdminEnrollmentResponse(enrollment) {
+  if (!enrollment) return null;
+  return {
+    ...commonFields(enrollment),
+    externalPaymentReference: enrollment.externalPaymentReference,
+    paymentNote: enrollment.paymentNote,
+    enrolledByUserId: enrollment.enrolledByUserId,
+    user: enrollment.user ? toAdminUserResponse(enrollment.user) : null,
+    enrolledBy: enrollment.enrolledBy
+      ? toAdminUserResponse(enrollment.enrolledBy)
+      : null,
+    course: toEnrollmentCourseSummary(enrollment),
+  };
+}
+
+export const toMyEnrollmentListResponse = (enrollments, progressByEnrollment = null) =>
+  Array.isArray(enrollments)
+    ? enrollments.map((enrollment) => toMyEnrollmentResponse(enrollment, progressByEnrollment?.get(enrollment.id) ?? null))
+    : [];
+
+export const toAdminEnrollmentListResponse = (enrollments) =>
+  Array.isArray(enrollments) ? enrollments.map(toAdminEnrollmentResponse) : [];
+
+// Compatibility alias for intake-wide admin roster consumers.
+export const toCourseStudentListResponse = toAdminEnrollmentListResponse;

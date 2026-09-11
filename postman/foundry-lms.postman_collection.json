@@ -1,0 +1,4047 @@
+{
+  "info": {
+    "name": "Foundry Academy LMS API",
+    "description": "Canonical API contract for the Foundry Academy LMS.\n\nAuthentication uses the HTTP-only `token` cookie. In Postman, run Login or\nVerify email OTP first and allow Postman's cookie jar to retain the cookie.\nAdmin and super-admin requests require an account with the matching backend\npermission.\n\nGENERATED FILE: edit docs/api/openapi.yaml, then run npm run api:postman.\n\nAuthentication uses the Postman cookie jar. Login or OTP verification first; never paste the HTTP-only JWT into collection variables.\n\nAccess labels: [PUBLIC] no login; [SIGNED IN] any authenticated account subject to ownership; [STUDENT] learner operation; [ADMIN + SUPER ADMIN] both administrative roles; [SUPER ADMIN ONLY] regular admins are rejected.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 System",
+      "item": [
+        {
+          "name": "[PUBLIC] Check API database readiness",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ready"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: readiness"
+          }
+        },
+        {
+          "name": "[PUBLIC] Check API health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: getHealth"
+          }
+        },
+        {
+          "name": "[PUBLIC] Download latest Postman collection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/postman/collection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "postman",
+                "collection"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nReturns the raw generated collection for direct URL import into Postman.\n\nOperation ID: downloadPostmanCollection"
+          }
+        },
+        {
+          "name": "[PUBLIC] Download safe Postman environment",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/postman/environment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "postman",
+                "environment"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nReturns the raw local environment with blank credentials and destructive requests disabled.\n\nOperation ID: downloadPostmanEnvironment"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Authentication",
+      "item": [
+        {
+          "name": "[PUBLIC] Register student",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Student\",\n  \"email\": \"{{registrationEmail}}\",\n  \"password\": \"{{registrationPassword}}\",\n  \"phone\": \"0751234567\",\n  \"address\": \"123 Academy Road\",\n  \"district\": \"Colombo\",\n  \"dateOfBirth\": \"2000-01-01\",\n  \"alStream\": \"Technology\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: registerStudent"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"registeredUserId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[PUBLIC] Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{loginEmail}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nSets the HTTP-only authentication cookie used by protected requests.\n\nOperation ID: login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"currentUserId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[PUBLIC] Verify administrator login code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{loginChallengeId}}\",\n  \"code\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/verify-login-challenge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "verify-login-challenge"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nConsumes a short-lived administrator email challenge and sets the HTTP-only authentication cookie.\n\nOperation ID: verifyAdministratorLogin"
+          }
+        },
+        {
+          "name": "[PUBLIC] Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: logout"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Get current user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: getCurrentUser"
+          }
+        },
+        {
+          "name": "[PUBLIC] Request password reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registrationEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: forgotPassword"
+          }
+        },
+        {
+          "name": "[PUBLIC] Reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{registrationPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: resetPassword"
+          }
+        },
+        {
+          "name": "[PUBLIC] Verify email OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registrationEmail}}\",\n  \"code\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nVerifies the account and sets the HTTP-only authentication cookie.\n\nOperation ID: verifyEmailOtp"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"currentUserId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[PUBLIC] Resend email OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{registrationEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/resend-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "resend-otp"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: resendEmailOtp"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Users",
+      "item": [
+        {
+          "name": "[SIGNED IN] Update own profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Updated\",\n  \"lastName\": \"Student\",\n  \"phone\": \"0751234567\",\n  \"address\": \"456 Foundry Road\",\n  \"district\": \"Colombo\",\n  \"dateOfBirth\": \"2000-01-01T00:00:00.000Z\",\n  \"alStream\": \"Technology\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "profile"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: updateOwnProfile"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "STUDENT",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nRequires user-view permission.\n\nOperation ID: listUsers"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Promote student to admin",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/promote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "promote"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only.\n\nOperation ID: promoteUser"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Demote admin to student",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/demote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "demote"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Super admins cannot be demoted through this route.\n\nOperation ID: demoteUser"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Public Catalog",
+      "item": [
+        {
+          "name": "[PUBLIC] List active learning services",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/catalog/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "services"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nReturns database-configured Active learning services and their inherited access, course, enrollment, and payment policies.\n\nOperation ID: listPublicLearningServices"
+          }
+        },
+        {
+          "name": "[PUBLIC] List published service categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "{{serviceSlug}}",
+                "categories"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: listPublicCategories"
+          }
+        },
+        {
+          "name": "[PUBLIC] Get published category and courses",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/categories/{{categorySlug}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "{{serviceSlug}}",
+                "categories",
+                "{{categorySlug}}"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: getPublicCategory"
+          }
+        },
+        {
+          "name": "[PUBLIC] Get published course detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/categories/{{categorySlug}}/courses/{{courseSlug}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "catalog",
+                "{{serviceSlug}}",
+                "categories",
+                "{{categorySlug}}",
+                "courses",
+                "{{courseSlug}}"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: getPublicCourse"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Categories",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] List categories for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "serviceId",
+                  "value": "{{learningServiceId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "DRAFT",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: listCategoriesAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create category draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceId\": \"{{learningServiceId}}\",\n  \"slug\": \"api-testing\",\n  \"title\": \"API Testing\",\n  \"description\": \"Practical API testing courses for software engineers.\",\n  \"audienceLabel\": \"Beginner friendly\",\n  \"visualKey\": \"code2\",\n  \"badgeLabel\": \"New\",\n  \"sortOrder\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: createCategory"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"categoryId\", data.id);",
+                  "  if (data?.slug) pm.environment.set(\"categorySlug\", data.slug);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get category for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getCategoryAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"API Testing and Quality\",\n  \"description\": \"Practical API testing and quality courses for software engineers.\",\n  \"sortOrder\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: updateCategory"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Permanently delete archived category",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Deletes only archived catalog setup without course curriculum or learner history.\n\nOperation ID: deleteCategoryPermanently"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Preview whether permanent category deletion is safe",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/deletion-impact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}",
+                "deletion-impact"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Aggregates child course-intake curriculum and protected learner history without changing data.\n\nOperation ID: getCategoryDeletionImpact"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Publish category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}",
+                "publish"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only.\n\nOperation ID: publishCategory"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Unpublish category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/unpublish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}",
+                "unpublish"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only.\n\nOperation ID: unpublishCategory"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Archive category and child courses",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}",
+                "archive"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Preserves existing learner records and session content.\n\nOperation ID: archiveCategory"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Restore category as draft",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/unarchive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{categoryId}}",
+                "unarchive"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Child courses remain archived.\n\nOperation ID: unarchiveCategory"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Courses",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] List internal courses for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses"
+              ],
+              "query": [
+                {
+                  "key": "categoryId",
+                  "value": "{{categoryId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "serviceId",
+                  "value": "{{learningServiceId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "level",
+                  "value": "BEGINNER",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "enrollmentStatus",
+                  "value": "OPEN",
+                  "description": "The course's derived, stored enrollment status — recomputed at intake create/transition/delete, not per-request.",
+                  "disabled": true
+                },
+                {
+                  "key": "includeArchived",
+                  "value": "false",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nA Course is the real-world program a student browses and enrolls in — content, pricing, and certificate policy are fixed here and shared by every Intake underneath it. See the 2026-08-30 course-to-program-intake rename plan.\n\nOperation ID: listCoursesAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create a course",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"slug\": \"ai-ml-ignition\",\n  \"title\": \"AI/ML Ignition Program\",\n  \"summary\": \"Learn practical AI and machine-learning foundations.\",\n  \"description\": \"A practical guided program for engineers beginning applied AI and machine learning.\",\n  \"level\": \"BEGINNER\",\n  \"durationValue\": 4,\n  \"durationUnit\": \"WEEK\",\n  \"price\": 0,\n  \"highlights\": [\n    \"Requests\",\n    \"Environments\",\n    \"Tests\"\n  ],\n  \"skills\": [\n    \"Postman\",\n    \"HTTP\",\n    \"API Testing\"\n  ],\n  \"prerequisites\": [\n    \"Basic web knowledge\"\n  ],\n  \"thumbnailUrl\": null,\n  \"sortOrder\": 0,\n  \"intakeCodePrefix\": \"AI-ML-IGNITION\",\n  \"certificateEnabled\": true,\n  \"discountAmount\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCertificate policy, discount amount, and intake code prefix are fixed at creation and immutable afterward. A course is never published directly — it only becomes visible once it has an Intake, and its enrollmentStatus is then derived from that Intake's lifecycle.\n\nOperation ID: createCourse"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"courseId\", data.id);",
+                  "  if (data?.slug) pm.environment.set(\"courseSlug\", data.slug);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get course for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getCourseAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update course content and pricing",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"summary\": \"Learn practical, hands-on AI and machine-learning foundations.\",\n  \"price\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCertificate policy, discount amount, intake code prefix, and parent category cannot be changed after creation.\n\nOperation ID: updateCourse"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Permanently delete an archived course with no intake history",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. The course must already be archived and must have zero intakes, ever — a course that ever ran an intake keeps that history and cannot be deleted.\n\nOperation ID: deleteCoursePermanently"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Preview whether permanent course deletion is safe",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/deletion-impact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "deletion-impact"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Aggregates every intake's curriculum and enrollment history without changing data.\n\nOperation ID: getCourseDeletionImpact"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get cross-intake enrollment, revenue, and outcome analytics for a course",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "analytics"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nPowers the course detail page's KPI row — the same shape as GET /intakes/{intakeId}/analytics but rolled up across every intake this course has ever run (grouped by courseId instead of intakeId). Districts and per-session engagement are intake-workspace-only and are not included here, since curricula can differ between intakes.\n\nOperation ID: getCourseAnalytics"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Archive an inactive course",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "archive"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOpen or closed-active intakes block archival.\n\nOperation ID: archiveCourse"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Restore an archived course",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/unarchive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "unarchive"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nBlocked while the parent category or learning service is itself archived.\n\nOperation ID: unarchiveCourse"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Course Intakes",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] List a course's intakes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/intakes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "intakes"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nConvenience alias for GET /intakes?courseId={courseId} — powers the course workspace's intake list.\n\nOperation ID: listCourseIntakes"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create an intake draft under a course",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intakeKey\": \"2026-1\",\n  \"startDate\": \"2026-09-01T00:00:00.000Z\",\n  \"expectedEndDate\": \"2026-12-01T00:00:00.000Z\",\n  \"timezone\": \"Asia/Colombo\",\n  \"capacity\": 50\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/intakes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "intakes"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nNearly everything about an intake is inherited from its Course or auto-suggested (see GET .../intakes/defaults) — this is deliberately a small payload. Seasonal courses require startDate/expectedEndDate together; evergreen courses must omit both.\n\nOperation ID: createIntake"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"intakeId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Suggest the next intake key, code, and timezone",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/intakes/defaults",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "intakes",
+                "defaults"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nPre-fills the create-intake form — the suggested intakeKey follows the {year}-{ordinal} convention (e.g. 2026-1).\n\nOperation ID: getIntakeDefaults"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List intakes for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes"
+              ],
+              "query": [
+                {
+                  "key": "serviceId",
+                  "value": "{{learningServiceId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryId",
+                  "value": "{{categoryId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "OPEN_ACTIVE",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOne Intake is a single scheduled, enrollable run of a Course — dates, capacity, code, and lifecycle status live here.\n\nOperation ID: listIntakesAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get intake for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getIntakeAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update intake dates, timezone, or capacity",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capacity\": 60,\n  \"expectedEndDate\": \"2026-12-15T00:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOnly dates, timezone, and capacity can be changed after intake creation. Everything else — content, pricing, certificate policy — lives on the parent course.\n\nOperation ID: updateIntake"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Permanently delete an unused archived intake",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Deletes only an archived intake with no curriculum, enrollments, or projects.\n\nOperation ID: deleteIntakePermanently"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Preview whether permanent intake deletion is safe",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/deletion-impact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "deletion-impact"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Aggregates protected curriculum, enrollment, and project history without changing data.\n\nOperation ID: getIntakeDeletionImpact"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get enrollment, revenue, district, and engagement analytics for one intake",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "analytics"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nPowers the intake workspace's Overview tab and KPI row. Revenue and payment breakdowns read the payment ledger directly (SUM of actual Payment rows) — not an estimate. successRate.completedPct is null until at least one enrollment has completed or cancelled, since an intake with only active enrollments hasn't produced an outcome yet.\n\nOperation ID: getIntakeAnalytics"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Transition the intake lifecycle",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedStatus\": \"DRAFT\",\n  \"status\": \"OPEN_ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "status"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nUses expectedStatus for optimistic concurrency. Opening, closing, and archiving require Super Admin; completion and cancellation are available to authorized administrators. Opening one sibling atomically closes the previous OPEN_ACTIVE sibling and recomputes the parent course's derived enrollmentStatus.\n\nOperation ID: transitionIntakeStatus"
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Session Library",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] List Session Library resources",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "READY",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "tag",
+                  "value": "jav",
+                  "description": "Return sessions with a tag containing this text (case-insensitive partial match).",
+                  "disabled": true
+                },
+                {
+                  "key": "attachableIntakeId",
+                  "value": "{{intakeId}}",
+                  "description": "Return Ready library sessions with no active or retired relationship to this intake. Retired relationships are restored from curriculum history instead of the picker.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/session-library permission required. Supports lifecycle, search, pagination, and intake-attachability filters. Every session is reusable across intakes. The response includes a `summary` object ({ all, ready, draft, archive }) counting sessions by status under the current search/tag filters, independent of the status filter itself — used to drive status filter pills.\n\nOperation ID: listSessionLibrary"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create independent session resource",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Understanding HTTP Requests\",\n  \"description\": \"Learn methods, headers, bodies, and response codes.\",\n  \"recordingUrl\": \"https://example.com/recordings/http\",\n  \"materialUrl\": \"https://example.com/materials/http\",\n  \"quizUrl\": null,\n  \"feedbackUrl\": null,\n  \"durationMinutes\": 60,\n  \"status\": \"READY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nA READY session requires a recording URL. It is not attached to a course by creation alone.\n\nOperation ID: createSession"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"sessionId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Archive multiple Session Library resources",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{sessionId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/bulk-archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "bulk-archive"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nArchives up to 100 sessions in one request. Each session is archived independently; a failure on one does not block the others.\n\nOperation ID: bulkArchiveSessions"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get Session Library detail and usage impact",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getSession"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update session resource",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Understanding HTTP Requests and Responses\",\n  \"durationMinutes\": 75,\n  \"status\": \"READY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nArchived resources are read-only. Shared updates affect every attached course intake.\n\nOperation ID: updateSession"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Permanently delete unused session",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. The session must be archived and have no curriculum or delivery references.\n\nOperation ID: deleteSession"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Archive session resource",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}",
+                "archive"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: archiveSession"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Restore archived session as draft",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/unarchive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}",
+                "unarchive"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: unarchiveSession"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Duplicate a session resource as a new draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sessions/{{sessionId}}/duplicate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sessions",
+                "{{sessionId}}",
+                "duplicate"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCopies content fields (title suffixed \"(Copy)\", description, URLs, duration, tags) into a brand-new session. Never copies course usage, delivery state, or completion history. The copy always starts DRAFT regardless of the source's status.\n\nOperation ID: duplicateSession"
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Course Curriculum & Delivery",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] List intake curriculum",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/curriculum",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "curriculum"
+              ],
+              "query": [
+                {
+                  "key": "includeRetired",
+                  "value": "false",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nSet includeRetired to show history-preserved curriculum relationships that were already delivered or completed.\n\nOperation ID: listCourseCurriculum"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Attach an existing Ready library session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionId\": \"{{sessionId}}\",\n  \"orderIndex\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/curriculum",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "curriculum"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nInline session creation is intentionally unavailable; create resources in the Session Library first.\n\nOperation ID: attachCourseSession"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.courseSession?.id) pm.environment.set(\"courseSessionId\", data.courseSession.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Reorder active intake curriculum",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"courseSessions\": [\n    {\n      \"id\": \"{{courseSessionId}}\",\n      \"orderIndex\": 0\n    }\n  ],\n  \"acknowledgeSequenceRisk\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/curriculum/reorder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "curriculum",
+                "reorder"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: reorderCourseCurriculum"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Detach unused or retire delivered curriculum session",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"RELEASED\",\n  \"availableAt\": null,\n  \"acknowledgeSequenceRisk\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/curriculum/{{courseSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "curriculum",
+                "{{courseSessionId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: removeCourseSession"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Release, schedule, withdraw, or reset a course session",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/curriculum/{{courseSessionId}}/delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "curriculum",
+                "{{courseSessionId}}",
+                "delivery"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nDelivery belongs directly to the intake. Unsafe sequencing returns 409 until explicitly acknowledged.\n\nOperation ID: updateCourseSessionDelivery"
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Enrollments & Classroom",
+      "item": [
+        {
+          "name": "[SIGNED IN] List own enrollments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/my",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "my"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: listOwnEnrollments"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Get enrollment progress",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "progress"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nAvailable to the enrollment owner or an admin.\n\nOperation ID: getEnrollmentProgress"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Get delivery-specific classroom",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/classroom",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "classroom"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOwner or admin. Paid access requires completed payment; all classrooms resolve released or mature scheduled sessions directly from the enrolled course intake.\n\nOperation ID: getEnrollmentClassroom"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Get one accessible classroom session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/sessions/{{courseSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "sessions",
+                "{{courseSessionId}}"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: getClassroomSession"
+          }
+        },
+        {
+          "name": "[STUDENT] Mark accessible session complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/sessions/{{courseSessionId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "sessions",
+                "{{courseSessionId}}",
+                "complete"
+              ]
+            },
+            "description": "Access: STUDENT\n\nEnrollment owner only. Completion may change only while the enrollment is Active; a Completed enrollment remains readable but its learning history is frozen.\n\nOperation ID: completeClassroomSession"
+          }
+        },
+        {
+          "name": "[STUDENT] Remove accessible session completion",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/sessions/{{courseSessionId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "sessions",
+                "{{courseSessionId}}",
+                "complete"
+              ]
+            },
+            "description": "Access: STUDENT\n\nEnrollment owner only. Completion may change only while the enrollment is Active; a Completed enrollment returns ENROLLMENT_COMPLETED and preserves its history.\n\nOperation ID: uncompleteClassroomSession"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update enrollment or payment status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\",\n  \"externalPaymentReference\": \"PAY-2026-0001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/enrollment-management permission required. Active may move to Completed or Cancelled. Cancelled paid/admin enrollment may return to Active; cancelled self-enrollment is reactivated only by its student enrollment endpoint. Completed is terminal and cannot be reopened or cancelled through this operation. Status writes are serialized with student completion mutations.\n\nOperation ID: updateEnrollment"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Record the remaining half-payment for a partially paid enrollment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/complete-payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "complete-payment"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/enrollment-management permission required. Only a PARTIAL enrollment can be completed this way — records a TOP_UP payment ledger entry for the other half of the course price (never discounted, unlike a one-time full payment) and moves paymentStatus to COMPLETED.\n\nOperation ID: completeEnrollmentPayment"
+          }
+        },
+        {
+          "name": "[STUDENT] Self-enroll in a free intake",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/enroll",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "enroll"
+              ]
+            },
+            "description": "Access: STUDENT\n\nStudent-only. The intake and its parent category must be published, enrollment must be Open, and the Free Learning intake must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.\n\nOperation ID: selfEnrollFreeCourse"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"enrollmentId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Search verified students eligible for this paid intake",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/eligible-students",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "eligible-students"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "25",
+                  "description": "Page size. Use cursor for additional pages instead of increasing the limit.",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{eligibleStudentsCursor}}",
+                  "description": "Opaque next-page cursor returned by the preceding eligible-student response. It is valid only with the same course and search query.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nReturns a stable email-and-ID keyset page. Pass the opaque nextCursor from one response as cursor to request the next page; changing q starts a new search.\n\nOperation ID: listCourseEligibleStudents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  pm.environment.set(\"eligibleStudentsCursor\", data?.pagination?.nextCursor ?? \"\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List the intake roster and payment evidence",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/enrollments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "enrollments"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: listCourseRoster"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Manually enroll a verified student in an open paid intake",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{targetUserId}}\",\n  \"paymentStatus\": \"COMPLETED\",\n  \"externalPaymentReference\": \"PAY-2026-0001\",\n  \"paymentNote\": \"Payment confirmed outside the LMS.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/enrollments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "enrollments"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: manuallyEnrollStudent"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"enrollmentId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Process intake enrollment for multiple students",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"students\": [\n    {\n      \"userId\": \"{{targetUserId}}\",\n      \"paymentStatus\": \"COMPLETED\",\n      \"externalPaymentReference\": \"PAY-2026-0001\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/enrollments/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "enrollments",
+                "bulk"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nReturns ordered per-student CREATED or FAILED results. Writes are serialized behind the intake-enrollment lock so capacity and duplicate decisions remain concurrency-safe. Once a locked transaction proves capacity is exhausted, the remaining eligible rows receive COURSE_CAPACITY_REACHED without opening additional insert transactions.\n\nOperation ID: bulkEnrollStudents"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Enrollment Requests",
+      "item": [
+        {
+          "name": "[STUDENT] Request enrollment in a paid course",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contactPhone\": \"0751234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/enrollment-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "enrollment-requests"
+              ]
+            },
+            "description": "Access: STUDENT\n\nThe missing link between a PAID course's public \"Enroll\" button and the admin-mediated payment process. Filed against the course's current open (or next) intake; notifies every admin by email with a deep link. Does not create an Enrollment by itself — an admin converts the request via POST /enrollment-requests/{id}/enroll.\n\nOperation ID: createEnrollmentRequest"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"enrollmentRequestId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List enrollment requests filed against this intake",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intakes/{{intakeId}}/enrollment-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intakes",
+                "{{intakeId}}",
+                "enrollment-requests"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/enrollment-management permission required. Returns a `summary` object counting requests by status ({ all, PENDING, CONTACTED, ENROLLED, DECLINED }) alongside the offset-paginated page.\n\nOperation ID: listIntakeEnrollmentRequests"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get an enrollment request",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollment-requests/{{enrollmentRequestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollment-requests",
+                "{{enrollmentRequestId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getEnrollmentRequest"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Mark an enrollment request Contacted or Declined, or reopen a Declined one",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CONTACTED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollment-requests/{{enrollmentRequestId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollment-requests",
+                "{{enrollmentRequestId}}",
+                "status"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAllowed transitions: PENDING -> CONTACTED | DECLINED, CONTACTED -> DECLINED, DECLINED -> PENDING (reopen, in place of forcing the student to resubmit). Enrolled is reached only through POST .../enroll, never through this endpoint.\n\nOperation ID: updateEnrollmentRequestStatus"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Convert a request into a real enrollment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentStatus\": \"COMPLETED\",\n  \"externalPaymentReference\": \"PAY-2026-0001\",\n  \"paymentNote\": \"Payment confirmed outside the LMS.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollment-requests/{{enrollmentRequestId}}/enroll",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollment-requests",
+                "{{enrollmentRequestId}}",
+                "enroll"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nRecords payment and creates the Enrollment through the same shared enroll mutation the direct search-and-enroll flow uses (POST /intakes/{intakeId}/enrollments) — not a second implementation of the enroll rules. Marks the request Enrolled and links it to the new enrollment.\n\nOperation ID: enrollFromEnrollmentRequest"
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Certificates",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] Issue certificate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Successfully completed all course requirements.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/certificate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "certificate"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin-only. Enrollment must be completed and the course must have certificates enabled. Random certificate-code collisions are retried up to five times; a competing certificate for the same enrollment is not treated as a retryable code collision.\n\nOperation ID: issueCertificate"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"certificateId\", data.id);",
+                  "  if (data?.certificateCode) pm.environment.set(\"certificateCode\", data.certificateCode);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[PUBLIC] Verify certificate publicly",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/certificates/verify/{{certificateCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "certificates",
+                "verify",
+                "{{certificateCode}}"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: verifyCertificate"
+          }
+        },
+        {
+          "name": "[SIGNED IN] List own certificates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/certificates/my",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "certificates",
+                "my"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: listOwnCertificates"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List all certificates for administration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/certificates/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "certificates",
+                "admin"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "ISSUED",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "intakeId",
+                  "value": "{{intakeId}}",
+                  "description": "Scope the list to one intake — used by the intake workspace's Certificates and Projects tabs.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/certificate-management permission required. Returns a bounded keyset page.\n\nOperation ID: listCertificatesAdmin"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Get certificate detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/certificates/{{certificateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "certificates",
+                "{{certificateId}}"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nAvailable to the certificate owner or an admin.\n\nOperation ID: getCertificate"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Revoke certificate",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"revocationReason\": \"Issued using incorrect enrollment information.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/certificates/{{certificateId}}/revoke",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "certificates",
+                "{{certificateId}}",
+                "revoke"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/certificate-management permission required. Revocation locks the enrollment, rereads the certificate and its course/catalog lifecycle in one transaction, and rejects a repeated revocation. A credential may still be revoked after its course or catalog parents become terminal or archived because invalid credentials must remain revocable.\n\nOperation ID: revokeCertificate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Projects",
+      "item": [
+        {
+          "name": "[PUBLIC] List public approved projects",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/showcase",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "showcase"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: listPublicProjects"
+          }
+        },
+        {
+          "name": "[PUBLIC] Get public approved project",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/showcase/{{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "showcase",
+                "{{projectId}}"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: getPublicProject"
+          }
+        },
+        {
+          "name": "[STUDENT] Submit project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intakeId\": \"{{intakeId}}\",\n  \"enrollmentId\": \"{{enrollmentId}}\",\n  \"title\": \"Foundry API Test Suite\",\n  \"description\": \"A reusable automated API regression collection.\",\n  \"thumbnailUrl\": \"https://example.com/project-thumbnail.png\",\n  \"projectUrl\": \"https://example.com/projects/foundry-api\",\n  \"githubUrl\": \"https://github.com/example/foundry-api-tests\",\n  \"demoUrl\": null,\n  \"technologies\": [\n    \"Postman\",\n    \"JavaScript\"\n  ],\n  \"isPublic\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects"
+              ]
+            },
+            "description": "Access: STUDENT\n\nEnrollment must belong to the current user and must not be cancelled.\n\nOperation ID: submitProject"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"projectId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SIGNED IN] List own projects",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/my",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "my"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: listOwnProjects"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Get project detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/{{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "{{projectId}}"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nAvailable only to the project owner or an administrator. Public approved projects use the separately projected showcase endpoint.\n\nOperation ID: getProject"
+          }
+        },
+        {
+          "name": "[STUDENT] Update pending project",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Foundry LMS API Regression Suite\",\n  \"description\": \"An updated reusable API regression collection.\",\n  \"isPublic\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/{{projectId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "{{projectId}}"
+              ]
+            },
+            "description": "Access: STUDENT\n\nThe current user must own the project and it must still be pending.\n\nOperation ID: updateProject"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List all projects for review",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/admin/all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "admin",
+                "all"
+              ],
+              "query": [
+                {
+                  "key": "intakeId",
+                  "value": "{{intakeId}}",
+                  "description": "Scope the list to one intake — used by the intake workspace's Certificates and Projects tabs.",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Opaque next-page cursor returned by the preceding response. It is valid only with the same resource scope and filters.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/project-review permission required.\n\nOperation ID: listProjectsAdmin"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Review project",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"APPROVED\",\n  \"adminFeedback\": \"Strong API coverage and clear organization.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "{{projectId}}",
+                "review"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nAdmin/project-review permission required.\n\nOperation ID: reviewProject"
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Audit Logs",
+      "item": [
+        {
+          "name": "[SUPER ADMIN ONLY] Search audit logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/audit/logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "audit",
+                "logs"
+              ],
+              "query": [
+                {
+                  "key": "action",
+                  "value": "COURSE_PUBLISHED",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "resourceType",
+                  "value": "COURSE",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "actorUserId",
+                  "value": "{{currentUserId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "entityId",
+                  "value": "{{courseId}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01T00:00:00.000Z",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31T23:59:59.999Z",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only.\n\nOperation ID: listAuditLogs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Service Overview",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get learning-service administration summaries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "summary"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCompatibility alias for the database-backed learning-service list. Returns every configured service with catalog, learner, curriculum, course-intake, payment-attention, and lifecycle aggregates.\n\nOperation ID: getAdminLearningServiceSummaries"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List learning services and administration summaries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "includeArchived",
+                  "value": "true",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: listLearningServices"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Create a learning service as Draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"PROFESSIONAL_WORKSHOPS\",\n  \"slug\": \"professional-workshops\",\n  \"title\": \"Professional Workshops\",\n  \"description\": \"Short paid seasonal workshops administered by Foundry Academy.\",\n  \"accessType\": \"PAID\",\n  \"courseMode\": \"SEASONAL\",\n  \"enrollmentMode\": \"ADMIN\",\n  \"paymentRequirement\": \"REQUIRED\",\n  \"sortOrder\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. The initial release supports either paid seasonal/admin-enrolled services or free evergreen/self-enrolled services.\n\nOperation ID: createLearningService"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get a learning service and administration summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getLearningService"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Update a Draft learning service",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Professional Workshops\",\n  \"description\": \"Short paid seasonal workshops for working professionals.\",\n  \"sortOrder\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Identity and policy are protected after categories or courses depend on the service; the stable key is never mutable.\n\nOperation ID: updateLearningService"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Permanently delete an archived empty learning service",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Permanent deletion requires Archived status and no categories or protected descendant history.\n\nOperation ID: deleteLearningServicePermanently"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Preview whether permanent service deletion is safe",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}/deletion-impact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}",
+                "deletion-impact"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: getLearningServiceDeletionImpact"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Activate a Draft learning service",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedStatus\": \"DRAFT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}",
+                "activate"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: activateLearningService"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Return an Active learning service to Draft",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedStatus\": \"DRAFT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}/deactivate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}",
+                "deactivate"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: deactivateLearningService"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Archive an inactive learning service",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedStatus\": \"DRAFT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}",
+                "archive"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nLive courses or enrollments block archival.\n\nOperation ID: archiveLearningService"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Restore an Archived learning service as Draft",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedStatus\": \"DRAFT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/services/{{learningServiceId}}/unarchive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "services",
+                "{{learningServiceId}}",
+                "unarchive"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: unarchiveLearningService"
+          }
+        }
+      ]
+    }
+  ]
+}

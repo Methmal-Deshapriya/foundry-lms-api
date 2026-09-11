@@ -1,8 +1,8 @@
 import express from "express";
 import * as auditController from "../../../controllers/v1/audit/audit.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
-import { requireRole } from "../../../middlewares/requireRole.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { requirePermission } from "../../../middlewares/requirePermission.js";
+import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 
 /**
  * Audit Routes - The "Security Vault"
@@ -20,7 +20,7 @@ const router = express.Router();
 router.get(
   "/logs",
   authenticate,
-  requireRole([ROLES.SUPER_ADMIN]),
+  requirePermission(PERMISSIONS.AUDIT_VIEW),
   auditController.getAuditLogsController
 );
 

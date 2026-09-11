@@ -1,8 +1,8 @@
 import express from "express";
 import * as userController from "../../../controllers/v1/users/user.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
-import { requireRole } from "../../../middlewares/requireRole.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { requirePermission } from "../../../middlewares/requirePermission.js";
+import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 
 /**
  * User Routes - The "Security Map"
@@ -12,6 +12,17 @@ import { ROLES } from "../../../constants/v1/users/users.constants.js";
 const router = express.Router();
 
 /**
+ * @route   PATCH /v1/users/profile
+ * @desc    Update current user profile
+ * @access  Private
+ */
+router.patch(
+  "/profile",
+  authenticate,
+  userController.updateProfileController,
+);
+
+/**
  * @route   GET /v1/users
  * @desc    Get all registered users
  * @access  Private (ADMIN or SUPER_ADMIN)
@@ -19,8 +30,20 @@ const router = express.Router();
 router.get(
   "/",
   authenticate,
-  requireRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]),
-  userController.getAllUsersController
+  requirePermission(PERMISSIONS.USERS_VIEW),
+  userController.getAllUsersController,
+);
+
+/**
+ * @route   GET /v1/users/:id
+ * @desc    Get one user's full profile and activity summary
+ * @access  Private (ADMIN or SUPER_ADMIN)
+ */
+router.get(
+  "/:id",
+  authenticate,
+  requirePermission(PERMISSIONS.USERS_VIEW),
+  userController.getOneUserController,
 );
 
 /**
@@ -31,8 +54,8 @@ router.get(
 router.patch(
   "/:id/promote",
   authenticate,
-  requireRole([ROLES.SUPER_ADMIN]),
-  userController.promoteUserController
+  requirePermission(PERMISSIONS.USERS_MANAGE_ROLES),
+  userController.promoteUserController,
 );
 
 /**
@@ -43,8 +66,8 @@ router.patch(
 router.patch(
   "/:id/demote",
   authenticate,
-  requireRole([ROLES.SUPER_ADMIN]),
-  userController.demoteUserController
+  requirePermission(PERMISSIONS.USERS_MANAGE_ROLES),
+  userController.demoteUserController,
 );
 
 export default router;

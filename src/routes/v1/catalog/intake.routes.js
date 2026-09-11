@@ -1,0 +1,26 @@
+import express from "express";
+import * as controller from "../../../controllers/v1/catalog/intake.controller.js";
+import * as enrollmentController from "../../../controllers/v1/enrollments/enrollment.controller.js";
+import curriculumRoutes from "../courses/courseCurriculum.routes.js";
+import * as enrollmentRequestController from "../../../controllers/v1/enrollments/enrollmentRequest.controller.js";
+import { authenticate } from "../../../middlewares/authenticate.js";
+import { requirePermission } from "../../../middlewares/requirePermission.js";
+import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
+
+const router = express.Router();
+router.use(authenticate);
+router.use("/:intakeId/curriculum", curriculumRoutes);
+router.get("/:intakeId/enrollment-requests", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentRequestController.listForIntake);
+router.post("/:intakeId/enroll", requirePermission(PERMISSIONS.COURSES_SELF_ENROLL), enrollmentController.selfEnrollFreeCourseController);
+router.get("/:intakeId/enrollments", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.getCourseEnrollmentsController);
+router.get("/:intakeId/eligible-students", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.getEligibleStudentsForCourseController);
+router.post("/:intakeId/enrollments", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.enrollStudentInCourseController);
+router.post("/:intakeId/enrollments/bulk", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.bulkEnrollStudentsInCourseController);
+router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.list);
+router.get("/:id/deletion-impact", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.deletionImpact);
+router.get("/:id/analytics", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.analytics);
+router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.get);
+router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.update);
+router.patch("/:id/status", requirePermission(PERMISSIONS.COURSE_LIFECYCLE_MANAGE), controller.updateStatus);
+router.delete("/:id", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.remove);
+export default router;

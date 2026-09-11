@@ -1,9 +1,16 @@
 import * as userRepo from "../../../repositories/v1/users/user.repository.js";
+import * as userActivityRepo from "../../../repositories/v1/users/userActivity.repository.js";
 import * as userModel from "../../../models/v1/users/user.model.js";
 import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import {
+  userIdSchema,
+  userListQuerySchema,
+} from "../../../constants/v1/users/user.schema.js";
+import { updateProfileSchema } from "../../../constants/v1/auth/auth.schema.js";
+import { transformUser } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
-import { ConflictError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
+import { ConflictError, NotFoundError, ForbiddenError, ValidationError } from "../../../utils/Errors.js";
 
 /**
  * User Service - The "Brain"
@@ -11,11 +18,112 @@ import { ConflictError, NotFoundError, ForbiddenError } from "../../../utils/Err
  */
 
 /**
- * Service: Get a list of all users.
+ * Service: Update user profile.
+ * @param {string} userId - ID of the user being updated.
+ * @param {object} data - Profile fields.
  */
-export async function getAllUsersService() {
-  const users = await userRepo.findAllUsers();
-  return userModel.toAdminUserListResponse(users);
+export async function updateUserProfileService(userId, data) {
+  // 1. Validation
+  const validation = updateProfileSchema.safeParse(data);
+  if (!validation.success) {
+    const firstError = validation.error.issues[0];
+    throw new ValidationError(firstError.message, firstError.path[0]);
+  }
+
+  // 2. Existence Check
+  const user = await userRepo.findUserById(userId);
+  if (!user) {
+    throw new NotFoundError("User not found.");
+  }
+
+  // 3. Update
+  const updateData = {
+    ...validation.data,
+    ...(validation.data.dateOfBirth
+      ? { dateOfBirth: new Date(`${validation.data.dateOfBirth}T00:00:00.000Z`) }
+      : {}),
+  };
+  const updatedUser = await userRepo.updateUser(userId, updateData);
+
+  return transformUser(updatedUser);
+}
+
+/**
+ * Service: Get a paginated list of users with optional role filtering.
+ */
+export async function getAllUsersService(query = {}) {
+  const validation = userListQuerySchema.safeParse(query);
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    throw new ValidationError(issue.message, issue.path.join(".") || null);
+  }
+  const { role, limit, offset } = validation.data;
+  const sanitizedFilters = role ? { role } : {};
+
+  const { total, users } = await userRepo.findAndCountUsers(
+    sanitizedFilters,
+    limit,
+    offset
+  );
+  const sanitizedUsers = userModel.toAdminUserListResponse(users);
+
+  return {
+    users: sanitizedUsers,
+    pagination: {
+      total,
+      limit: Number(limit),
+      offset: Number(offset),
+      hasMore: Number(offset) + sanitizedUsers.length < total,
+    },
+  };
+}
+
+/**
+ * Service: Get one user's full profile plus a bounded, recent view of their
+ * activity across the system, for the admin user detail view.
+ * @param {string} id - The UUID of the user to fetch.
+ */
+export async function getUserDetailService(id) {
+  const parsedId = userIdSchema.safeParse(id);
+  if (!parsedId.success) {
+    throw new ValidationError(parsedId.error.issues[0].message, "id");
+  }
+
+  const user = await userRepo.findUserById(id);
+  if (!user) {
+    throw new NotFoundError("User not found.");
+  }
+
+  const [
+    enrollments,
+    managedEnrollments,
+    paymentsRecorded,
+    paymentsMade,
+    certificates,
+    studentProjects,
+    enrollmentRequests,
+    auditActions,
+  ] = await Promise.all([
+    userActivityRepo.findEnrollmentsForUser(id),
+    userActivityRepo.findManagedEnrollmentsForUser(id),
+    userActivityRepo.findPaymentsRecordedByUser(id),
+    userActivityRepo.findPaymentsForUser(id),
+    userActivityRepo.findCertificatesForUser(id),
+    userActivityRepo.findStudentProjectsForUser(id),
+    userActivityRepo.findEnrollmentRequestsForUser(id),
+    userActivityRepo.findAuditLogsForActor(id),
+  ]);
+
+  return userModel.toAdminUserDetailResponse(user, {
+    enrollments,
+    managedEnrollments,
+    paymentsRecorded,
+    paymentsMade,
+    certificates,
+    studentProjects,
+    enrollmentRequests,
+    auditActions,
+  });
 }
 
 /**
@@ -24,6 +132,10 @@ export async function getAllUsersService() {
  * @param {string} actorId - The Super Admin performing the action.
  */
 export async function promoteUserService(targetId, actorId) {
+  const parsedId = userIdSchema.safeParse(targetId);
+  if (!parsedId.success) {
+    throw new ValidationError(parsedId.error.issues[0].message, "id");
+  }
   // 1. Find the target user
   const user = await userRepo.findUserById(targetId);
   if (!user) {
@@ -58,6 +170,10 @@ export async function promoteUserService(targetId, actorId) {
  * @param {string} actorId - The Super Admin performing the action.
  */
 export async function demoteUserService(targetId, actorId) {
+  const parsedId = userIdSchema.safeParse(targetId);
+  if (!parsedId.success) {
+    throw new ValidationError(parsedId.error.issues[0].message, "id");
+  }
   // 1. Find the target user
   const user = await userRepo.findUserById(targetId);
   if (!user) {

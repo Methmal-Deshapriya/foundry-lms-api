@@ -7,12 +7,41 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
  */
 
 /**
+ * Controller: Update the profile of the currently logged-in user.
+ * PATCH /v1/users/profile
+ */
+export async function updateProfileController(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const updatedUser = await userService.updateUserProfileService(userId, req.body);
+    return ApiResponse.send(res, updatedUser, "Profile updated successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Controller: Get all users.
  */
 export async function getAllUsersController(req, res, next) {
   try {
-    const users = await userService.getAllUsersService();
-    return ApiResponse.send(res, users, "User list fetched successfully");
+    const result = await userService.getAllUsersService(req.query);
+
+    return ApiResponse.send(res, result, "User list fetched successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Controller: Get one user's full profile and activity summary.
+ * GET /v1/users/:id
+ */
+export async function getOneUserController(req, res, next) {
+  try {
+    const { id } = req.params;
+    const user = await userService.getUserDetailService(id);
+    return ApiResponse.send(res, user, "User detail fetched successfully");
   } catch (error) {
     next(error);
   }

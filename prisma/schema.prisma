@@ -1,5 +1,4 @@
-// This is your Prisma schema file (Modern Prisma 7 Edition)
-// It defines the data shapes for Foundry LMS.
+// Foundry LMS database schema (Prisma 7 / PostgreSQL)
 
 generator client {
   provider = "prisma-client-js"
@@ -9,65 +8,543 @@ datasource db {
   provider = "postgresql"
 }
 
-// User Roles
 enum Role {
   STUDENT
   ADMIN
   SUPER_ADMIN
 }
 
-// User Model: Identity and System Authority
+enum LearningAccessType {
+  FREE
+  PAID
+}
+
+enum LearningCourseMode {
+  SEASONAL
+  EVERGREEN
+}
+
+enum LearningEnrollmentMode {
+  ADMIN
+  SELF
+}
+
+enum LearningPaymentRequirement {
+  REQUIRED
+  NOT_REQUIRED
+}
+
+enum LearningServiceStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum CatalogStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CourseLevel {
+  OPEN
+  FOUNDATION
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum DurationUnit {
+  SESSION
+  DAY
+  WEEK
+  MONTH
+}
+
+enum SessionStatus {
+  DRAFT
+  READY
+  ARCHIVED
+}
+
+enum CourseEnrollmentStatus {
+  COMING_SOON // no intake exists yet
+  OPEN // has an OPEN_ACTIVE intake right now
+  REOPENING_SOON // has intake(s), none currently OPEN_ACTIVE
+}
+
+enum IntakeStatus {
+  DRAFT
+  OPEN_ACTIVE
+  CLOSED_ACTIVE
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum CourseSessionDeliveryStatus {
+  UNRELEASED
+  SCHEDULED
+  RELEASED
+  WITHDRAWN
+}
+
+enum EnrollmentSource {
+  ADMIN
+  SELF
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  NOT_REQUIRED
+  PARTIAL
+  COMPLETED
+}
+
+enum PaymentType {
+  FULL // paid the full (discounted) price in one go at enrollment time
+  PARTIAL // paid half the full price at enrollment time
+  TOP_UP // paid the remaining half after being enrolled as PARTIAL
+}
+
+enum EnrollmentRequestStatus {
+  PENDING // just submitted, nobody's reached out yet
+  CONTACTED // admin has given the student payment instructions, awaiting payment
+  ENROLLED // converted — Enrollment + Payment now exist, linked via enrollmentId
+  DECLINED // admin closed the request without enrolling (stale/no-show)
+}
+
+enum CertificateStatus {
+  ISSUED
+  REVOKED
+}
+
+enum ProjectStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  phone     Int? // Optional phone number
-  password  String // Note: We will handle hiding this via the Global Omit API
-  role      Role     @default(STUDENT)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id              String    @id @default(uuid())
+  firstName       String    @default("") @map("first_name")
+  lastName        String    @default("") @map("last_name")
+  email           String    @unique
+  phone           String?
+  address         String?
+  district        String?
+  dateOfBirth     DateTime? @map("date_of_birth")
+  alStream        String?   @map("al_stream")
+  password        String
+  role            Role      @default(STUDENT)
+  emailVerified   Boolean   @default(false) @map("email_verified")
+  securityVersion Int       @default(0) @map("security_version")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
-  enrollments    Enrollment[]
-  actorAuditLogs AuditLog[]   @relation("ActorRelation")
+  enrollments               Enrollment[]        @relation("StudentEnrollments")
+  managedEnrollments        Enrollment[]        @relation("EnrollmentManager")
+  recordedPayments          Payment[]
+  studentProjects           StudentProject[]
+  actorAuditLogs            AuditLog[]          @relation("ActorRelation")
+  passwordResetTokens       PasswordResetToken[]
+  emailOtps                 EmailOtp[]
+  loginChallenges           LoginChallenge[]
+  enrollmentRequests        EnrollmentRequest[] @relation("EnrollmentRequestStudent")
+  contactedEnrollmentRequests EnrollmentRequest[] @relation("EnrollmentRequestContactedBy")
 
+  @@index([role, emailVerified, email, id])
+  @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_first_name_trgm_idx")
+  @@index([lastName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_last_name_trgm_idx")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_email_trgm_idx")
   @@map("users")
 }
 
-// Bootcamp Model: The learning products
-model Bootcamp {
-  id          String   @id @default(uuid())
-  title       String
-  slug        String   @unique
-  description String?
-  price       Float
-  isPublished Boolean  @default(false) @map("is_published")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+model LoginChallenge {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime  @map("expires_at")
+  attempts  Int       @default(0)
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
-  // Relationships
-  enrollments Enrollment[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@map("bootcamps")
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("login_challenges")
 }
 
-// Enrollment Model: The "Bridge" linking Students to Bootcamps
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailOtp {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("email_otps")
+}
+
+model LearningService {
+  id                 String                     @id @default(uuid())
+  key                String                     @unique
+  slug               String                     @unique
+  title              String
+  description        String
+  accessType         LearningAccessType         @map("access_type")
+  courseMode         LearningCourseMode         @map("course_mode")
+  enrollmentMode     LearningEnrollmentMode     @map("enrollment_mode")
+  paymentRequirement LearningPaymentRequirement @map("payment_requirement")
+  status             LearningServiceStatus      @default(DRAFT)
+  sortOrder          Int                        @default(0) @map("sort_order")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at")
+
+  categories Category[]
+
+  @@index([status, sortOrder, title])
+  @@map("learning_services")
+}
+
+model Category {
+  id            String        @id @default(uuid())
+  serviceId     String        @map("service_id")
+  slug          String
+  title         String
+  description   String
+  audienceLabel String?       @map("audience_label")
+  visualKey     String        @map("visual_key")
+  badgeLabel    String?       @map("badge_label")
+  status        CatalogStatus @default(DRAFT)
+  sortOrder     Int           @default(0) @map("sort_order")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  courses Course[]
+  intakes Intake[]
+  service LearningService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@unique([serviceId, slug])
+  @@index([serviceId, status, sortOrder])
+  @@map("categories")
+}
+
+/// The real-world program a student browses and enrolls in. Holds every piece of
+/// content that's identical across every run of the program — its content lives
+/// here, not on Intake, because it never varies between intakes (see the
+/// 2026-08-30 course-to-program-intake rename plan for the full reasoning).
+model Course {
+  id                 String                 @id @default(uuid())
+  categoryId         String                 @map("category_id")
+  slug               String
+  title              String
+  summary            String
+  description        String
+  level              CourseLevel
+  durationValue      Int?                   @map("duration_value")
+  durationUnit       DurationUnit?          @map("duration_unit")
+  highlights         String[]               @default([])
+  skills             String[]               @default([])
+  prerequisites      String[]               @default([])
+  thumbnailUrl       String?                @map("thumbnail_url")
+  sortOrder          Int                    @default(0) @map("sort_order")
+  price              Decimal                @default(0) @db.Decimal(12, 2)
+  currency           String                 @default("LKR")
+  intakeCodePrefix   String                 @unique @map("intake_code_prefix")
+  certificateEnabled Boolean                @map("certificate_enabled")
+  discountAmount     Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
+  enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
+  archivedAt         DateTime?              @map("archived_at")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
+
+  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  intakes            Intake[]
+  payments           Payment[]
+  enrollments        Enrollment[]
+  enrollmentRequests EnrollmentRequest[]
+
+  @@unique([id, categoryId])
+  @@unique([categoryId, slug])
+  @@index([categoryId, archivedAt, title])
+  @@index([categoryId, enrollmentStatus, sortOrder])
+  @@map("courses")
+}
+
+/// One scheduled, enrollable run of a Course. Holds only what varies between
+/// runs — dates, timezone, capacity, lifecycle status — plus the sessions,
+/// enrollments, and projects that were always scoped to a single run.
+model Intake {
+  id              String       @id @default(uuid())
+  courseId        String       @map("course_id")
+  categoryId      String       @map("category_id") // denormalized off Course, same reasoning as Course.categoryId off Category
+  intakeKey       String       @map("intake_key")
+  code            String       @unique
+  startDate       DateTime?    @map("start_date") @db.Date
+  expectedEndDate DateTime?    @map("expected_end_date") @db.Date
+  timezone        String       @default("Asia/Colombo")
+  capacity        Int?
+  status          IntakeStatus @default(DRAFT)
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at")
+
+  course             Course              @relation(fields: [courseId, categoryId], references: [id, categoryId], onDelete: Restrict)
+  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  enrollments        Enrollment[]
+  courseSessions     CourseSession[]
+  studentProjects    StudentProject[]
+  payments           Payment[]
+  enrollmentRequests EnrollmentRequest[]
+
+  @@unique([courseId, intakeKey])
+  @@unique([id, courseId]) // lets Enrollment/Payment/EnrollmentRequest FK against (intakeId, courseId), guaranteeing the intake actually belongs to the course claimed
+  @@index([courseId, status, startDate])
+  @@index([categoryId, status])
+  @@map("intakes")
+}
+
 model Enrollment {
-  id         String   @id @default(uuid())
-  userId     String   @map("user_id")
-  bootcampId String   @map("bootcamp_id")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id                       String           @id @default(uuid())
+  userId                   String           @map("user_id")
+  courseId                 String           @map("course_id") // -> Course.id — the program, any intake
+  intakeId                 String           @map("intake_id") // -> Intake.id — the specific run the student is in
+  source                   EnrollmentSource
+  enrolledByUserId         String?          @map("enrolled_by_user_id")
+  status                   EnrollmentStatus @default(ACTIVE)
+  paymentStatus            PaymentStatus    @default(NOT_REQUIRED) @map("payment_status")
+  paymentCompletedAt       DateTime?        @map("payment_completed_at")
+  externalPaymentReference String?          @map("external_payment_reference")
+  paymentNote              String?          @map("payment_note")
+  completedAt              DateTime?        @map("completed_at")
+  createdAt                DateTime         @default(now()) @map("created_at")
+  updatedAt                DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  // Relationships
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bootcamp Bootcamp @relation(fields: [bootcampId], references: [id], onDelete: Cascade)
+  user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Cascade)
+  enrolledBy         User?               @relation("EnrollmentManager", fields: [enrolledByUserId], references: [id], onDelete: SetNull)
+  course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake             Intake              @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
+  sessionCompletions SessionCompletion[]
+  certificates       Certificate[]
+  studentProjects    StudentProject[]
+  payments           Payment[]
+  enrollmentRequest  EnrollmentRequest?
 
-  // Constraint: A student can only be enrolled in a specific bootcamp once
-  @@unique([userId, bootcampId])
+  @@unique([id, intakeId]) // lets SessionCompletion/StudentProject FK against (enrollmentId, intakeId)
+  @@unique([userId, intakeId]) // a student can't be enrolled twice in the same intake (re-enrolling into a later intake of the same course is allowed)
+  @@index([courseId, status])
+  @@index([intakeId, status])
+  @@index([intakeId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([enrolledByUserId])
   @@map("enrollments")
 }
 
-// AuditLog Model: Security and accountability tracking
+model Session {
+  id              String        @id @default(uuid())
+  title           String
+  description     String?
+  recordingUrl    String?       @map("recording_url")
+  materialUrl     String?       @map("material_url")
+  quizUrl         String?       @map("quiz_url")
+  feedbackUrl     String?       @map("feedback_url")
+  durationMinutes Int?          @map("duration_minutes")
+  status          SessionStatus @default(DRAFT)
+  tags            String[]      @default([])
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  courseSessions CourseSession[]
+
+  @@index([status, updatedAt(sort: Desc)])
+  @@index([tags], type: Gin)
+  @@map("sessions")
+}
+
+model CourseSession {
+  id                   String                      @id @default(uuid())
+  intakeId             String                      @map("intake_id")
+  sessionId            String                      @map("session_id")
+  orderIndex           Int?                        @map("order_index")
+  deliveryStatus       CourseSessionDeliveryStatus @default(UNRELEASED) @map("delivery_status")
+  availableAt          DateTime?                   @map("available_at")
+  firstReleasedAt      DateTime?                   @map("first_released_at")
+  retiredAt            DateTime?                   @map("retired_at")
+  historicalOrderIndex Int?                        @map("historical_order_index")
+  createdAt            DateTime                    @default(now()) @map("created_at")
+  updatedAt            DateTime                    @default(now()) @updatedAt @map("updated_at")
+
+  intake      Intake              @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  session     Session             @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  completions SessionCompletion[]
+
+  @@unique([id, intakeId])
+  @@unique([intakeId, sessionId])
+  @@unique([intakeId, orderIndex])
+  @@index([sessionId])
+  @@index([intakeId, retiredAt, orderIndex])
+  @@index([intakeId, deliveryStatus, availableAt])
+  @@map("course_sessions")
+}
+
+model SessionCompletion {
+  id              String   @id @default(uuid())
+  courseSessionId String   @map("course_session_id")
+  enrollmentId    String   @map("enrollment_id")
+  intakeId        String   @map("intake_id")
+  completedAt     DateTime @default(now()) @map("completed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  courseSession CourseSession @relation(fields: [courseSessionId, intakeId], references: [id, intakeId], onDelete: Cascade)
+  enrollment    Enrollment    @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
+
+  @@unique([courseSessionId, enrollmentId])
+  @@index([enrollmentId])
+  @@index([courseSessionId])
+  @@index([intakeId])
+  @@map("session_completions")
+}
+
+model Payment {
+  id                String      @id @default(uuid())
+  enrollmentId      String      @map("enrollment_id")
+  courseId          String      @map("course_id") // -> Course.id, denormalized — program-level revenue rollups without a join
+  intakeId          String      @map("intake_id") // -> Intake.id, denormalized — per-intake ledger view
+  amount            Decimal     @db.Decimal(12, 2) // what was actually collected for this entry
+  discountAmount    Decimal     @default(0) @map("discount_amount") @db.Decimal(12, 2) // recorded explicitly rather than re-derived, so a later change to a course's discount policy never rewrites what old rows say happened
+  currency          String      @default("LKR")
+  type              PaymentType
+  externalReference String?     @map("external_reference")
+  note              String?
+  recordedByUserId  String?     @map("recorded_by_user_id")
+  createdAt         DateTime    @default(now()) @map("created_at")
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  recordedBy User?      @relation(fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  course     Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake     Intake     @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
+
+  @@index([courseId, createdAt])
+  @@index([intakeId, createdAt])
+  @@index([enrollmentId, createdAt])
+  @@map("payments")
+}
+
+/// The missing link between a PAID course's public "Enroll" button and the
+/// admin-mediated payment process: a visitor's request sits here until an admin
+/// contacts them and, once paid outside the system, converts it into a real
+/// Enrollment + Payment. FREE/evergreen intakes skip this — they self-enroll
+/// directly and never create one of these.
+model EnrollmentRequest {
+  id                String                  @id @default(uuid())
+  courseId          String                  @map("course_id")
+  intakeId          String                  @map("intake_id") // the OPEN_ACTIVE intake resolved at request time
+  studentUserId     String                  @map("student_user_id")
+  contactPhone      String                  @map("contact_phone") // captured on the request form
+  status            EnrollmentRequestStatus @default(PENDING)
+  contactedAt       DateTime?               @map("contacted_at")
+  contactedByUserId String?                 @map("contacted_by_user_id")
+  enrollmentId      String?                 @unique @map("enrollment_id") // set once converted — permanent audit trail
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @default(now()) @updatedAt @map("updated_at")
+
+  course      Course      @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  intake      Intake      @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
+  student     User        @relation("EnrollmentRequestStudent", fields: [studentUserId], references: [id], onDelete: Restrict)
+  contactedBy User?       @relation("EnrollmentRequestContactedBy", fields: [contactedByUserId], references: [id], onDelete: SetNull)
+  enrollment  Enrollment? @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+
+  @@index([intakeId, status])
+  @@index([courseId, status])
+  @@index([studentUserId])
+  @@map("enrollment_requests")
+}
+
+model Certificate {
+  id               String            @id @default(uuid())
+  enrollmentId     String            @map("enrollment_id")
+  certificateCode  String            @unique @map("certificate_code")
+  studentName      String            @map("student_name")
+  courseName       String            @map("course_name")
+  description      String?
+  issuedDate       DateTime          @map("issued_date")
+  status           CertificateStatus @default(ISSUED)
+  revokedAt        DateTime?         @map("revoked_at")
+  revokedBy        String?           @map("revoked_by")
+  revocationReason String?           @map("revocation_reason")
+  certificateData  Json              @map("certificate_data")
+  snapshotUrl      String?           @map("snapshot_url")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([enrollmentId, status, issuedDate(sort: Desc)])
+  @@index([status, issuedDate])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([certificateCode(ops: raw("gin_trgm_ops"))], type: Gin, map: "certificates_code_trgm_idx")
+  @@index([studentName(ops: raw("gin_trgm_ops"))], type: Gin, map: "certificates_student_name_trgm_idx")
+  @@index([courseName(ops: raw("gin_trgm_ops"))], type: Gin, map: "certificates_course_name_trgm_idx")
+  @@map("certificates")
+}
+
+model StudentProject {
+  id            String        @id @default(uuid())
+  userId        String        @map("user_id")
+  intakeId      String        @map("intake_id")
+  enrollmentId  String        @map("enrollment_id")
+  title         String
+  description   String?
+  thumbnailUrl  String?       @map("thumbnail_url")
+  projectUrl    String?       @map("project_url")
+  githubUrl     String?       @map("github_url")
+  demoUrl       String?       @map("demo_url")
+  technologies  Json          @default("[]")
+  status        ProjectStatus @default(PENDING)
+  reviewedBy    String?       @map("reviewed_by")
+  reviewedAt    DateTime?     @map("reviewed_at")
+  adminFeedback String?       @map("admin_feedback")
+  isPublic      Boolean       @default(false) @map("is_public")
+  displayOrder  Int           @default(0) @map("display_order")
+  likeCount     Int           @default(0) @map("like_count")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  intake     Intake     @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  enrollment Enrollment @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
+
+  @@index([intakeId, status, isPublic])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([enrollmentId])
+  @@index([likeCount(sort: Desc), createdAt(sort: Desc)])
+  @@map("student_projects")
+}
+
 model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?  @map("actor_user_id")
@@ -78,8 +555,10 @@ model AuditLog {
   metadata    Json?
   createdAt   DateTime @default(now()) @map("created_at")
 
-  // Relationships
   actor User? @relation("ActorRelation", fields: [actorUserId], references: [id], onDelete: SetNull)
 
+  @@index([createdAt(sort: Desc)])
+  @@index([actorUserId])
+  @@index([entityType, entityId])
   @@map("audit_logs")
 }
