@@ -171,6 +171,7 @@ export async function verifyCertificateService(certificateCode) {
   return {
     studentName: certificate.studentName,
     courseName: certificate.courseName,
+    description: certificate.description,
     issuedDate: certificate.issuedDate,
     certificateCode: certificate.certificateCode,
     status: certificate.status,
