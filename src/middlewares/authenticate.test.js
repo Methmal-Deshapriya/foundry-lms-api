@@ -32,7 +32,7 @@ describe("authenticate security claims", () => {
     expect(next.mock.calls[0][0]).toMatchObject({ statusCode: 401 });
     expect(res.clearCookie).toHaveBeenCalledWith(
       "token",
-      expect.objectContaining({ httpOnly: true, sameSite: "strict", path: "/" }),
+      expect.objectContaining({ httpOnly: true, sameSite: "lax", path: "/" }),
     );
   });
 
@@ -46,7 +46,7 @@ describe("authenticate security claims", () => {
     expect(next.mock.calls[0][0]).toMatchObject({ statusCode: 401 });
     expect(res.clearCookie).toHaveBeenCalledWith(
       "token",
-      expect.objectContaining({ path: "/", sameSite: "strict" }),
+      expect.objectContaining({ path: "/", sameSite: "lax" }),
     );
   });
 
