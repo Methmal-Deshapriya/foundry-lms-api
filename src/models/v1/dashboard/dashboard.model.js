@@ -43,5 +43,9 @@ export function toAdminDashboardResponse(summary) {
     districtBreakdown: summary.districtBreakdown,
     topCourses: summary.topCourses,
     serviceBreakdown: summary.serviceBreakdown,
+    runningIntakes: summary.runningIntakes,
+    upcomingIntakes: summary.upcomingIntakes,
+    overdueIntakes: summary.overdueIntakes,
+    enrollmentRequestsList: summary.enrollmentRequestsList,
   };
 }

@@ -89,12 +89,12 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/ready", async (req, res) => {
   res.set("Cache-Control", "no-store");
-  const checkSmtp =
+  const checkEmail =
     process.env.NODE_ENV === "production" ||
-    process.env.READINESS_CHECK_SMTP === "true";
+    process.env.READINESS_CHECK_EMAIL === "true";
   try {
     const databaseCheck = checkDatabaseReadiness(2_000);
-    const emailCheck = checkSmtp ? checkEmailReadiness() : Promise.resolve();
+    const emailCheck = checkEmail ? checkEmailReadiness() : Promise.resolve();
     const rateLimitStoreCheck = checkRateLimitStoreReadiness();
     const [, , rateLimitStore] = await Promise.all([
       databaseCheck,
@@ -104,7 +104,7 @@ app.get("/api/ready", async (req, res) => {
     return ApiResponse.send(res, {
       status: "READY",
       database: "UP",
-      smtp: checkSmtp ? "UP" : "NOT_CHECKED",
+      email: checkEmail ? "UP" : "NOT_CHECKED",
       rateLimitStore,
     });
   } catch (error) {
@@ -114,7 +114,7 @@ app.get("/api/ready", async (req, res) => {
       {
         status: "NOT_READY",
         database: "UNKNOWN",
-        smtp: checkSmtp ? "UNKNOWN" : "NOT_CHECKED",
+        email: checkEmail ? "UNKNOWN" : "NOT_CHECKED",
         rateLimitStore: "UNKNOWN",
       },
       "Dependency readiness check failed",

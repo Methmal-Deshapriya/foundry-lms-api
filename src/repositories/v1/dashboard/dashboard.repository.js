@@ -1,5 +1,5 @@
 import prisma from "../../../utils/prisma.js";
-import { findProgressForEnrollments } from "../enrollments/enrollment.repository.js";
+import { findProgressForEnrollments, visibleCourseSessionWhere } from "../enrollments/enrollment.repository.js";
 import { findVisibleSessions } from "../learning/classroom.repository.js";
 
 /**
@@ -182,6 +182,122 @@ function resolveTrendWindow({ months, from, to } = {}) {
 
 const toCounts = (rows, key) => Object.fromEntries(rows.map((row) => [row[key], row._count]));
 
+// categoryId/service.slug are selected purely to let the client build the
+// admin intake workspace URL (/admin/services/{slug}/categories/{categoryId}
+// /courses/{courseId}/intakes/{id}) without a second lookup — same pattern
+// sessionLibrary.service.js uses for its own "link straight to the intake"
+// problem. Neither is displayed anywhere.
+const INTAKE_CARD_SELECT = {
+  id: true,
+  code: true,
+  courseId: true,
+  categoryId: true,
+  startDate: true,
+  expectedEndDate: true,
+  capacity: true,
+  status: true,
+  course: { select: { title: true } },
+  category: { select: { service: { select: { slug: true } } } },
+  _count: { select: { enrollments: true } },
+};
+
+// categoryId/service.slug (via course) are selected purely to let the client
+// build the admin intake workspace URL, same reasoning as INTAKE_CARD_SELECT
+// above — a pending request is worked from that same enrollment-requests tab
+// (?tab=enrollment-requests&requestId={id}), there's no separate page for it.
+const ENROLLMENT_REQUEST_CARD_SELECT = {
+  id: true,
+  intakeId: true,
+  courseId: true,
+  contactPhone: true,
+  status: true,
+  createdAt: true,
+  student: { select: { firstName: true, lastName: true, email: true } },
+  course: { select: { title: true, categoryId: true, category: { select: { service: { select: { slug: true } } } } } },
+};
+
+function mapEnrollmentRequestRow(row) {
+  const name = `${row.student?.firstName ?? ""} ${row.student?.lastName ?? ""}`.trim();
+  return {
+    id: row.id,
+    intakeId: row.intakeId,
+    courseId: row.courseId,
+    categoryId: row.course?.categoryId ?? null,
+    serviceSlug: row.course?.category?.service?.slug ?? null,
+    courseTitle: row.course?.title ?? "Untitled course",
+    studentName: name || row.student?.email || "Unknown student",
+    studentEmail: row.student?.email ?? null,
+    contactPhone: row.contactPhone,
+    status: row.status,
+    createdAt: row.createdAt,
+  };
+}
+
+function mapIntakeRow(row, deliveryStats) {
+  const stats = deliveryStats?.get(row.id);
+  return {
+    id: row.id,
+    code: row.code,
+    courseId: row.courseId,
+    categoryId: row.categoryId,
+    serviceSlug: row.category?.service?.slug ?? null,
+    title: row.course?.title ?? "Untitled course",
+    status: row.status,
+    startDate: row.startDate,
+    expectedEndDate: row.expectedEndDate,
+    capacity: row.capacity,
+    enrolledCount: row._count.enrollments,
+    totalSessions: stats?.totalSessions ?? 0,
+    releasedSessions: stats?.releasedSessions ?? 0,
+    releaseProgressPct: stats?.releaseProgressPct ?? null,
+    completionPct: stats?.completionPct ?? null,
+  };
+}
+
+// Curriculum-release and completion stats for a bounded set of intakes (the
+// ones actually showing on the "Course delivery" card). Each of the four
+// queries is a single groupBy riding on an existing index — CourseSession's
+// [intakeId, deliveryStatus, availableAt] / [intakeId, retiredAt,
+// orderIndex], SessionCompletion's plain [intakeId], Enrollment's
+// [intakeId, status] — so this stays cheap regardless of platform size; it's
+// never a per-intake query loop.
+async function getIntakeDeliveryStats(intakeIds) {
+  if (intakeIds.length === 0) return new Map();
+  const now = new Date();
+
+  const [eligibleRows, totalRows, completionRows, activeEnrollmentRows] = await Promise.all([
+    // "Released" curriculum — the exact same definition a student's
+    // classroom uses (see visibleCourseSessionWhere), not a fresh rule.
+    prisma.courseSession.groupBy({ by: ["intakeId"], where: visibleCourseSessionWhere({ in: intakeIds }, now), _count: true }),
+    // Total current (non-retired) curriculum, to turn "released" into a %.
+    prisma.courseSession.groupBy({ by: ["intakeId"], where: { intakeId: { in: intakeIds }, retiredAt: null }, _count: true }),
+    prisma.sessionCompletion.groupBy({ by: ["intakeId"], where: { intakeId: { in: intakeIds } }, _count: true }),
+    prisma.enrollment.groupBy({ by: ["intakeId"], where: { intakeId: { in: intakeIds }, status: "ACTIVE" }, _count: true }),
+  ]);
+
+  const eligibleByIntake = toCounts(eligibleRows, "intakeId");
+  const totalByIntake = toCounts(totalRows, "intakeId");
+  const completionsByIntake = toCounts(completionRows, "intakeId");
+  const activeEnrollmentsByIntake = toCounts(activeEnrollmentRows, "intakeId");
+
+  const stats = new Map();
+  for (const id of intakeIds) {
+    const totalSessions = totalByIntake[id] ?? 0;
+    const releasedSessions = eligibleByIntake[id] ?? 0;
+    // Completion % denominator is "every (active enrollment × released
+    // session) pair" — the same shape findProgressForEnrollments already
+    // uses per-student, just aggregated platform-wide instead of per-user.
+    const possibleCompletions = releasedSessions * (activeEnrollmentsByIntake[id] ?? 0);
+    stats.set(id, {
+      totalSessions,
+      releasedSessions,
+      releaseProgressPct: totalSessions > 0 ? Math.round((releasedSessions / totalSessions) * 100) : null,
+      completionPct: possibleCompletions > 0 ? Math.round(((completionsByIntake[id] ?? 0) / possibleCompletions) * 100) : null,
+    });
+  }
+  return stats;
+}
+
 export async function getAdminSummary(options = {}) {
   const { start: trendSince, end: trendUntil } = resolveTrendWindow(options);
   const monthBuckets = seedMonthBuckets(trendSince, trendUntil);
@@ -203,6 +319,10 @@ export async function getAdminSummary(options = {}) {
     topCourseRows,
     serviceEnrollments,
     payableEnrollments,
+    runningIntakeRows,
+    upcomingIntakeRows,
+    overdueIntakeRows,
+    enrollmentRequestRows,
   ] = await Promise.all([
     prisma.user.count({ where: { role: "STUDENT" } }),
     prisma.enrollment.count({ where: { status: "ACTIVE" } }),
@@ -264,7 +384,56 @@ export async function getAdminSummary(options = {}) {
       where: { status: { not: "CANCELLED" }, paymentStatus: { not: "NOT_REQUIRED" } },
       select: { paymentStatus: true, course: { select: { price: true, discountAmount: true } } },
     }),
+    // "Services delivered" — what's actually in progress right now: started,
+    // not yet past its expected end. Small bounded list, soonest-ending first.
+    prisma.intake.findMany({
+      where: {
+        status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] },
+        startDate: { lte: new Date() },
+        OR: [{ expectedEndDate: null }, { expectedEndDate: { gte: new Date() } }],
+      },
+      orderBy: { startDate: "asc" },
+      take: 6,
+      select: INTAKE_CARD_SELECT,
+    }),
+    // Not started yet — lets admins see what's about to need attention
+    // (instructor/session prep, marketing) before it goes live.
+    prisma.intake.findMany({
+      where: { status: { in: ["DRAFT", "OPEN_ACTIVE"] }, startDate: { gt: new Date() } },
+      orderBy: { startDate: "asc" },
+      take: 6,
+      select: INTAKE_CARD_SELECT,
+    }),
+    // Past its own expected end date but never moved to COMPLETED/ARCHIVED —
+    // a cohort that needs an admin to actually close it out. Most-overdue
+    // (oldest expectedEndDate) first.
+    prisma.intake.findMany({
+      where: { status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] }, expectedEndDate: { lt: new Date() } },
+      orderBy: { expectedEndDate: "asc" },
+      take: 6,
+      select: INTAKE_CARD_SELECT,
+    }),
+    // Oldest-pending-first: whoever's been waiting longest needs an admin's
+    // attention first. Small bounded list, same shape as the intake cards.
+    prisma.enrollmentRequest.findMany({
+      where: { status: "PENDING" },
+      orderBy: { createdAt: "asc" },
+      take: 6,
+      select: ENROLLMENT_REQUEST_CARD_SELECT,
+    }),
   ]);
+
+  // Curriculum-release / completion stats for whichever intakes are
+  // actually showing on the delivery card (running + upcoming + overdue,
+  // capped at 18 ids total) — a second small round trip since it depends on
+  // the ids above, but each of the three queries below is a single `groupBy`
+  // riding on an existing index (CourseSession's
+  // [intakeId, deliveryStatus, availableAt] / [intakeId, retiredAt,
+  // orderIndex], SessionCompletion's plain [intakeId], Enrollment's
+  // [intakeId, status]) — bounded to at most 18 rows each, not a per-intake
+  // query loop.
+  const deliveryIntakeIds = [...new Set([...runningIntakeRows, ...upcomingIntakeRows, ...overdueIntakeRows].map((row) => row.id))];
+  const deliveryStats = await getIntakeDeliveryStats(deliveryIntakeIds);
 
   const enrollmentCounts = new Map(monthBuckets.map((bucket) => [bucket.key, 0]));
   for (const { createdAt } of enrollmentDates) {
@@ -327,5 +496,9 @@ export async function getAdminSummary(options = {}) {
     districtBreakdown: districtRows.map((row) => ({ district: row.district, count: row._count })),
     topCourses,
     serviceBreakdown,
+    runningIntakes: runningIntakeRows.map((row) => mapIntakeRow(row, deliveryStats)),
+    upcomingIntakes: upcomingIntakeRows.map((row) => mapIntakeRow(row, deliveryStats)),
+    overdueIntakes: overdueIntakeRows.map((row) => mapIntakeRow(row, deliveryStats)),
+    enrollmentRequestsList: enrollmentRequestRows.map(mapEnrollmentRequestRow),
   };
 }

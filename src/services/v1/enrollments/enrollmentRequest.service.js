@@ -74,7 +74,7 @@ export async function createEnrollmentRequestService(courseId, data, student) {
     metadata: { courseId, intakeId: request.intakeId },
   });
 
-  // Notification is best-effort — a slow/failed SMTP send should never fail
+  // Notification is best-effort — a slow/failed email send should never fail
   // the student's request itself.
   notifyAdminsOfEnrollmentRequest(request).catch(() => {});
 
