@@ -131,7 +131,8 @@ export async function getStudentSummary(userId) {
   };
 }
 
-const TREND_MONTHS = 6;
+const DEFAULT_TREND_MONTHS = 6;
+const MAX_TREND_MONTHS = 24; // guards a wide-open custom range from seeding an unbounded bucket list
 
 // "yyyy-MM" bucket key in UTC — matches how the buckets below are seeded,
 // so a row's key always finds its pre-built bucket regardless of timezone.
@@ -139,11 +140,16 @@ function monthKey(date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-// The last `count` months (oldest first, current month last), pre-seeded so
-// a month with zero rows still shows up as a zero bar instead of a gap.
-function seedMonthBuckets(count) {
+function monthsBetween(from, to) {
+  return (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + (to.getUTCMonth() - from.getUTCMonth()) + 1;
+}
+
+// Every month between `from` and `to` (inclusive, oldest first), pre-seeded
+// so a month with zero rows still shows up as a zero bar instead of a gap.
+function seedMonthBuckets(from, to) {
+  const count = Math.min(MAX_TREND_MONTHS, Math.max(1, monthsBetween(from, to)));
   const buckets = [];
-  const cursor = new Date();
+  const cursor = new Date(to);
   cursor.setUTCDate(1);
   cursor.setUTCHours(0, 0, 0, 0);
   for (let i = count - 1; i >= 0; i--) {
@@ -154,16 +160,31 @@ function seedMonthBuckets(count) {
   return buckets;
 }
 
-function startOfTrendWindow() {
-  const since = new Date();
-  since.setUTCMonth(since.getUTCMonth() - (TREND_MONTHS - 1));
-  since.setUTCDate(1);
-  since.setUTCHours(0, 0, 0, 0);
-  return since;
+// Either an explicit custom range (`from`/`to`, from the calendar picker) or
+// a preset lookback window (`months` — 3/6/12 from the filter pills),
+// never both; `months` is the fallback when neither date is given.
+function resolveTrendWindow({ months, from, to } = {}) {
+  if (from || to) {
+    const start = from ? new Date(from) : new Date(to);
+    const end = to ? new Date(to) : new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    end.setUTCHours(23, 59, 59, 999);
+    return { start, end };
+  }
+  const resolvedMonths = Math.min(MAX_TREND_MONTHS, Math.max(1, months ?? DEFAULT_TREND_MONTHS));
+  const end = new Date();
+  const start = new Date();
+  start.setUTCMonth(start.getUTCMonth() - (resolvedMonths - 1));
+  start.setUTCDate(1);
+  start.setUTCHours(0, 0, 0, 0);
+  return { start, end };
 }
 
-export async function getAdminSummary() {
-  const trendSince = startOfTrendWindow();
+const toCounts = (rows, key) => Object.fromEntries(rows.map((row) => [row[key], row._count]));
+
+export async function getAdminSummary(options = {}) {
+  const { start: trendSince, end: trendUntil } = resolveTrendWindow(options);
+  const monthBuckets = seedMonthBuckets(trendSince, trendUntil);
 
   const [
     totalStudents,
@@ -177,9 +198,11 @@ export async function getAdminSummary() {
     enrollmentStatusRows,
     certificateStatusRows,
     projectStatusRows,
+    paymentStatusRows,
     districtRows,
     topCourseRows,
     serviceEnrollments,
+    payableEnrollments,
   ] = await Promise.all([
     prisma.user.count({ where: { role: "STUDENT" } }),
     prisma.enrollment.count({ where: { status: "ACTIVE" } }),
@@ -187,21 +210,29 @@ export async function getAdminSummary() {
     prisma.certificate.count({ where: { status: "ISSUED" } }),
     prisma.studentProject.count({ where: { status: "PENDING" } }),
     prisma.payment.aggregate({ _sum: { amount: true } }),
-    // Enrollment/revenue trends: bounded to the last 6 months, minimal
+    // Enrollment/revenue trends: bounded to the selected window, minimal
     // columns selected, bucketed by month in JS below — the same "cheap
     // single query, bucket client-side" shape the learning-activity
     // heatmap already established, just platform-wide instead of per-user.
     prisma.enrollment.findMany({
-      where: { createdAt: { gte: trendSince } },
+      where: { createdAt: { gte: trendSince, lte: trendUntil } },
       select: { createdAt: true },
     }),
     prisma.payment.findMany({
-      where: { createdAt: { gte: trendSince } },
+      where: { createdAt: { gte: trendSince, lte: trendUntil } },
       select: { amount: true, createdAt: true },
     }),
     prisma.enrollment.groupBy({ by: ["status"], _count: true }),
     prisma.certificate.groupBy({ by: ["status"], _count: true }),
     prisma.studentProject.groupBy({ by: ["status"], _count: true }),
+    // "Fully paid" vs "still paying" — among enrollments that actually owe
+    // money (NOT_REQUIRED/free plans excluded). All-time, not part of the
+    // trend window — a snapshot of the current book, not a trend over it.
+    prisma.enrollment.groupBy({
+      by: ["paymentStatus"],
+      where: { status: { not: "CANCELLED" }, paymentStatus: { not: "NOT_REQUIRED" } },
+      _count: true,
+    }),
     prisma.user.groupBy({
       by: ["district"],
       where: { role: "STUDENT", district: { not: null } },
@@ -223,9 +254,18 @@ export async function getAdminSummary() {
       where: { status: "ACTIVE" },
       select: { course: { select: { category: { select: { service: { select: { title: true } } } } } } },
     }),
+    // Revenue-receivable summary: every non-cancelled, payment-required
+    // enrollment's course price/discount, to compute what "everyone paid
+    // in full" would have totaled versus what's actually been collected.
+    // A COMPLETED (fully paid) enrollment already had the one-shot discount
+    // applied, so its "full amount" is price minus that discount; a PARTIAL
+    // (still paying in installments) enrollment owes the plain price.
+    prisma.enrollment.findMany({
+      where: { status: { not: "CANCELLED" }, paymentStatus: { not: "NOT_REQUIRED" } },
+      select: { paymentStatus: true, course: { select: { price: true, discountAmount: true } } },
+    }),
   ]);
 
-  const monthBuckets = seedMonthBuckets(TREND_MONTHS);
   const enrollmentCounts = new Map(monthBuckets.map((bucket) => [bucket.key, 0]));
   for (const { createdAt } of enrollmentDates) {
     const key = monthKey(createdAt);
@@ -239,8 +279,6 @@ export async function getAdminSummary() {
     if (revenueTotals.has(key)) revenueTotals.set(key, revenueTotals.get(key) + Number(amount));
   }
   const revenueTrend = monthBuckets.map((bucket) => ({ month: bucket.label, amount: revenueTotals.get(bucket.key) }));
-
-  const toStatusCounts = (rows) => Object.fromEntries(rows.map((row) => [row.status, row._count]));
 
   const topCourseIds = topCourseRows.map((row) => row.courseId);
   const topCourseDetails = topCourseIds.length
@@ -262,18 +300,30 @@ export async function getAdminSummary() {
     (a, b) => b.count - a.count,
   );
 
+  const availableRevenue = Number(revenueAgg._sum.amount ?? 0);
+  const fullPotentialRevenue = payableEnrollments.reduce((sum, enrollment) => {
+    const price = Number(enrollment.course?.price ?? 0);
+    const discount = Number(enrollment.course?.discountAmount ?? 0);
+    const fullAmount = enrollment.paymentStatus === "COMPLETED" ? price - discount : price;
+    return sum + Math.max(0, fullAmount);
+  }, 0);
+  const revenueToCome = Math.max(0, fullPotentialRevenue - availableRevenue);
+
   return {
     totalStudents,
     totalActiveEnrollments,
     pendingEnrollmentRequests,
     totalCertificatesIssued,
     pendingProjectReviews,
-    totalRevenue: Number(revenueAgg._sum.amount ?? 0),
+    totalRevenue: availableRevenue,
+    fullPotentialRevenue,
+    revenueToCome,
     enrollmentTrend,
     revenueTrend,
-    enrollmentStatusBreakdown: toStatusCounts(enrollmentStatusRows),
-    certificateStatusBreakdown: toStatusCounts(certificateStatusRows),
-    projectStatusBreakdown: toStatusCounts(projectStatusRows),
+    enrollmentStatusBreakdown: toCounts(enrollmentStatusRows, "status"),
+    certificateStatusBreakdown: toCounts(certificateStatusRows, "status"),
+    projectStatusBreakdown: toCounts(projectStatusRows, "status"),
+    paymentStatusBreakdown: toCounts(paymentStatusRows, "paymentStatus"),
     districtBreakdown: districtRows.map((row) => ({ district: row.district, count: row._count })),
     topCourses,
     serviceBreakdown,

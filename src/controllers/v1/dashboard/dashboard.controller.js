@@ -16,7 +16,7 @@ export async function getStudentDashboardController(req, res, next) {
 
 export async function getAdminDashboardController(req, res, next) {
   try {
-    const data = await dashboardService.getAdminDashboardService();
+    const data = await dashboardService.getAdminDashboardService(req.query);
     return ApiResponse.send(res, data, "Admin dashboard summary fetched successfully");
   } catch (error) {
     next(error);

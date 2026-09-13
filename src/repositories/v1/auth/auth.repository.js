@@ -297,59 +297,52 @@ export async function verifyLoginChallenge(id, codeHashes, maxAttempts) {
   return result.user;
 }
 
-export async function cleanupExpiredAuthArtifacts(cutoff, batchSize) {
-  return prisma.$transaction(async (transaction) => {
-    // Interactive transactions use one database connection. Keep these operations
-    // explicitly sequential so the transaction remains short and predictable.
-    const emailOtps = await transaction.emailOtp.findMany({
-      where: {
-        OR: [
-          { expiresAt: { lte: cutoff } },
-          { verifiedAt: { not: null, lte: cutoff } },
-        ],
-      },
-      select: { id: true },
-      orderBy: { createdAt: "asc" },
-      take: batchSize,
-    });
-    const loginChallenges = await transaction.loginChallenge.findMany({
-      where: {
-        OR: [
-          { expiresAt: { lte: cutoff } },
-          { usedAt: { not: null, lte: cutoff } },
-        ],
-      },
-      select: { id: true },
-      orderBy: { createdAt: "asc" },
-      take: batchSize,
-    });
-    const resetTokens = await transaction.passwordResetToken.findMany({
-      where: {
-        OR: [
-          { expiresAt: { lte: cutoff } },
-          { usedAt: { not: null, lte: cutoff } },
-        ],
-      },
-      select: { id: true },
-      orderBy: { createdAt: "asc" },
-      take: batchSize,
-    });
-
-    const otpResult = await transaction.emailOtp.deleteMany({
-      where: { id: { in: emailOtps.map(({ id }) => id) } },
-    });
-    const challengeResult = await transaction.loginChallenge.deleteMany({
-      where: { id: { in: loginChallenges.map(({ id }) => id) } },
-    });
-    const resetResult = await transaction.passwordResetToken.deleteMany({
-      where: { id: { in: resetTokens.map(({ id }) => id) } },
-    });
-
-    return {
-      emailOtps: otpResult.count,
-      loginChallenges: challengeResult.count,
-      passwordResetTokens: resetResult.count,
-      total: otpResult.count + challengeResult.count + resetResult.count,
-    };
+// Deletes the oldest `batchSize` expired rows of one auth-artifact table.
+// Two steps (find the ids, then delete just those) because `deleteMany`
+// can't take an `orderBy`/`take` itself — this is how the batch stays
+// bounded instead of deleting an unbounded number of rows in one go.
+async function cleanupOneArtifactTable(model, cutoffFilter, batchSize) {
+  const rows = await model.findMany({
+    where: cutoffFilter,
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+    take: batchSize,
   });
+  if (rows.length === 0) return 0;
+  const { count } = await model.deleteMany({ where: { id: { in: rows.map(({ id }) => id) } } });
+  return count;
+}
+
+export async function cleanupExpiredAuthArtifacts(cutoff, batchSize) {
+  // Deliberately NOT wrapped in prisma.$transaction: over Prisma Accelerate,
+  // an interactive transaction has to reserve a dedicated connection within
+  // a short maxWait (~2s), which is prone to P2028 ("Unable to start a
+  // transaction in the given time") under cold-start/proxy latency — this
+  // job runs immediately on server boot, right when that's most likely.
+  // None of these three tables' cleanup depends on another, so there's
+  // nothing an interactive transaction was actually protecting here.
+  const [emailOtps, loginChallenges, passwordResetTokens] = await Promise.all([
+    cleanupOneArtifactTable(
+      prisma.emailOtp,
+      { OR: [{ expiresAt: { lte: cutoff } }, { verifiedAt: { not: null, lte: cutoff } }] },
+      batchSize,
+    ),
+    cleanupOneArtifactTable(
+      prisma.loginChallenge,
+      { OR: [{ expiresAt: { lte: cutoff } }, { usedAt: { not: null, lte: cutoff } }] },
+      batchSize,
+    ),
+    cleanupOneArtifactTable(
+      prisma.passwordResetToken,
+      { OR: [{ expiresAt: { lte: cutoff } }, { usedAt: { not: null, lte: cutoff } }] },
+      batchSize,
+    ),
+  ]);
+
+  return {
+    emailOtps,
+    loginChallenges,
+    passwordResetTokens,
+    total: emailOtps + loginChallenges + passwordResetTokens,
+  };
 }
