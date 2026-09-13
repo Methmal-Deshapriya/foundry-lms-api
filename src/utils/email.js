@@ -1,42 +1,51 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 /**
  * Email Utility - The "Mailroom"
- * Wraps a Nodemailer SMTP transporter so the rest of the app never
- * touches the transport details directly.
+ * Wraps the Resend HTTP API so the rest of the app never touches the
+ * transport details directly. Previously wrapped a Nodemailer/Gmail SMTP
+ * transporter — migrated off that because Render's free tier blocks
+ * outbound SMTP ports, so every send there failed with ETIMEDOUT on the
+ * connection handshake. Resend's API is a plain HTTPS POST, which isn't
+ * subject to that restriction.
  */
 
-let transporter;
+let client;
 let lastVerifiedAt = 0;
 
-const SMTP_TIMEOUT_MS = Number(process.env.SMTP_TIMEOUT_MS ?? 5_000);
-const SMTP_READINESS_CACHE_MS = Number(
-  process.env.SMTP_READINESS_CACHE_MS ?? 60_000,
-);
+const EMAIL_READINESS_CACHE_MS = Number(process.env.EMAIL_READINESS_CACHE_MS ?? 60_000);
 
-const getTransporter = () => {
-  if (!transporter) {
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASSWORD;
-    const port = Number(process.env.SMTP_PORT ?? 587);
-
-    if (!user || !pass) {
-      throw new Error("SMTP_USER or SMTP_PASSWORD is missing in environment variables!");
+function getClient() {
+  if (!client) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      throw new Error("RESEND_API_KEY is missing in environment variables!");
     }
-
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port,
-      secure: port === 465,
-      connectionTimeout: SMTP_TIMEOUT_MS,
-      greetingTimeout: SMTP_TIMEOUT_MS,
-      socketTimeout: SMTP_TIMEOUT_MS,
-      auth: { user, pass },
-    });
+    client = new Resend(apiKey);
   }
+  return client;
+}
 
-  return transporter;
-};
+function getFromAddress() {
+  const from = process.env.RESEND_FROM_EMAIL;
+  if (!from) {
+    throw new Error("RESEND_FROM_EMAIL is missing in environment variables!");
+  }
+  return from;
+}
+
+// Resend's SDK resolves with `{ data, error }` rather than throwing on
+// failure. Every call site in this app (auth.service.js's awaited sends,
+// enrollmentRequest.service.js's fire-and-forget `.catch()`) was written
+// against Nodemailer's throw-on-failure contract, so this throws instead —
+// keeping every existing try/catch and `.catch()` call site correct
+// unchanged, rather than requiring a matching rewrite at every call site.
+async function send(message) {
+  const { error } = await getClient().emails.send(message);
+  if (error) {
+    throw new Error(`Resend email delivery failed (${error.name}): ${error.message}`);
+  }
+}
 
 /**
  * Send a password reset email containing the reset link.
@@ -44,13 +53,8 @@ const getTransporter = () => {
  * @param {string} resetUrl - Fully-built link to the client's reset-password page
  */
 export const sendPasswordResetEmail = async (to, resetUrl) => {
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-
-  // Nodemailer throws on send failure (auth errors, connection errors,
-  // rejected recipients), so unlike some provider SDKs, no separate
-  // error-shape check is needed here.
-  await getTransporter().sendMail({
-    from,
+  await send({
+    from: getFromAddress(),
     to,
     subject: "Reset your Foundry LMS password",
     html: `
@@ -67,10 +71,8 @@ export const sendPasswordResetEmail = async (to, resetUrl) => {
  * @param {string} code - The raw 6-digit OTP
  */
 export const sendOtpEmail = async (to, code) => {
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-
-  await getTransporter().sendMail({
-    from,
+  await send({
+    from: getFromAddress(),
     to,
     subject: "Verify your Foundry LMS email",
     html: `
@@ -81,16 +83,23 @@ export const sendOtpEmail = async (to, code) => {
   });
 };
 
+// There's no SMTP handshake to verify anymore — Resend is a stateless HTTPS
+// API, and the sending-scoped API key this app uses (least-privilege on
+// purpose) can't call any account-level read endpoint to "ping" it, so
+// there's nothing to round-trip-check short of actually sending an email.
+// This instead confirms the config a send actually needs is present, which
+// is what this check exists to catch in practice — a missing/misconfigured
+// env var reaching production undetected.
 export const checkEmailReadiness = async ({ force = false } = {}) => {
-  if (!force && Date.now() - lastVerifiedAt < SMTP_READINESS_CACHE_MS) return;
-  await getTransporter().verify();
+  if (!force && Date.now() - lastVerifiedAt < EMAIL_READINESS_CACHE_MS) return;
+  getClient();
+  getFromAddress();
   lastVerifiedAt = Date.now();
 };
 
 export const sendLoginChallengeEmail = async (to, code) => {
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-  await getTransporter().sendMail({
-    from,
+  await send({
+    from: getFromAddress(),
     to,
     subject: "Your Foundry LMS administrator login code",
     html: `
@@ -107,9 +116,8 @@ export const sendLoginChallengeEmail = async (to, code) => {
  * 2026-08-30 rename plan §8a.
  */
 export const sendEnrollmentRequestNotificationEmail = async (to, { courseTitle, intakeCode, studentName, requestUrl }) => {
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-  await getTransporter().sendMail({
-    from,
+  await send({
+    from: getFromAddress(),
     to,
     subject: `New enrollment request: ${courseTitle}`,
     html: `
@@ -120,9 +128,8 @@ export const sendEnrollmentRequestNotificationEmail = async (to, { courseTitle, 
 };
 
 export const sendPasswordChangedEmail = async (to) => {
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-  await getTransporter().sendMail({
-    from,
+  await send({
+    from: getFromAddress(),
     to,
     subject: "Your Foundry LMS password was changed",
     html: `

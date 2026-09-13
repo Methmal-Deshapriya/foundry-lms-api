@@ -6,9 +6,11 @@ import { CourseCapacityReachedError, ConflictError, NotFoundError, handlePrismaE
 // Shared "visible session" criteria — mirrors classroom.repository.js's
 // findVisibleSessions exactly (released, or scheduled-and-due, with a
 // ready/archived session) so every count/backfill derived from it always
-// matches what a student would actually see in the classroom.
+// matches what a student would actually see in the classroom. Exported so
+// dashboard.repository.js's platform-wide curriculum/completion aggregates
+// reuse this exact definition instead of a fourth copy.
 // `intakeIdFilter` is a raw Prisma filter value, e.g. a single id or `{ in: [...] }`.
-function visibleCourseSessionWhere(intakeIdFilter, now) {
+export function visibleCourseSessionWhere(intakeIdFilter, now) {
   return {
     intakeId: intakeIdFilter,
     deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },

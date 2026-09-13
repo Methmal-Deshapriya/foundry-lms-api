@@ -25,16 +25,16 @@ describe("runtime configuration", () => {
     expect(() => validateRuntimeConfig()).toThrow(/CLIENT_URL is required/);
   });
 
-  it("requires SMTP, OTP, and explicit Accelerate timeout configuration in production", () => {
+  it("requires Resend, OTP, and explicit Accelerate timeout configuration in production", () => {
     process.env.NODE_ENV = "production";
     process.env.JWT_SECRET = "test-secret-with-at-least-32-bytes";
     process.env.CLIENT_URL = "https://academy.example";
     process.env.CORS_ORIGIN = "https://academy.example";
     process.env.PROJECT_THUMBNAIL_HOSTS = "cdn.example";
     process.env.DATABASE_URL = "prisma+postgres://accelerate.example/key";
-    delete process.env.SMTP_HOST;
+    delete process.env.RESEND_API_KEY;
 
-    expect(() => validateRuntimeConfig()).toThrow(/SMTP_HOST is required/i);
+    expect(() => validateRuntimeConfig()).toThrow(/RESEND_API_KEY is required/i);
   });
 
   it("keeps Prisma's transaction deadline below the database idle deadline", () => {

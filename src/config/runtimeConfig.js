@@ -27,19 +27,8 @@ export function validateRuntimeConfig() {
     throw new Error("CLIENT_URL and CORS_ORIGIN must use HTTPS in production.");
   }
   if (process.env.NODE_ENV === "production") {
-    for (const name of [
-      "SMTP_HOST",
-      "SMTP_PORT",
-      "SMTP_USER",
-      "SMTP_PASSWORD",
-      "SMTP_FROM_EMAIL",
-      "OTP_HMAC_KEYS",
-    ]) {
+    for (const name of ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "OTP_HMAC_KEYS"]) {
       if (!process.env[name]?.trim()) throw new Error(`${name} is required in production.`);
-    }
-    const smtpPort = Number(process.env.SMTP_PORT);
-    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65_535) {
-      throw new Error("SMTP_PORT must be an integer between 1 and 65535.");
     }
     const otpKeys = process.env.OTP_HMAC_KEYS.split(",").map((key) => key.trim());
     if (
@@ -125,8 +114,7 @@ export function validateRuntimeConfig() {
     );
   }
   for (const [name, fallback] of [
-    ["SMTP_TIMEOUT_MS", 5_000],
-    ["SMTP_READINESS_CACHE_MS", 60_000],
+    ["EMAIL_READINESS_CACHE_MS", 60_000],
     ["AUTH_ARTIFACT_CLEANUP_INTERVAL_MS", 3_600_000],
     ["AUTH_ARTIFACT_CLEANUP_BATCH_SIZE", 500],
     ["AUTH_ARTIFACT_RETENTION_DAYS", 7],

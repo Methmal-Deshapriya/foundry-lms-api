@@ -6,6 +6,7 @@ export const auditLogQuerySchema = z
     action: z.enum(Object.values(AUDIT_ACTIONS)).optional(),
     resourceType: z.enum(Object.values(ENTITY_TYPES)).optional(),
     actorUserId: z.string().uuid("Invalid actor user ID.").optional(),
+    q: z.string().trim().min(1).max(100).optional(),
     entityId: z.string().uuid("Invalid entity ID.").optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),

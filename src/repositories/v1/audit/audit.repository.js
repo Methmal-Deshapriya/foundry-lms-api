@@ -31,6 +31,18 @@ export async function findAndCount(filters, limit = 50, cursor = null) {
   if (filters.entityType) where.entityType = filters.entityType;
   if (filters.actorUserId) where.actorUserId = filters.actorUserId;
   if (filters.entityId) where.entityId = filters.entityId;
+  // Actor search by name/email — the actor relation is nullable (system
+  // actions), so this only ever matches human-attributed logs, which is
+  // the whole point of an "actor" filter.
+  if (filters.q) {
+    where.actor = {
+      OR: [
+        { firstName: { contains: filters.q, mode: "insensitive" } },
+        { lastName: { contains: filters.q, mode: "insensitive" } },
+        { email: { contains: filters.q, mode: "insensitive" } },
+      ],
+    };
+  }
 
   // Handle Date range filtering
   if (filters.from || filters.to) {
