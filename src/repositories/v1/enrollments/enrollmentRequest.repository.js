@@ -3,10 +3,10 @@ import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
 const include = {
-  // category/service nested so the admin notification email can build a
-  // real deep link (needs the service slug) — see Finding A of the
-  // 2026-08-30 system guide/audit.
-  course: { include: { category: { include: { service: true } } } },
+  // service nested so the admin notification email can build a real deep
+  // link (needs the service slug) — see Finding A of the 2026-08-30 system
+  // guide/audit.
+  course: { include: { service: true } },
   intake: true,
   student: true,
   contactedBy: true,

@@ -11,7 +11,7 @@ import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
 
-const EMPTY_STATS = Object.freeze({ categoryTotal: 0, categoryPublished: 0, categoryDraft: 0, categoryArchived: 0, courseTotal: 0, courseDraft: 0, courseArchived: 0, coursesWithoutSessions: 0, curriculumAttachmentCount: 0, activeUniqueLearners: 0, totalUniqueLearners: 0, activeEnrollments: 0, paymentAttentionCount: 0, openActiveCourseCount: 0, closedActiveCourseCount: 0, completedCourseCount: 0 });
+const EMPTY_STATS = Object.freeze({ courseTotal: 0, coursePublished: 0, courseDraft: 0, courseArchived: 0, intakeTotal: 0, intakeDraft: 0, intakeArchived: 0, intakesWithoutSessions: 0, curriculumAttachmentCount: 0, activeUniqueLearners: 0, totalUniqueLearners: 0, activeEnrollments: 0, paymentAttentionCount: 0, openActiveIntakeCount: 0, closedActiveIntakeCount: 0, completedIntakeCount: 0 });
 const ALLOWED_TRANSITIONS = Object.freeze({ DRAFT: ["ACTIVE", "ARCHIVED"], ACTIVE: ["DRAFT", "ARCHIVED"], ARCHIVED: ["DRAFT"] });
 
 function parse(schema, value) {
@@ -21,7 +21,7 @@ function parse(schema, value) {
 }
 
 function response(service) {
-  return { ...service, categoryCount: service._count?.categories ?? service.categoryCount ?? 0, _count: undefined };
+  return { ...service, courseCount: service._count?.courses ?? service.courseCount ?? 0, _count: undefined };
 }
 
 function withSummary(service, stats = EMPTY_STATS) {
@@ -33,12 +33,12 @@ function withSummary(service, stats = EMPTY_STATS) {
     label: service.title,
     instanceKind: service.courseMode,
     requiresCompletedPaymentForAccess: service.paymentRequirement === "REQUIRED",
-    categories: { total: values.categoryTotal, published: values.categoryPublished, draft: values.categoryDraft, archived: values.categoryArchived },
-    courses: { total: values.courseTotal, openActive: values.openActiveCourseCount, closedActive: values.closedActiveCourseCount, completed: values.completedCourseCount, draft: values.courseDraft, archived: values.courseArchived, withoutSessions: values.coursesWithoutSessions },
+    courses: { total: values.courseTotal, published: values.coursePublished, draft: values.courseDraft, archived: values.courseArchived },
+    intakes: { total: values.intakeTotal, openActive: values.openActiveIntakeCount, closedActive: values.closedActiveIntakeCount, completed: values.completedIntakeCount, draft: values.intakeDraft, archived: values.intakeArchived, withoutSessions: values.intakesWithoutSessions },
     learners: { activeUnique: values.activeUniqueLearners, totalUnique: values.totalUniqueLearners, activeEnrollments: values.activeEnrollments },
     curriculumAttachmentCount: values.curriculumAttachmentCount,
     payments: service.paymentRequirement === "REQUIRED" ? { needsAttention: values.paymentAttentionCount } : null,
-    attentionCount: values.categoryDraft + values.courseDraft + values.coursesWithoutSessions + values.paymentAttentionCount,
+    attentionCount: values.courseDraft + values.intakeDraft + values.intakesWithoutSessions + values.paymentAttentionCount,
   };
 }
 

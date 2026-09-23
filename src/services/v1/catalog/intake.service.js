@@ -60,7 +60,7 @@ export async function createIntakeService(courseId, data, actorId) {
   const intakeKey = input.intakeKey ?? defaults.intakeKey;
   const timezone = input.timezone ?? defaults.timezone;
 
-  if (course.category.service.courseMode === "SEASONAL") {
+  if (course.service.courseMode === "SEASONAL") {
     if (!input.startDate || !input.expectedEndDate) throw new ValidationError("Seasonal intakes require start and expected end dates.", "startDate");
   } else if (input.startDate != null || input.expectedEndDate != null) {
     throw new ValidationError("Evergreen intakes do not use intake dates.", "startDate");
@@ -86,7 +86,7 @@ export async function updateIntakeService(id, data, actorId) {
   const input = parse(updateIntakeSchema, data);
   const current = await intakeRepository.findById(id);
   if (!current) throw new NotFoundError("Intake not found.");
-  if (current.category.service.courseMode === "SEASONAL") {
+  if (current.service.courseMode === "SEASONAL") {
     const nextStart = input.startDate === undefined ? current.startDate : input.startDate;
     const nextEnd = input.expectedEndDate === undefined ? current.expectedEndDate : input.expectedEndDate;
     if (!nextStart || !nextEnd || nextEnd <= nextStart) {

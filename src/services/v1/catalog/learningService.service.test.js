@@ -31,7 +31,7 @@ const paidService = {
   paymentRequirement: "REQUIRED",
   status: "DRAFT",
   sortOrder: 4,
-  _count: { categories: 0 },
+  _count: { courses: 0 },
 };
 
 describe("learning-service domain", () => {
@@ -46,7 +46,7 @@ describe("learning-service domain", () => {
       _count: undefined,
     }, "actor-1");
     expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({ status: "DRAFT" }));
-    expect(result).toMatchObject({ key: "CAREER_LABS", categoryCount: 0 });
+    expect(result).toMatchObject({ key: "CAREER_LABS", courseCount: 0 });
   });
 
   it("rejects a policy combination without an implemented workflow", async () => {
@@ -79,9 +79,9 @@ describe("learning-service domain", () => {
 
   it("joins operational summaries without one request per service", async () => {
     repository.findAdmin.mockResolvedValue({ total: 1, services: [paidService] });
-    repository.findAdminSummaries.mockResolvedValue([{ serviceId: paidService.id, categoryTotal: 2 }]);
+    repository.findAdminSummaries.mockResolvedValue([{ serviceId: paidService.id, courseTotal: 2 }]);
     const result = await listLearningServicesService({ includeArchived: "true" });
-    expect(result.services[0]).toMatchObject({ id: paidService.id, categories: { total: 2 } });
+    expect(result.services[0]).toMatchObject({ id: paidService.id, courses: { total: 2 } });
     expect(repository.findAdminSummaries).toHaveBeenCalledWith([paidService.id]);
   });
 });

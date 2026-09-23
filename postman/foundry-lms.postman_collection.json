@@ -108,6 +108,56 @@
             },
             "description": "Access: PUBLIC\n\nReturns the raw local environment with blank credentials and destructive requests disabled.\n\nOperation ID: downloadPostmanEnvironment"
           }
+        },
+        {
+          "name": "[SIGNED IN] Get the current user's student dashboard summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/student",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "student"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: getStudentDashboard"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get the administrator dashboard summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dashboard/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dashboard",
+                "admin"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getAdminDashboard"
+          }
         }
       ]
     },
@@ -560,6 +610,31 @@
           }
         },
         {
+          "name": "[ADMIN + SUPER ADMIN] Get one user's profile and activity summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getUserAdmin"
+          }
+        },
+        {
           "name": "[SUPER ADMIN ONLY] Promote student to admin",
           "request": {
             "method": "PATCH",
@@ -642,7 +717,7 @@
           }
         },
         {
-          "name": "[PUBLIC] List published service categories",
+          "name": "[PUBLIC] Explore published courses across active services",
           "request": {
             "method": "GET",
             "header": [
@@ -652,7 +727,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/categories",
+              "raw": "{{baseUrl}}/api/v1/catalog/explore",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -660,110 +735,24 @@
                 "api",
                 "v1",
                 "catalog",
-                "{{serviceSlug}}",
-                "categories"
-              ]
-            },
-            "description": "Access: PUBLIC\n\nOperation ID: listPublicCategories"
-          }
-        },
-        {
-          "name": "[PUBLIC] Get published category and courses",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/categories/{{categorySlug}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "catalog",
-                "{{serviceSlug}}",
-                "categories",
-                "{{categorySlug}}"
-              ]
-            },
-            "description": "Access: PUBLIC\n\nOperation ID: getPublicCategory"
-          }
-        },
-        {
-          "name": "[PUBLIC] Get published course detail",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/categories/{{categorySlug}}/courses/{{courseSlug}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "catalog",
-                "{{serviceSlug}}",
-                "categories",
-                "{{categorySlug}}",
-                "courses",
-                "{{courseSlug}}"
-              ]
-            },
-            "description": "Access: PUBLIC\n\nOperation ID: getPublicCourse"
-          }
-        }
-      ]
-    },
-    {
-      "name": "04 Categories",
-      "item": [
-        {
-          "name": "[ADMIN + SUPER ADMIN] List categories for administration",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories"
+                "explore"
               ],
               "query": [
                 {
-                  "key": "serviceId",
-                  "value": "{{learningServiceId}}",
-                  "description": "",
-                  "disabled": true
-                },
-                {
-                  "key": "status",
-                  "value": "DRAFT",
-                  "description": "",
-                  "disabled": true
-                },
-                {
                   "key": "q",
                   "value": "ai",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "level",
+                  "value": "BEGINNER",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "accessType",
+                  "value": "FREE",
                   "description": "",
                   "disabled": true
                 },
@@ -781,63 +770,11 @@
                 }
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: listCategoriesAdmin"
+            "description": "Access: PUBLIC\n\nOperation ID: explorePublicCourses"
           }
         },
         {
-          "name": "[ADMIN + SUPER ADMIN] Create category draft",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"serviceId\": \"{{learningServiceId}}\",\n  \"slug\": \"api-testing\",\n  \"title\": \"API Testing\",\n  \"description\": \"Practical API testing courses for software engineers.\",\n  \"audienceLabel\": \"Beginner friendly\",\n  \"visualKey\": \"code2\",\n  \"badgeLabel\": \"New\",\n  \"sortOrder\": 0\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories"
-              ]
-            },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: createCategory"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
-                  "  const data = pm.response.json()?.data;",
-                  "  if (data?.id) pm.environment.set(\"categoryId\", data.id);",
-                  "  if (data?.slug) pm.environment.set(\"categorySlug\", data.slug);",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "[ADMIN + SUPER ADMIN] Get category for administration",
+          "name": "[PUBLIC] List published courses under an active service",
           "request": {
             "method": "GET",
             "header": [
@@ -847,98 +784,23 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}",
+              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/courses",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "categories",
-                "{{categoryId}}"
+                "catalog",
+                "{{serviceSlug}}",
+                "courses"
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getCategoryAdmin"
+            "description": "Access: PUBLIC\n\nOperation ID: listPublicCourses"
           }
         },
         {
-          "name": "[ADMIN + SUPER ADMIN] Update category",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"API Testing and Quality\",\n  \"description\": \"Practical API testing and quality courses for software engineers.\",\n  \"sortOrder\": 1\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories",
-                "{{categoryId}}"
-              ]
-            },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: updateCategory"
-          }
-        },
-        {
-          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Permanently delete archived category",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories",
-                "{{categoryId}}"
-              ]
-            },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Deletes only archived catalog setup without course curriculum or learner history.\n\nOperation ID: deleteCategoryPermanently"
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
-                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "[SUPER ADMIN ONLY] Preview whether permanent category deletion is safe",
+          "name": "[PUBLIC] Get published course detail",
           "request": {
             "method": "GET",
             "header": [
@@ -948,126 +810,27 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/deletion-impact",
+              "raw": "{{baseUrl}}/api/v1/catalog/{{serviceSlug}}/courses/{{courseSlug}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "categories",
-                "{{categoryId}}",
-                "deletion-impact"
+                "catalog",
+                "{{serviceSlug}}",
+                "courses",
+                "{{courseSlug}}"
               ]
             },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Aggregates child course-intake curriculum and protected learner history without changing data.\n\nOperation ID: getCategoryDeletionImpact"
-          }
-        },
-        {
-          "name": "[SUPER ADMIN ONLY] Publish category",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/publish",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories",
-                "{{categoryId}}",
-                "publish"
-              ]
-            },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only.\n\nOperation ID: publishCategory"
-          }
-        },
-        {
-          "name": "[SUPER ADMIN ONLY] Unpublish category",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/unpublish",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories",
-                "{{categoryId}}",
-                "unpublish"
-              ]
-            },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only.\n\nOperation ID: unpublishCategory"
-          }
-        },
-        {
-          "name": "[SUPER ADMIN ONLY] Archive category and child courses",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/archive",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories",
-                "{{categoryId}}",
-                "archive"
-              ]
-            },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Preserves existing learner records and session content.\n\nOperation ID: archiveCategory"
-          }
-        },
-        {
-          "name": "[SUPER ADMIN ONLY] Restore category as draft",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/categories/{{categoryId}}/unarchive",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "categories",
-                "{{categoryId}}",
-                "unarchive"
-              ]
-            },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Child courses remain archived.\n\nOperation ID: unarchiveCategory"
+            "description": "Access: PUBLIC\n\nOperation ID: getPublicCourse"
           }
         }
       ]
+    },
+    {
+      "name": "04 Categories",
+      "item": []
     },
     {
       "name": "05 Courses",
@@ -1349,6 +1112,58 @@
               ]
             },
             "description": "Access: ADMIN + SUPER ADMIN\n\nPowers the course detail page's KPI row — the same shape as GET /intakes/{intakeId}/analytics but rolled up across every intake this course has ever run (grouped by courseId instead of intakeId). Districts and per-session engagement are intake-workspace-only and are not included here, since curricula can differ between intakes.\n\nOperation ID: getCourseAnalytics"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Publish a course to the public catalog",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "publish"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: publishCourse"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Return a published course to draft",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/courses/{{courseId}}/unpublish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "courses",
+                "{{courseId}}",
+                "unpublish"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: unpublishCourse"
           }
         },
         {
@@ -4039,6 +3854,103 @@
               ]
             },
             "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: unarchiveLearningService"
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Object Storage",
+      "item": [
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create a short-lived direct R2 upload intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"purpose\": \"COURSE_THUMBNAIL\",\n  \"fileName\": \"ai-ml-ignition.webp\",\n  \"contentType\": \"image/webp\",\n  \"sizeBytes\": 245760\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/storage/uploads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "storage",
+                "uploads"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCreates a pending object record and a presigned PUT URL. Cloudflare credentials are never returned to the client.\n\nOperation ID: createObjectUploadIntent"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Verify and finalize a direct R2 upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/storage/uploads/{{storedObjectId}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "storage",
+                "uploads",
+                "{{storedObjectId}}",
+                "complete"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: completeObjectUpload"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Get an administrator access URL for a ready object",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/storage/objects/{{storedObjectId}}/access",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "storage",
+                "objects",
+                "{{storedObjectId}}",
+                "access"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getStoredObjectAccess"
           }
         }
       ]

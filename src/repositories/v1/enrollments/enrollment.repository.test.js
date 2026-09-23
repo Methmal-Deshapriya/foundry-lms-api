@@ -39,7 +39,7 @@ function managedEnrollment(overrides = {}) {
     status: "CANCELLED",
     paymentStatus: "COMPLETED",
     user: { role: "STUDENT", emailVerified: true },
-    intake: { status: "OPEN_ACTIVE", category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+    intake: { status: "OPEN_ACTIVE", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
     certificates: [],
     ...overrides,
   };
@@ -49,7 +49,7 @@ describe("managed enrollment transaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-paid" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-paid" } })
       .mockResolvedValue(managedEnrollment());
     mocks.transaction.enrollment.update.mockResolvedValue(
       managedEnrollment({ status: "ACTIVE" }),
@@ -77,14 +77,14 @@ describe("managed enrollment transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique.mockReset();
     mocks.transaction.intake.findUnique
-      .mockResolvedValueOnce({ category: { serviceId: "service-paid" } })
+      .mockResolvedValueOnce({ serviceId: "service-paid" })
       .mockResolvedValueOnce({
         id: intakeId,
         courseId,
         status: "OPEN_ACTIVE",
         capacity: 2,
-        course: { archivedAt: null, price: 1000, currency: "LKR", discountAmount: 100 },
-        category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
+        course: { archivedAt: null, status: "PUBLISHED", price: 1000, currency: "LKR", discountAmount: 100 },
+        service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({ role: "STUDENT", emailVerified: true });
     mocks.transaction.enrollment.findUnique.mockResolvedValue(null);
@@ -124,14 +124,14 @@ describe("managed enrollment transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique.mockReset();
     mocks.transaction.intake.findUnique
-      .mockResolvedValueOnce({ category: { serviceId: "service-paid" } })
+      .mockResolvedValueOnce({ serviceId: "service-paid" })
       .mockResolvedValueOnce({
         id: intakeId,
         courseId,
         status: "OPEN_ACTIVE",
         capacity: 2,
-        course: { archivedAt: null, price: 1000, currency: "LKR", discountAmount: 100 },
-        category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
+        course: { archivedAt: null, status: "PUBLISHED", price: 1000, currency: "LKR", discountAmount: 100 },
+        service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({ role: "STUDENT", emailVerified: true });
     mocks.transaction.enrollment.findUnique.mockResolvedValue(null);
@@ -151,14 +151,14 @@ describe("managed enrollment transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique.mockReset();
     mocks.transaction.intake.findUnique
-      .mockResolvedValueOnce({ category: { serviceId: "service-paid" } })
+      .mockResolvedValueOnce({ serviceId: "service-paid" })
       .mockResolvedValueOnce({
         id: intakeId,
         courseId,
         status: "OPEN_ACTIVE",
         capacity: 2,
-        course: { archivedAt: null, price: 500, currency: "LKR", discountAmount: 1000 },
-        category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
+        course: { archivedAt: null, status: "PUBLISHED", price: 500, currency: "LKR", discountAmount: 1000 },
+        service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({ role: "STUDENT", emailVerified: true });
     mocks.transaction.enrollment.findUnique.mockResolvedValue(null);
@@ -175,7 +175,7 @@ describe("managed enrollment transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-paid" } } }) // lock context
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-paid" } }) // lock context
       .mockResolvedValueOnce({ id, courseId, intakeId, paymentStatus: "PARTIAL", course: { price: 1000, currency: "LKR" } }) // current
       .mockResolvedValueOnce(managedEnrollment({ status: "ACTIVE", paymentStatus: "COMPLETED" })); // final refetch
 
@@ -197,7 +197,7 @@ describe("managed enrollment transaction", () => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-paid" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-paid" } })
       .mockResolvedValueOnce({ id, courseId, intakeId, paymentStatus: "COMPLETED", course: { price: 1000, currency: "LKR" } });
 
     await expect(completePayment(id, "admin-1")).rejects.toMatchObject({ code: "PAYMENT_NOT_PARTIAL" });
@@ -210,11 +210,11 @@ describe("managed enrollment transaction", () => {
     async (intakeStatus) => {
       mocks.transaction.enrollment.findUnique
         .mockReset()
-        .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-paid" } } })
+        .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-paid" } })
         .mockResolvedValue(
           managedEnrollment({
             status: "ACTIVE",
-            intake: { status: intakeStatus, category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+            intake: { status: intakeStatus, service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
           }),
         );
 

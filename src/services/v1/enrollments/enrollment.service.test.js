@@ -23,7 +23,7 @@ const intakeId = "90000000-0000-4000-8000-000000000005";
 
 function intakeFixture(serviceType = "BOOTCAMPS", overrides = {}) {
   const free = serviceType === "FREE_LEARNING";
-  const category = { status: "PUBLISHED", service: { key: serviceType, status: "ACTIVE", accessType: free ? "FREE" : "PAID", courseMode: free ? "EVERGREEN" : "SEASONAL", enrollmentMode: free ? "SELF" : "ADMIN", paymentRequirement: free ? "NOT_REQUIRED" : "REQUIRED" } };
+  const service = { key: serviceType, status: "ACTIVE", accessType: free ? "FREE" : "PAID", courseMode: free ? "EVERGREEN" : "SEASONAL", enrollmentMode: free ? "SELF" : "ADMIN", paymentRequirement: free ? "NOT_REQUIRED" : "REQUIRED" };
   return {
     id: intakeId,
     courseId,
@@ -31,8 +31,8 @@ function intakeFixture(serviceType = "BOOTCAMPS", overrides = {}) {
     intakeKey: free ? "EVERGREEN" : "2026-B1",
     capacity: null,
     status: "OPEN_ACTIVE",
-    category,
-    course: { id: courseId, title: "AI/ML Ignition", slug: "ai-ml-ignition", summary: "Practical foundations", level: "BEGINNER", durationValue: 4, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, category },
+    service,
+    course: { id: courseId, title: "AI/ML Ignition", slug: "ai-ml-ignition", summary: "Practical foundations", level: "BEGINNER", durationValue: 4, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, status: "PUBLISHED", archivedAt: null, service },
     ...overrides,
   };
 }

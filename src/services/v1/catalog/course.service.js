@@ -1,5 +1,5 @@
 import * as repository from "../../../repositories/v1/catalog/course.repository.js";
-import * as categoryRepository from "../../../repositories/v1/catalog/category.repository.js";
+import * as learningServiceRepository from "../../../repositories/v1/catalog/learningService.repository.js";
 import {
   courseAdminFiltersSchema,
   createCourseSchema,
@@ -11,6 +11,7 @@ import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.c
 import { COURSE_CURRENCY } from "../../../constants/v1/catalog/catalog.constants.js";
 import { toAdminCourse } from "../../../models/v1/catalog/catalog.model.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
+import { assertAttachableStoredObject } from "../storage/storedObject.service.js";
 
 function parse(schema, value) {
   const result = schema.safeParse(value);
@@ -21,8 +22,8 @@ function parse(schema, value) {
   return result.data;
 }
 
-function validatePricingPolicy(category, price) {
-  const accessType = category.service.accessType;
+function validatePricingPolicy(service, price) {
+  const accessType = service.accessType;
   if (accessType === "FREE" && Number(price) !== 0) throw new ValidationError("Free Learning courses must have zero price.", "price");
   if (accessType === "PAID" && Number(price) <= 0) throw new ValidationError("Paid courses must have a price greater than zero.", "price");
 }
@@ -93,22 +94,25 @@ export async function getCourseAnalyticsService(courseId) {
 
 export async function createCourseService(data, actorId) {
   const input = parse(createCourseSchema, data);
-  const category = await categoryRepository.findById(input.categoryId);
-  if (!category) throw new NotFoundError("Category not found.");
-  if (category.status === "ARCHIVED") throw new ConflictError("Category is archived.");
-  validatePricingPolicy(category, input.price);
+  const service = await learningServiceRepository.findById(input.serviceId);
+  if (!service) throw new NotFoundError("Learning service not found.");
+  if (service.status === "ARCHIVED") throw new ConflictError("Learning service is archived.");
+  validatePricingPolicy(service, input.price);
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
+  }
   const course = await repository.create({ ...input, currency: COURSE_CURRENCY });
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.COURSE_CREATED,
     entityType: ENTITY_TYPES.COURSE,
     entityId: course.id,
-    description: `Course "${course.title}" created.`,
-    metadata: { categoryId: course.categoryId, intakeCodePrefix: course.intakeCodePrefix },
+    description: `Course "${course.title}" created as a draft.`,
+    metadata: { serviceId: course.serviceId, serviceKey: service.key, intakeCodePrefix: course.intakeCodePrefix },
   });
-  // A Course is always publicly served once it exists (COMING_SOON at
-  // minimum) — see the 2026-08-30 system guide/audit, Finding B.
-  await revalidatePublicCatalogCache();
+  // A Course is always publicly served once published (COMING_SOON at
+  // minimum) — see the 2026-08-30 system guide/audit, Finding B. It starts
+  // as a Draft, so no cache revalidation is needed until it's published.
   return toAdminCourse(course);
 }
 
@@ -116,9 +120,32 @@ export async function updateCourseService(id, data, actorId) {
   const input = parse(updateCourseSchema, data);
   const current = await repository.findById(id);
   if (!current) throw new NotFoundError("Course not found.");
-  if (input.price !== undefined) validatePricingPolicy(current.category, input.price);
+  if (input.price !== undefined) validatePricingPolicy(current.service, input.price);
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
+  }
+  if (input.thumbnailObjectId) input.thumbnailUrl = null;
+  if (input.thumbnailUrl) input.thumbnailObjectId = null;
   const course = await repository.update(id, input);
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_UPDATED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" updated.`, metadata: { changedFields: Object.keys(input) } });
+  if (current.status === "PUBLISHED") {
+    await revalidatePublicCatalogCache();
+  }
+  return toAdminCourse(course);
+}
+
+export async function setCoursePublicationService(id, publish, actorId) {
+  const current = await repository.findById(id);
+  if (!current) throw new NotFoundError("Course not found.");
+  if (current.status === "ARCHIVED") throw new ConflictError("Archived courses cannot be published.");
+  const course = await repository.setPublication(id, publish);
+  recordActionService({
+    actorUserId: actorId,
+    action: publish ? AUDIT_ACTIONS.COURSE_PUBLISHED : AUDIT_ACTIONS.COURSE_UNPUBLISHED,
+    entityType: ENTITY_TYPES.COURSE,
+    entityId: id,
+    description: `Course "${course.title}" ${publish ? "published" : "unpublished"}.`,
+  });
   await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }
@@ -126,7 +153,7 @@ export async function updateCourseService(id, data, actorId) {
 export async function setCourseArchivedService(id, archived, actorId) {
   const course = await repository.setArchived(id, archived);
   if (!course) throw new NotFoundError("Course not found.");
-  recordActionService({ actorUserId: actorId, action: archived ? AUDIT_ACTIONS.COURSE_ARCHIVED : AUDIT_ACTIONS.COURSE_UNARCHIVED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" ${archived ? "archived" : "restored"}.` });
+  recordActionService({ actorUserId: actorId, action: archived ? AUDIT_ACTIONS.COURSE_ARCHIVED : AUDIT_ACTIONS.COURSE_UNARCHIVED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" ${archived ? "archived" : "restored as a draft"}.` });
   await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }

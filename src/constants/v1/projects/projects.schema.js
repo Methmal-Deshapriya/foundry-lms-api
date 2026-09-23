@@ -15,23 +15,32 @@ export const createProjectSchema = z.object({
   title: z.string().trim().min(3, "Title must be at least 3 characters long").max(180),
   description: z.string().trim().max(10000).optional().nullable(),
   thumbnailUrl: projectThumbnailUrlSchema,
+  thumbnailObjectId: z.string().uuid().nullable().optional(),
   projectUrl: nullableSecureHttpUrlSchema,
   githubUrl: nullableSecureHttpUrlSchema,
   demoUrl: nullableSecureHttpUrlSchema,
   technologies: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
   isPublic: z.boolean().optional(),
-});
+}).refine(
+  (data) => !(data.thumbnailUrl && data.thumbnailObjectId),
+  { message: "Use either an uploaded thumbnail or an external thumbnail URL, not both.", path: ["thumbnailObjectId"] },
+);
 
 export const updateProjectSchema = z.object({
   title: z.string().trim().min(3, "Title must be at least 3 characters long").max(180).optional(),
   description: z.string().trim().max(10000).optional().nullable(),
   thumbnailUrl: projectThumbnailUrlSchema,
+  thumbnailObjectId: z.string().uuid().nullable().optional(),
   projectUrl: nullableSecureHttpUrlSchema,
   githubUrl: nullableSecureHttpUrlSchema,
   demoUrl: nullableSecureHttpUrlSchema,
   technologies: z.array(z.string().trim().min(1).max(80)).max(40).optional(),
   isPublic: z.boolean().optional(),
-}).refine((data) => Object.keys(data).length > 0, "At least one field is required.");
+}).refine((data) => Object.keys(data).length > 0, "At least one field is required.")
+  .refine(
+    (data) => !(data.thumbnailUrl && data.thumbnailObjectId),
+    { message: "Use either an uploaded thumbnail or an external thumbnail URL, not both.", path: ["thumbnailObjectId"] },
+  );
 
 export const reviewProjectSchema = z.object({
   status: z.enum(ALL_PROJECT_STATUSES),

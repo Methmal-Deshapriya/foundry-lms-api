@@ -48,7 +48,6 @@ export const intakeStatusSchema = z.object({
 
 export const intakeAdminFiltersSchema = z.object({
   serviceId: z.string().uuid().optional(),
-  categoryId: z.string().uuid().optional(),
   courseId: z.string().uuid().optional(),
   status: z.enum(INTAKE_STATUSES).optional(),
   q: z.string().trim().max(100).optional(),

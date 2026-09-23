@@ -11,6 +11,8 @@ import {
 } from "../../../utils/Errors.js";
 import { recordActionService } from "../audit/audit.service.js";
 import { hasLearningAccess, hasSufficientPayment } from "../../../utils/enrollmentAccessPolicy.js";
+import { privateStoredObjectUrl } from "../storage/storedObject.service.js";
+import { publicObjectUrl } from "../../../config/r2.js";
 
 const ACCESSIBLE_ENROLLMENT_STATUSES = ["ACTIVE", "COMPLETED"];
 const ACCESSIBLE_INTAKE_STATUSES = [
@@ -47,7 +49,7 @@ export async function requireEnrollmentAccessService(
     throw new ForbiddenError("This course is not currently accessible.");
   }
 
-  const policy = enrollment.intake.category.service;
+  const policy = enrollment.intake.service;
   if (!hasLearningAccess(enrollment, policy)) {
     if (policy.accessType !== "FREE" && !hasSufficientPayment(enrollment.paymentStatus)) {
       throw new ForbiddenError("Payment must be recorded before classroom access.");
@@ -65,15 +67,19 @@ async function visibleSessions(context) {
   );
 }
 
-function toSessionResponse(courseSession) {
+async function toSessionResponse(courseSession) {
   const completion = courseSession.completions?.[0] ?? null;
+  const [recordingObjectUrl, materialObjectUrl] = await Promise.all([
+    privateStoredObjectUrl(courseSession.session.recordingObject),
+    privateStoredObjectUrl(courseSession.session.materialObject),
+  ]);
   return {
     courseSessionId: courseSession.id,
     orderIndex: courseSession.orderIndex ?? courseSession.historicalOrderIndex,
     title: courseSession.session.title,
     description: courseSession.session.description,
-    recordingUrl: courseSession.session.recordingUrl,
-    materialUrl: courseSession.session.materialUrl,
+    recordingUrl: recordingObjectUrl ?? courseSession.session.recordingUrl,
+    materialUrl: materialObjectUrl ?? courseSession.session.materialUrl,
     quizUrl: courseSession.session.quizUrl,
     feedbackUrl: courseSession.session.feedbackUrl,
     durationMinutes: courseSession.session.durationMinutes,
@@ -125,19 +131,20 @@ export async function getClassroomService(enrollmentId, requester) {
         highlights: course.highlights,
         skills: course.skills,
         prerequisites: course.prerequisites,
-        thumbnailUrl: course.thumbnailUrl,
-        categoryTitle: intake.category.title,
-        categoryVisualKey: intake.category.visualKey,
-        serviceTitle: intake.category.service.title,
+        thumbnailUrl:
+          course.thumbnailObject?.status === "READY"
+            ? publicObjectUrl(course.thumbnailObject.objectKey)
+            : course.thumbnailUrl,
+        serviceTitle: intake.service.title,
         intakeKey: intake.intakeKey,
         code: intake.code,
-        instanceKind: intake.category.service.courseMode,
+        instanceKind: intake.service.courseMode,
         startDate: intake.startDate,
         expectedEndDate: intake.expectedEndDate,
         timezone: intake.timezone,
       },
     },
-    sessions: rows.map(toSessionResponse),
+    sessions: await Promise.all(rows.map(toSessionResponse)),
     progress: progressFromRows(
       enrollment.id,
       enrollment.courseId,

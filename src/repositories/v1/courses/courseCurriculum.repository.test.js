@@ -31,15 +31,14 @@ const courseSessionId = "30000000-0000-4000-8000-000000000002";
 function prepareDelivery(rows, intakeOverrides = {}) {
   mocks.transaction.intake.findUnique
     .mockResolvedValueOnce({
-      categoryId: "30000000-0000-4000-8000-000000000003",
+      serviceId: "service-1",
       courseId: "30000000-0000-4000-8000-000000000004",
-      category: { serviceId: "service-1" },
     })
     .mockResolvedValueOnce({
       id: intakeId,
       status: "OPEN_ACTIVE",
-      course: { archivedAt: null },
-      category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL" } },
+      course: { archivedAt: null, status: "PUBLISHED" },
+      service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL" },
       ...intakeOverrides,
     });
   mocks.transaction.courseSession.findFirst.mockResolvedValue({
@@ -109,7 +108,7 @@ describe("course curriculum repository reads", () => {
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
     prepareDelivery([
       { id: courseSessionId, orderIndex: 0, deliveryStatus: "RELEASED", availableAt: null, session: { title: "Only lesson" } },
-    ], { category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN" } } });
+    ], { service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN" } });
     mocks.transaction.courseSession.findFirst.mockResolvedValue({
       id: courseSessionId,
       intakeId,
@@ -132,15 +131,14 @@ describe("course curriculum repository reads", () => {
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
     mocks.transaction.intake.findUnique
       .mockResolvedValueOnce({
-        categoryId: "30000000-0000-4000-8000-000000000003",
+        serviceId: "service-1",
         courseId: "30000000-0000-4000-8000-000000000004",
-        category: { serviceId: "service-1" },
       })
       .mockResolvedValueOnce({
         id: intakeId,
         status: "CLOSED_ACTIVE",
-        course: { archivedAt: null },
-        category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL" } },
+        course: { archivedAt: null, status: "PUBLISHED" },
+        service: { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL" },
       });
     mocks.transaction.courseSession.findMany.mockResolvedValue([
       { id: "first", orderIndex: 0, deliveryStatus: "RELEASED", firstReleasedAt: new Date(), _count: { completions: 2 }, session: { title: "First" } },

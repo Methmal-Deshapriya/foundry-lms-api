@@ -9,7 +9,7 @@ import { findVisibleSessions } from "../learning/classroom.repository.js";
  * no per-row N+1 work, so this stays fast regardless of platform size.
  */
 
-const HEATMAP_DAYS = 182; // 26 weeks (~6 months) — still one small, cheap, single-user query
+const HEATMAP_DAYS = 364; // 52 weeks (full year) — still one small, cheap, single-user query
 
 export async function getStudentSummary(userId) {
   const [coursesEnrolled, coursesCompleted, certificatesEarned, recentEnrollments, heatmapCompletions, issuedCertificates, reviewedProjects] =
@@ -28,7 +28,13 @@ export async function getStudentSummary(userId) {
           intakeId: true,
           status: true,
           updatedAt: true,
-          course: { select: { title: true, thumbnailUrl: true, category: { select: { visualKey: true } } } },
+          course: {
+            select: {
+              title: true,
+              thumbnailUrl: true,
+              thumbnailObject: { select: { status: true, objectKey: true } },
+            },
+          },
           intake: { select: { code: true } },
         },
       }),
@@ -182,26 +188,26 @@ function resolveTrendWindow({ months, from, to } = {}) {
 
 const toCounts = (rows, key) => Object.fromEntries(rows.map((row) => [row[key], row._count]));
 
-// categoryId/service.slug are selected purely to let the client build the
-// admin intake workspace URL (/admin/services/{slug}/categories/{categoryId}
-// /courses/{courseId}/intakes/{id}) without a second lookup — same pattern
+// serviceId/service.slug are selected purely to let the client build the
+// admin intake workspace URL (/admin/services/{slug}/courses/{courseId}
+// /intakes/{id}) without a second lookup — same pattern
 // sessionLibrary.service.js uses for its own "link straight to the intake"
 // problem. Neither is displayed anywhere.
 const INTAKE_CARD_SELECT = {
   id: true,
   code: true,
   courseId: true,
-  categoryId: true,
+  serviceId: true,
   startDate: true,
   expectedEndDate: true,
   capacity: true,
   status: true,
   course: { select: { title: true } },
-  category: { select: { service: { select: { slug: true } } } },
+  service: { select: { slug: true } },
   _count: { select: { enrollments: true } },
 };
 
-// categoryId/service.slug (via course) are selected purely to let the client
+// serviceId/service.slug (via course) are selected purely to let the client
 // build the admin intake workspace URL, same reasoning as INTAKE_CARD_SELECT
 // above — a pending request is worked from that same enrollment-requests tab
 // (?tab=enrollment-requests&requestId={id}), there's no separate page for it.
@@ -213,7 +219,7 @@ const ENROLLMENT_REQUEST_CARD_SELECT = {
   status: true,
   createdAt: true,
   student: { select: { firstName: true, lastName: true, email: true } },
-  course: { select: { title: true, categoryId: true, category: { select: { service: { select: { slug: true } } } } } },
+  course: { select: { title: true, serviceId: true, service: { select: { slug: true } } } },
 };
 
 function mapEnrollmentRequestRow(row) {
@@ -222,8 +228,8 @@ function mapEnrollmentRequestRow(row) {
     id: row.id,
     intakeId: row.intakeId,
     courseId: row.courseId,
-    categoryId: row.course?.categoryId ?? null,
-    serviceSlug: row.course?.category?.service?.slug ?? null,
+    serviceId: row.course?.serviceId ?? null,
+    serviceSlug: row.course?.service?.slug ?? null,
     courseTitle: row.course?.title ?? "Untitled course",
     studentName: name || row.student?.email || "Unknown student",
     studentEmail: row.student?.email ?? null,
@@ -239,8 +245,8 @@ function mapIntakeRow(row, deliveryStats) {
     id: row.id,
     code: row.code,
     courseId: row.courseId,
-    categoryId: row.categoryId,
-    serviceSlug: row.category?.service?.slug ?? null,
+    serviceId: row.serviceId,
+    serviceSlug: row.service?.slug ?? null,
     title: row.course?.title ?? "Untitled course",
     status: row.status,
     startDate: row.startDate,
@@ -372,7 +378,7 @@ export async function getAdminSummary(options = {}) {
     // enrollments only, so this stays a small, cheap fetch.
     prisma.enrollment.findMany({
       where: { status: "ACTIVE" },
-      select: { course: { select: { category: { select: { service: { select: { title: true } } } } } } },
+      select: { course: { select: { service: { select: { title: true } } } } },
     }),
     // Revenue-receivable summary: every non-cancelled, payment-required
     // enrollment's course price/discount, to compute what "everyone paid
@@ -462,7 +468,7 @@ export async function getAdminSummary(options = {}) {
 
   const serviceCounts = new Map();
   for (const { course } of serviceEnrollments) {
-    const title = course?.category?.service?.title ?? "Other";
+    const title = course?.service?.title ?? "Other";
     serviceCounts.set(title, (serviceCounts.get(title) ?? 0) + 1);
   }
   const serviceBreakdown = Array.from(serviceCounts, ([service, count]) => ({ service, count })).sort(

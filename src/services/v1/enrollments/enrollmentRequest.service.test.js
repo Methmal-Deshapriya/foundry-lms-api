@@ -60,8 +60,8 @@ function requestFixture(overrides = {}) {
       id: courseId,
       title: "AI/ML Ignition Program",
       slug: "ai-ml-ignition",
-      categoryId,
-      category: { slug: "bootcamps", service: { slug: "professional-workshops" } },
+      serviceId: categoryId,
+      service: { slug: "professional-workshops" },
     },
     intake: { id: intakeId, code: "AI-ML-2026-1", status: "OPEN_ACTIVE" },
     student,
@@ -94,7 +94,7 @@ describe("enrollmentRequest service", () => {
       expect(sendEnrollmentRequestNotificationEmail).toHaveBeenCalledWith(
         "admin@example.com",
         expect.objectContaining({
-          requestUrl: `${process.env.CLIENT_URL?.replace(/\/$/, "") ?? ""}/admin/services/professional-workshops/categories/${categoryId}/courses/${courseId}/intakes/${intakeId}?tab=enrollment-requests&requestId=${requestId}`,
+          requestUrl: `${process.env.CLIENT_URL?.replace(/\/$/, "") ?? ""}/admin/services/professional-workshops/courses/${courseId}/intakes/${intakeId}?tab=enrollment-requests&requestId=${requestId}`,
         }),
       );
     });

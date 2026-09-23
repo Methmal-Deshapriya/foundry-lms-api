@@ -15,24 +15,11 @@ export async function getPublicExplore(req, res, next) {
   }
 }
 
-export async function getPublicCategories(req, res, next) {
+export async function getPublicCourses(req, res, next) {
   try {
-    const data = await catalogService.getPublicCategoriesService(req.params.serviceSlug);
+    const data = await catalogService.getPublicCoursesService(req.params.serviceSlug);
     setPublicCache(res);
-    return ApiResponse.send(res, data, "Categories fetched successfully");
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function getPublicCategory(req, res, next) {
-  try {
-    const data = await catalogService.getPublicCategoryService(
-      req.params.serviceSlug,
-      req.params.categorySlug,
-    );
-    setPublicCache(res);
-    return ApiResponse.send(res, data, "Category fetched successfully");
+    return ApiResponse.send(res, data, "Courses fetched successfully");
   } catch (error) {
     next(error);
   }
@@ -42,7 +29,6 @@ export async function getPublicCourse(req, res, next) {
   try {
     const data = await catalogService.getPublicCourseService(
       req.params.serviceSlug,
-      req.params.categorySlug,
       req.params.courseSlug,
     );
     setPublicCache(res);

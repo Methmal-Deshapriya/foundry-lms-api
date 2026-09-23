@@ -44,7 +44,7 @@ function buildInitialPaymentEntry(course, paymentStatus) {
 const enrollmentInclude = {
   user: true,
   enrolledBy: true,
-  course: { include: { category: { include: { service: true } } } },
+  course: { include: { service: true, thumbnailObject: true } },
   intake: true,
   // Not filtered to ISSUED: the roster/detail views need to tell "revoked"
   // apart from "never issued" (a REVOKED certificate doesn't block issuing a
@@ -58,16 +58,16 @@ export function findById(id) { return prisma.enrollment.findUnique({ where: { id
 export async function createPaid(intakeId, userId, actorId, payment) {
   try {
     const id = await prisma.$transaction(async (transaction) => {
-      const initialIntake = await transaction.intake.findUnique({ where: { id: intakeId }, select: { category: { select: { serviceId: true } } } });
+      const initialIntake = await transaction.intake.findUnique({ where: { id: intakeId }, select: { serviceId: true } });
       if (!initialIntake) throw new NotFoundError("Intake not found.");
-      await acquireTransactionLock(transaction, `learning-service:${initialIntake.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initialIntake.serviceId}`);
       await acquireTransactionLock(transaction, `intake:${intakeId}`);
       await acquireTransactionLock(transaction, `intake-enrollment:${intakeId}`);
-      const intake = await transaction.intake.findUnique({ where: { id: intakeId }, include: { category: { include: { service: true } }, course: true } });
+      const intake = await transaction.intake.findUnique({ where: { id: intakeId }, include: { service: true, course: true } });
       const student = await transaction.user.findUnique({ where: { id: userId }, select: { role: true, emailVerified: true } });
       if (!intake) throw new NotFoundError("Intake not found.");
       if (!student || student.role !== "STUDENT" || !student.emailVerified) throw new ConflictError("The account must be a verified student.", "INELIGIBLE_STUDENT");
-      if (intake.status !== "OPEN_ACTIVE" || intake.course.archivedAt || intake.category.status !== "PUBLISHED" || intake.category.service.status !== "ACTIVE" || intake.category.service.accessType !== "PAID" || intake.category.service.courseMode !== "SEASONAL" || intake.category.service.enrollmentMode !== "ADMIN" || intake.category.service.paymentRequirement !== "REQUIRED") {
+      if (intake.status !== "OPEN_ACTIVE" || intake.course.archivedAt || intake.course.status !== "PUBLISHED" || intake.service.status !== "ACTIVE" || intake.service.accessType !== "PAID" || intake.service.courseMode !== "SEASONAL" || intake.service.enrollmentMode !== "ADMIN" || intake.service.paymentRequirement !== "REQUIRED") {
         throw new ConflictError("This intake is not accepting enrollment.", "COURSE_ENROLLMENT_CLOSED");
       }
       if (await transaction.enrollment.findUnique({ where: { userId_intakeId: { userId, intakeId } } })) throw new ConflictError("Student is already enrolled in this intake.");
@@ -90,9 +90,9 @@ export async function createPaid(intakeId, userId, actorId, payment) {
 export async function completePayment(id, actorId) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.enrollment.findUnique({ where: { id }, select: { intakeId: true, intake: { select: { category: { select: { serviceId: true } } } } } });
+      const initial = await transaction.enrollment.findUnique({ where: { id }, select: { intakeId: true, intake: { select: { serviceId: true } } } });
       if (!initial) throw new NotFoundError("Enrollment not found.");
-      await acquireTransactionLock(transaction, `learning-service:${initial.intake.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.intake.serviceId}`);
       await acquireTransactionLock(transaction, `intake:${initial.intakeId}`);
       await acquireTransactionLock(transaction, `enrollment:${id}`);
       const current = await transaction.enrollment.findUnique({ where: { id }, include: { course: true } });
@@ -109,17 +109,17 @@ export async function completePayment(id, actorId) {
 export async function enrollFree(userId, intakeId) {
   try {
     const result = await prisma.$transaction(async (transaction) => {
-      const initialIntake = await transaction.intake.findUnique({ where: { id: intakeId }, select: { category: { select: { serviceId: true } } } });
+      const initialIntake = await transaction.intake.findUnique({ where: { id: intakeId }, select: { serviceId: true } });
       if (!initialIntake) throw new ConflictError("This Free Learning course is not open for enrollment.");
-      await acquireTransactionLock(transaction, `learning-service:${initialIntake.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initialIntake.serviceId}`);
       await acquireTransactionLock(transaction, `intake:${intakeId}`);
       await acquireTransactionLock(transaction, `intake-enrollment:${intakeId}`);
       const intake = await transaction.intake.findFirst({
         where: {
           id: intakeId,
           status: "OPEN_ACTIVE",
-          course: { archivedAt: null },
-          category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
+          course: { archivedAt: null, status: "PUBLISHED" },
+          service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" },
           courseSessions: {
             some: {
               retiredAt: null,
@@ -150,12 +150,12 @@ export async function enrollFree(userId, intakeId) {
 export async function update(id, expected, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.enrollment.findUnique({ where: { id }, select: { intakeId: true, intake: { select: { category: { select: { serviceId: true } } } } } });
+      const initial = await transaction.enrollment.findUnique({ where: { id }, select: { intakeId: true, intake: { select: { serviceId: true } } } });
       if (!initial) throw new NotFoundError("Enrollment not found.");
-      await acquireTransactionLock(transaction, `learning-service:${initial.intake.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.intake.serviceId}`);
       await acquireTransactionLock(transaction, `intake:${initial.intakeId}`);
       await acquireTransactionLock(transaction, `enrollment:${id}`);
-      const current = await transaction.enrollment.findUnique({ where: { id }, include: { user: true, intake: { include: { category: { include: { service: true } } } } } });
+      const current = await transaction.enrollment.findUnique({ where: { id }, include: { user: true, intake: { include: { service: true } } } });
       if (!current) throw new NotFoundError("Enrollment not found.");
       if (current.status !== expected.status || current.paymentStatus !== expected.paymentStatus) throw new ConflictError("Enrollment state changed. Refresh and try again.");
       const nextStatus = data.status ?? current.status;

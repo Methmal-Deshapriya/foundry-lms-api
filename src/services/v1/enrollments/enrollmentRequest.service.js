@@ -88,7 +88,7 @@ async function notifyAdminsOfEnrollmentRequest(request) {
   // Must match the live admin route exactly — see Finding A of the
   // 2026-08-30 system guide/audit (the previous /admin/catalog/courses/...
   // link pointed at a route that doesn't exist).
-  const requestUrl = `${clientUrl}/admin/services/${request.course.category.service.slug}/categories/${request.course.categoryId}/courses/${request.courseId}/intakes/${request.intakeId}?tab=enrollment-requests&requestId=${request.id}`;
+  const requestUrl = `${clientUrl}/admin/services/${request.course.service.slug}/courses/${request.courseId}/intakes/${request.intakeId}?tab=enrollment-requests&requestId=${request.id}`;
   await Promise.all(
     admins.map((email) =>
       sendEnrollmentRequestNotificationEmail(email, {

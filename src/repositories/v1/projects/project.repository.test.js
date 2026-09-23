@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
-    studentProject: { findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
+    studentProject: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     enrollment: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
   };
@@ -29,6 +29,9 @@ describe("project repository security boundaries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    // Default: no existing project on the enrollment, so the one-per-enrollment
+    // check doesn't block tests that aren't specifically exercising it.
+    mocks.transaction.studentProject.findFirst.mockResolvedValue(null);
   });
 
   it("projects only explicitly public fields for an approved showcase detail", async () => {
@@ -97,7 +100,7 @@ describe("project repository security boundaries", () => {
 
   it("locks and rechecks enrollment ownership before project submission", async () => {
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { category: { serviceId: "service-paid" } } })
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { serviceId: "service-paid" } })
       .mockResolvedValue({
         id: "enrollment-1",
         userId: "student-1",
@@ -105,7 +108,7 @@ describe("project repository security boundaries", () => {
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({
       id: "student-1",
@@ -137,7 +140,7 @@ describe("project repository security boundaries", () => {
 
   it("allows project submission for a partially paid enrollment, same as a fully paid one", async () => {
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { category: { serviceId: "service-paid" } } })
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { serviceId: "service-paid" } })
       .mockResolvedValue({
         id: "enrollment-1",
         userId: "student-1",
@@ -145,7 +148,7 @@ describe("project repository security boundaries", () => {
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "PARTIAL",
-        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({
       id: "student-1",
@@ -169,14 +172,14 @@ describe("project repository security boundaries", () => {
 
   it("rejects submission when cancellation won the enrollment lock", async () => {
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { category: { serviceId: "service-free" } } })
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { serviceId: "service-free" } })
       .mockResolvedValue({
         userId: "student-1",
         intakeId: "intake-1",
         source: "SELF",
         status: "CANCELLED",
         paymentStatus: "NOT_REQUIRED",
-        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
       });
     mocks.transaction.user.findUnique.mockResolvedValue({
       id: "student-1",
@@ -195,6 +198,39 @@ describe("project repository security boundaries", () => {
         },
       ),
     ).rejects.toThrow(/does not allow/i);
+    expect(mocks.transaction.studentProject.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second project submission against the same enrollment", async () => {
+    mocks.transaction.enrollment.findUnique
+      .mockResolvedValueOnce({ intakeId: "intake-1", intake: { serviceId: "service-free" } })
+      .mockResolvedValue({
+        id: "enrollment-1",
+        userId: "student-1",
+        intakeId: "intake-1",
+        source: "SELF",
+        status: "ACTIVE",
+        paymentStatus: "NOT_REQUIRED",
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
+      });
+    mocks.transaction.user.findUnique.mockResolvedValue({
+      id: "student-1",
+      role: "STUDENT",
+      emailVerified: true,
+    });
+    mocks.transaction.studentProject.findFirst.mockResolvedValue({ id: "existing-project" });
+
+    await expect(
+      createForEnrollment(
+        { id: "student-1", role: "STUDENT" },
+        {
+          enrollmentId: "enrollment-1",
+          intakeId: "intake-1",
+          userId: "student-1",
+          title: "Project",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "PROJECT_ALREADY_SUBMITTED" });
     expect(mocks.transaction.studentProject.create).not.toHaveBeenCalled();
   });
 });

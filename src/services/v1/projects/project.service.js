@@ -2,6 +2,7 @@ import * as projectRepo from "../../../repositories/v1/projects/project.reposito
 import { createProjectSchema, updateProjectSchema, reviewProjectSchema } from "../../../constants/v1/projects/projects.schema.js";
 import { ALL_PROJECT_STATUSES } from "../../../constants/v1/projects/projects.constants.js";
 import { ValidationError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
+import { assertAttachableStoredObject } from "../storage/storedObject.service.js";
 import {
   transformProject,
   transformProjectList,
@@ -26,11 +27,16 @@ export async function submitProjectService(requester, data) {
     const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
+  const input = validation.data;
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "PROJECT_THUMBNAIL");
+    input.thumbnailUrl = null;
+  }
 
   // Authorization, ownership, and enrollment eligibility are rechecked under
   // the same enrollment lock used by lifecycle commands.
   const project = await projectRepo.createForEnrollment(requester, {
-    ...validation.data,
+    ...input,
     userId: requester.id,
     status: "PENDING",
   });
@@ -50,11 +56,18 @@ export async function updateProjectService(projectId, userId, data) {
     const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
+  const input = validation.data;
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "PROJECT_THUMBNAIL");
+    input.thumbnailUrl = null;
+  } else if (input.thumbnailUrl) {
+    input.thumbnailObjectId = null;
+  }
 
   const updated = await projectRepo.updatePendingOwned(
     projectId,
     userId,
-    validation.data,
+    input,
   );
 
   return transformProject(updated);

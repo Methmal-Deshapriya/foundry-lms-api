@@ -2,7 +2,7 @@ import prisma from "../../../utils/prisma.js";
 import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
-const include = { _count: { select: { categories: true } } };
+const include = { _count: { select: { courses: true } } };
 
 export function findById(id) {
   return prisma.learningService.findUnique({ where: { id }, include });
@@ -40,27 +40,30 @@ export function findPublic() {
   return prisma.learningService.findMany({ where: { status: "ACTIVE" }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] });
 }
 
+/**
+ * Two independent stat blocks: "course" (Draft/Published/Archived — Course's
+ * own publish lifecycle, formerly Category's) and "intake" (DRAFT/
+ * OPEN_ACTIVE/CLOSED_ACTIVE/COMPLETED/ARCHIVED — an intake's run lifecycle;
+ * named "course_*" pre-2026-09-22 back when Category, not Course, owned the
+ * publish-status concept — see the 2026-09-22 category layer removal plan).
+ */
 export async function findAdminSummaries(serviceIds) {
   if (serviceIds.length === 0) return [];
   return prisma.$queryRaw`
-    WITH category_stats AS (
+    WITH course_status_stats AS (
       SELECT
-        category.service_id,
+        course.service_id,
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE category.status = 'PUBLISHED')::int AS published,
-        COUNT(*) FILTER (WHERE category.status = 'DRAFT')::int AS draft,
-        COUNT(*) FILTER (WHERE category.status = 'ARCHIVED')::int AS archived
-      FROM categories category
-      WHERE category.service_id = ANY(${serviceIds}::text[])
-      GROUP BY category.service_id
+        COUNT(*) FILTER (WHERE course.status = 'PUBLISHED')::int AS published,
+        COUNT(*) FILTER (WHERE course.status = 'DRAFT')::int AS draft,
+        COUNT(*) FILTER (WHERE course.status = 'ARCHIVED')::int AS archived
+      FROM courses course
+      WHERE course.service_id = ANY(${serviceIds}::text[])
+      GROUP BY course.service_id
     ),
-    course_stats AS (
-      -- Lifecycle status lives on Intake, not the new Course/program table —
-      -- see the 2026-08-30 rename plan. Column names in this CTE stay
-      -- "course_*" since they're only ever consumed as the courseTotal/
-      -- courseDraft/etc. fields below, unchanged for existing consumers.
+    intake_stats AS (
       SELECT
-        category.service_id,
+        intake.service_id,
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE intake.status = 'DRAFT')::int AS draft,
         COUNT(*) FILTER (WHERE intake.status = 'OPEN_ACTIVE')::int AS open_active,
@@ -76,21 +79,19 @@ export async function findAdminSummaries(serviceIds) {
             )
         )::int AS without_sessions
       FROM intakes intake
-      JOIN categories category ON category.id = intake.category_id
-      WHERE category.service_id = ANY(${serviceIds}::text[])
-      GROUP BY category.service_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
     ),
     curriculum_stats AS (
-      SELECT category.service_id,
+      SELECT intake.service_id,
         COUNT(course_session.id) FILTER (WHERE course_session.retired_at IS NULL)::int AS attachment_count
       FROM intakes intake
-      JOIN categories category ON category.id = intake.category_id
       LEFT JOIN course_sessions course_session ON course_session.intake_id = intake.id
-      WHERE category.service_id = ANY(${serviceIds}::text[])
-      GROUP BY category.service_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
     ),
     learner_stats AS (
-      SELECT category.service_id,
+      SELECT intake.service_id,
         COUNT(DISTINCT enrollment.user_id) FILTER (WHERE enrollment.status = 'ACTIVE')::int AS active_unique,
         COUNT(DISTINCT enrollment.user_id)::int AS total_unique,
         COUNT(*) FILTER (WHERE enrollment.status = 'ACTIVE')::int AS active_enrollments,
@@ -103,30 +104,29 @@ export async function findAdminSummaries(serviceIds) {
         )::int AS payment_attention
       FROM enrollments enrollment
       JOIN intakes intake ON intake.id = enrollment.intake_id
-      JOIN categories category ON category.id = intake.category_id
-      WHERE category.service_id = ANY(${serviceIds}::text[])
-      GROUP BY category.service_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
     )
     SELECT service.id AS "serviceId",
-      COALESCE(category.total, 0)::int AS "categoryTotal",
-      COALESCE(category.published, 0)::int AS "categoryPublished",
-      COALESCE(category.draft, 0)::int AS "categoryDraft",
-      COALESCE(category.archived, 0)::int AS "categoryArchived",
-      COALESCE(course.total, 0)::int AS "courseTotal",
-      COALESCE(course.draft, 0)::int AS "courseDraft",
-      COALESCE(course.open_active, 0)::int AS "openActiveCourseCount",
-      COALESCE(course.closed_active, 0)::int AS "closedActiveCourseCount",
-      COALESCE(course.completed, 0)::int AS "completedCourseCount",
-      COALESCE(course.archived, 0)::int AS "courseArchived",
-      COALESCE(course.without_sessions, 0)::int AS "coursesWithoutSessions",
+      COALESCE(course_status.total, 0)::int AS "courseTotal",
+      COALESCE(course_status.published, 0)::int AS "coursePublished",
+      COALESCE(course_status.draft, 0)::int AS "courseDraft",
+      COALESCE(course_status.archived, 0)::int AS "courseArchived",
+      COALESCE(intake.total, 0)::int AS "intakeTotal",
+      COALESCE(intake.draft, 0)::int AS "intakeDraft",
+      COALESCE(intake.open_active, 0)::int AS "openActiveIntakeCount",
+      COALESCE(intake.closed_active, 0)::int AS "closedActiveIntakeCount",
+      COALESCE(intake.completed, 0)::int AS "completedIntakeCount",
+      COALESCE(intake.archived, 0)::int AS "intakeArchived",
+      COALESCE(intake.without_sessions, 0)::int AS "intakesWithoutSessions",
       COALESCE(curriculum.attachment_count, 0)::int AS "curriculumAttachmentCount",
       COALESCE(learner.active_unique, 0)::int AS "activeUniqueLearners",
       COALESCE(learner.total_unique, 0)::int AS "totalUniqueLearners",
       COALESCE(learner.active_enrollments, 0)::int AS "activeEnrollments",
       COALESCE(learner.payment_attention, 0)::int AS "paymentAttentionCount"
     FROM learning_services service
-    LEFT JOIN category_stats category ON category.service_id = service.id
-    LEFT JOIN course_stats course ON course.service_id = service.id
+    LEFT JOIN course_status_stats course_status ON course_status.service_id = service.id
+    LEFT JOIN intake_stats intake ON intake.service_id = service.id
     LEFT JOIN curriculum_stats curriculum ON curriculum.service_id = service.id
     LEFT JOIN learner_stats learner ON learner.service_id = service.id
     WHERE service.id = ANY(${serviceIds}::text[])
@@ -146,8 +146,8 @@ export async function update(id, data) {
       if (!current) throw new NotFoundError("Learning service not found.");
       if (current.status === "ARCHIVED") throw new ConflictError("Archived learning services are read-only.");
       const lockedFields = ["slug", "accessType", "courseMode", "enrollmentMode", "paymentRequirement"];
-      if (current._count.categories > 0 && lockedFields.some((field) => Object.hasOwn(data, field) && data[field] !== current[field])) {
-        throw new ConflictError("Learning service identity and policy are immutable after its first category.", "LEARNING_SERVICE_POLICY_LOCKED");
+      if (current._count.courses > 0 && lockedFields.some((field) => Object.hasOwn(data, field) && data[field] !== current[field])) {
+        throw new ConflictError("Learning service identity and policy are immutable after its first course.", "LEARNING_SERVICE_POLICY_LOCKED");
       }
       return transaction.learningService.update({ where: { id }, data, include });
     });
@@ -162,7 +162,7 @@ export async function transitionStatus(id, expectedStatus, status) {
       if (!current) throw new NotFoundError("Learning service not found.");
       if (current.status !== expectedStatus) throw new ConflictError("Learning service status changed. Refresh and try again.", "STALE_LEARNING_SERVICE_STATUS");
       if (status === "ARCHIVED") {
-        const activeIntakes = await transaction.intake.count({ where: { category: { serviceId: id }, status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] } } });
+        const activeIntakes = await transaction.intake.count({ where: { serviceId: id, status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] } } });
         if (activeIntakes > 0) throw new ConflictError("Complete or cancel every active intake before archiving this learning service.", "LEARNING_SERVICE_ARCHIVE_BLOCKED");
       }
       return transaction.learningService.update({ where: { id }, data: { status }, include });
@@ -174,8 +174,8 @@ export async function findDeletionImpact(id) {
   const service = await prisma.learningService.findUnique({
     where: { id },
     include: {
-      _count: { select: { categories: true } },
-      categories: { select: { _count: { select: { courses: true, intakes: true } } } },
+      _count: { select: { courses: true } },
+      courses: { select: { _count: { select: { intakes: true } } } },
     },
   });
   if (!service) return null;
@@ -183,10 +183,9 @@ export async function findDeletionImpact(id) {
     resourceType: "LEARNING_SERVICE",
     resourceId: id,
     resourceStatus: service.status,
-    categories: service._count.categories,
-    courses: service.categories.reduce((sum, category) => sum + category._count.courses, 0),
-    intakes: service.categories.reduce((sum, category) => sum + category._count.intakes, 0),
-    deletable: service.status === "ARCHIVED" && service._count.categories === 0,
+    courses: service._count.courses,
+    intakes: service.courses.reduce((sum, course) => sum + course._count.intakes, 0),
+    deletable: service.status === "ARCHIVED" && service._count.courses === 0,
   };
 }
 
@@ -197,7 +196,7 @@ export async function remove(id) {
       const current = await transaction.learningService.findUnique({ where: { id }, include });
       if (!current) throw new NotFoundError("Learning service not found.");
       if (current.status !== "ARCHIVED") throw new ConflictError("Archive the learning service first.");
-      if (current._count.categories > 0) throw new ConflictError("A learning service with categories cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
+      if (current._count.courses > 0) throw new ConflictError("A learning service with courses cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
       await transaction.learningService.delete({ where: { id } });
       return { id };
     });

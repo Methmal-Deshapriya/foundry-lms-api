@@ -24,6 +24,8 @@ router.get("/:id/analytics", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), 
 router.get("/:id", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.get);
 router.post("/", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.create);
 router.patch("/:id", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), controller.update);
+router.patch("/:id/publish", requirePermission(PERMISSIONS.CATALOG_PUBLISH), controller.publish);
+router.patch("/:id/unpublish", requirePermission(PERMISSIONS.CATALOG_PUBLISH), controller.unpublish);
 router.patch("/:id/archive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), controller.archive);
 router.patch("/:id/unarchive", requirePermission(PERMISSIONS.CATALOG_PUBLISH), controller.restore);
 router.delete("/:id", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.remove);

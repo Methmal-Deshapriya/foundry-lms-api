@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CATALOG_STATUSES,
   COURSE_LEVELS,
   COURSE_ENROLLMENT_STATUSES,
   DURATION_UNITS,
@@ -16,7 +17,7 @@ const optionalStringArray = z.array(z.string().trim().min(1).max(160)).max(30).o
 // content that's identical across every Intake of this course, which is
 // exactly why it lives here and not on Intake.
 const courseObject = z.object({
-  categoryId: z.string().uuid(),
+  serviceId: z.string().uuid(),
   slug: z.string().trim().min(2).max(100).regex(SLUG_REGEX),
   title: z.string().trim().min(3).max(160),
   summary: z.string().trim().min(10).max(300),
@@ -29,6 +30,7 @@ const courseObject = z.object({
   skills: optionalStringArray,
   prerequisites: optionalStringArray,
   thumbnailUrl: nullableSecureHttpUrlSchema,
+  thumbnailObjectId: z.string().uuid().nullable().optional(),
   sortOrder: z.number().int().min(0).optional(),
   intakeCodePrefix: z.string().trim().min(2).max(80).regex(CODE_PREFIX_REGEX),
   certificateEnabled: z.boolean({
@@ -48,6 +50,13 @@ function validateDurationConsistency(data, context) {
       path: ["durationValue"],
     });
   }
+  if (data.thumbnailUrl && data.thumbnailObjectId) {
+    context.addIssue({
+      code: "custom",
+      message: "Use either an uploaded thumbnail or an external thumbnail URL, not both.",
+      path: ["thumbnailObjectId"],
+    });
+  }
 }
 
 export const createCourseSchema = courseObject
@@ -55,15 +64,15 @@ export const createCourseSchema = courseObject
   .superRefine(validateDurationConsistency);
 
 export const updateCourseSchema = courseObject
-  .omit({ categoryId: true, intakeCodePrefix: true, certificateEnabled: true, discountAmount: true })
+  .omit({ serviceId: true, intakeCodePrefix: true, certificateEnabled: true, discountAmount: true })
   .partial()
-  .strict("Certificate policy, discount amount, intake code prefix, and parent category cannot be changed after course creation.")
+  .strict("Certificate policy, discount amount, intake code prefix, and parent learning service cannot be changed after course creation.")
   .superRefine(validateDurationConsistency)
   .refine((data) => Object.keys(data).length > 0, "At least one field is required.");
 
 export const courseAdminFiltersSchema = z.object({
-  categoryId: z.string().uuid().optional(),
   serviceId: z.string().uuid().optional(),
+  status: z.enum(Object.values(CATALOG_STATUSES)).optional(),
   level: z.enum(COURSE_LEVELS).optional(),
   enrollmentStatus: z.enum(COURSE_ENROLLMENT_STATUSES).optional(),
   includeArchived: z.coerce.boolean().default(false),
@@ -79,7 +88,6 @@ export const courseAdminFiltersSchema = z.object({
 export const publicExploreFiltersSchema = z
   .object({
     service: z.string().trim().min(1).max(100).optional(),
-    category: z.string().trim().min(1).max(100).optional(),
     level: z.enum(COURSE_LEVELS).optional(),
     accessType: z.enum(LEARNING_ACCESS_TYPES).optional(),
     minPrice: z.coerce.number().min(0).max(99999999).optional(),

@@ -46,6 +46,24 @@ export function validateRuntimeConfig() {
   ) {
     throw new Error("CLIENT_URL and CORS_ORIGIN must use HTTPS in production.");
   }
+  if (process.env.R2_ENABLED === "true") {
+    for (const name of [
+      "R2_ACCOUNT_ID",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+      "R2_PUBLIC_BUCKET",
+      "R2_PRIVATE_BUCKET",
+      "R2_PUBLIC_BASE_URL",
+    ]) {
+      if (!process.env[name]?.trim()) {
+        throw new Error(`${name} is required when R2_ENABLED=true.`);
+      }
+    }
+    const r2PublicUrl = requireUrl("R2_PUBLIC_BASE_URL");
+    if (process.env.NODE_ENV === "production" && !r2PublicUrl.startsWith("https://")) {
+      throw new Error("R2_PUBLIC_BASE_URL must use HTTPS in production.");
+    }
+  }
   if (process.env.NODE_ENV === "production") {
     for (const name of ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "OTP_HMAC_KEYS"]) {
       if (!process.env[name]?.trim()) throw new Error(`${name} is required in production.`);
@@ -139,6 +157,13 @@ export function validateRuntimeConfig() {
     ["AUTH_ARTIFACT_CLEANUP_BATCH_SIZE", 500],
     ["AUTH_ARTIFACT_RETENTION_DAYS", 7],
     ["RATE_LIMIT_REDIS_CONNECT_TIMEOUT_MS", 2_000],
+    ["R2_UPLOAD_URL_TTL_SECONDS", 300],
+    ["R2_DOWNLOAD_URL_TTL_SECONDS", 300],
+    ["R2_READINESS_CACHE_MS", 60_000],
+    ["R2_MAX_IMAGE_BYTES", 10_485_760],
+    ["R2_MAX_MATERIAL_BYTES", 104_857_600],
+    ["R2_MAX_RECORDING_BYTES", 5_368_709_120],
+    ["R2_MAX_PROJECT_THUMBNAIL_BYTES", 5_242_880],
   ]) {
     const value = Number(process.env[name] ?? fallback);
     if (!Number.isInteger(value) || value < 1) {

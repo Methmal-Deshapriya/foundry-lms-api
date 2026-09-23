@@ -39,8 +39,6 @@ function toEnrollmentCourseSummary(enrollment) {
   const intake = enrollment.intake;
   return {
     ...publicCourse,
-    thumbnailUrl: enrollment.course.thumbnailUrl,
-    categoryVisualKey: enrollment.course.category?.visualKey,
     intakeId: enrollment.intakeId,
     intakeKey: intake?.intakeKey,
     code: intake?.code,

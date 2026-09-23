@@ -16,7 +16,6 @@ import errorHandler from "./middlewares/errorHandler.js";
 import authRoutes from "./routes/v1/auth/auth.routes.js";
 import userRoutes from "./routes/v1/users/user.routes.js";
 import catalogRoutes from "./routes/v1/catalog/catalog.routes.js";
-import categoryRoutes from "./routes/v1/catalog/category.routes.js";
 import courseRoutes from "./routes/v1/catalog/course.routes.js";
 import intakeRoutes from "./routes/v1/catalog/intake.routes.js";
 import learningServiceRoutes from "./routes/v1/catalog/learningService.routes.js";
@@ -28,7 +27,9 @@ import projectRoutes from "./routes/v1/projects/project.routes.js";
 import auditRoutes from "./routes/v1/audit/audit.routes.js";
 import dashboardRoutes from "./routes/v1/dashboard/dashboard.routes.js";
 import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
+import storedObjectRoutes from "./routes/v1/storage/storedObject.routes.js";
 import { requestContext } from "./middlewares/requestContext.js";
+import { checkR2Readiness, isR2Enabled } from "./config/r2.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -66,7 +67,6 @@ app.use("/api/v1/auth", (req, res, next) => {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/catalog", catalogRoutes);
-app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/courses", courseRoutes);
 app.use("/api/v1/intakes", intakeRoutes);
 app.use("/api/v1/services", learningServiceRoutes);
@@ -77,6 +77,7 @@ app.use("/api/v1/enrollment-requests", enrollmentRequestRoutes);
 app.use("/api/v1/projects", projectRoutes);
 app.use("/api/v1/audit", auditRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
+app.use("/api/v1/storage", storedObjectRoutes);
 app.use("/api/postman", apiArtifactRoutes);
 
 // 5. Health Check
@@ -97,16 +98,21 @@ app.get("/api/ready", async (req, res) => {
     const databaseCheck = checkDatabaseReadiness(2_000);
     const emailCheck = checkEmail ? checkEmailReadiness() : Promise.resolve();
     const rateLimitStoreCheck = checkRateLimitStoreReadiness();
-    const [, , rateLimitStore] = await Promise.all([
+    const storageCheck = isR2Enabled()
+      ? checkR2Readiness()
+      : Promise.resolve("NOT_CONFIGURED");
+    const [, , rateLimitStore, objectStorage] = await Promise.all([
       databaseCheck,
       emailCheck,
       rateLimitStoreCheck,
+      storageCheck,
     ]);
     return ApiResponse.send(res, {
       status: "READY",
       database: "UP",
       email: checkEmail ? "UP" : "NOT_CHECKED",
       rateLimitStore,
+      objectStorage,
     });
   } catch (error) {
     Logger.error("Dependency readiness check failed", error);
@@ -117,6 +123,7 @@ app.get("/api/ready", async (req, res) => {
         database: "UNKNOWN",
         email: checkEmail ? "UNKNOWN" : "NOT_CHECKED",
         rateLimitStore: "UNKNOWN",
+        objectStorage: isR2Enabled() ? "UNKNOWN" : "NOT_CONFIGURED",
       },
       "Dependency readiness check failed",
       503,

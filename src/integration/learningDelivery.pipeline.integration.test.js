@@ -12,8 +12,6 @@ const ids = {
   admin: "f0000000-0000-4000-8000-000000000100",
   paidStudent: "f0000000-0000-4000-8000-000000000101",
   freeStudent: "f0000000-0000-4000-8000-000000000102",
-  paidCategory: "f0000000-0000-4000-8000-000000000110",
-  freeCategory: "f0000000-0000-4000-8000-000000000111",
   paidCourse: "f0000000-0000-4000-8000-000000000120",
   freeCourse: "f0000000-0000-4000-8000-000000000121",
   paidB1: "f0000000-0000-4000-8000-000000000130",
@@ -51,7 +49,6 @@ async function cleanupFixture() {
   await prisma.intake.deleteMany({ where: { id: { in: intakeIds } } });
   await prisma.course.deleteMany({ where: { id: { in: courseIds } } });
   await prisma.session.deleteMany({ where: { id: { in: [ids.paidSession, ids.freeSession, ids.spareSession] } } });
-  await prisma.category.deleteMany({ where: { id: { in: [ids.paidCategory, ids.freeCategory] } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 }
 
@@ -80,18 +77,12 @@ async function seedFixture() {
       { id: ids.freeStudent, firstName: "Free", lastName: "Student", email: "pipeline-free@foundry.test", password: "integration-test-only", role: "STUDENT", emailVerified: true },
     ],
   });
-  await prisma.category.createMany({
-    data: [
-      { id: ids.paidCategory, serviceId: ids.paidService, slug: "pipeline-ai-ml", title: "Pipeline AI/ML", description: "Paid pipeline integration category.", audienceLabel: "Beginning engineers", visualKey: "code2", status: "PUBLISHED" },
-      { id: ids.freeCategory, serviceId: ids.freeService, slug: "pipeline-git", title: "Pipeline Git", description: "Free pipeline integration category.", audienceLabel: "Everyone", visualKey: "git-branch", status: "PUBLISHED" },
-    ],
-  });
   await prisma.course.createMany({
     data: [
-      { id: ids.paidCourse, categoryId: ids.paidCategory, intakeCodePrefix: "PIPELINE-AI-ML", certificateEnabled: true, ...commonCourseData() },
+      { id: ids.paidCourse, serviceId: ids.paidService, intakeCodePrefix: "PIPELINE-AI-ML", certificateEnabled: true, status: "PUBLISHED", ...commonCourseData() },
       {
         id: ids.freeCourse,
-        categoryId: ids.freeCategory,
+        serviceId: ids.freeService,
         title: "Pipeline Git Foundations",
         slug: "pipeline-git-foundations",
         summary: "A complete free learning integration fixture.",
@@ -106,14 +97,15 @@ async function seedFixture() {
         prerequisites: [],
         intakeCodePrefix: "PIPELINE-GIT",
         certificateEnabled: false,
+        status: "PUBLISHED",
       },
     ],
   });
   await prisma.intake.createMany({
     data: [
-      { id: ids.paidB1, courseId: ids.paidCourse, categoryId: ids.paidCategory, intakeKey: "2026-B1", code: "PIPELINE-AI-ML-2026-B1", startDate: new Date("2026-08-01"), expectedEndDate: new Date("2026-12-01"), timezone: "Asia/Colombo", capacity: 10, status: "OPEN_ACTIVE" },
-      { id: ids.paidB2, courseId: ids.paidCourse, categoryId: ids.paidCategory, intakeKey: "2026-B2", code: "PIPELINE-AI-ML-2026-B2", startDate: new Date("2026-12-01"), expectedEndDate: new Date("2027-04-01"), timezone: "Asia/Colombo", capacity: 10, status: "DRAFT" },
-      { id: ids.freeIntake, courseId: ids.freeCourse, categoryId: ids.freeCategory, intakeKey: "EVERGREEN", code: "PIPELINE-GIT-EVERGREEN", startDate: null, expectedEndDate: null, timezone: "Asia/Colombo", capacity: null, status: "OPEN_ACTIVE" },
+      { id: ids.paidB1, courseId: ids.paidCourse, serviceId: ids.paidService, intakeKey: "2026-B1", code: "PIPELINE-AI-ML-2026-B1", startDate: new Date("2026-08-01"), expectedEndDate: new Date("2026-12-01"), timezone: "Asia/Colombo", capacity: 10, status: "OPEN_ACTIVE" },
+      { id: ids.paidB2, courseId: ids.paidCourse, serviceId: ids.paidService, intakeKey: "2026-B2", code: "PIPELINE-AI-ML-2026-B2", startDate: new Date("2026-12-01"), expectedEndDate: new Date("2027-04-01"), timezone: "Asia/Colombo", capacity: 10, status: "DRAFT" },
+      { id: ids.freeIntake, courseId: ids.freeCourse, serviceId: ids.freeService, intakeKey: "EVERGREEN", code: "PIPELINE-GIT-EVERGREEN", startDate: null, expectedEndDate: null, timezone: "Asia/Colombo", capacity: null, status: "OPEN_ACTIVE" },
     ],
   });
   await prisma.session.createMany({
@@ -201,7 +193,7 @@ describe.runIf(runDatabaseIntegration)("course and intake delivery pipeline", ()
     // The public URL structure is unchanged by the rename (§2c) — same
     // three segments, now resolving the stable Course rather than swapping
     // between intake rows.
-    const publicCourse = await request(app).get("/api/v1/catalog/bootcamps/categories/pipeline-ai-ml/courses/pipeline-ai-ml-ignition");
+    const publicCourse = await request(app).get("/api/v1/catalog/bootcamps/courses/pipeline-ai-ml-ignition");
     expect(publicCourse.status).toBe(200);
     expect(publicCourse.body.data).toMatchObject({
       id: ids.paidCourse,
@@ -293,7 +285,7 @@ describe.runIf(runDatabaseIntegration)("course and intake delivery pipeline", ()
         data: {
           id: "f0000000-0000-4000-8000-000000000199",
           courseId: ids.freeCourse,
-          categoryId: ids.freeCategory,
+          serviceId: ids.freeService,
           intakeKey: "EVERGREEN-2",
           code: "PIPELINE-GIT-EVERGREEN-2",
           timezone: "Asia/Colombo",
@@ -334,13 +326,13 @@ describe.runIf(runDatabaseIntegration)("course and intake delivery pipeline", ()
     expect(courseImpact.status).toBe(200);
     expect(courseImpact.body.data).toMatchObject({
       resourceType: "COURSE",
-      resourceStatus: "ACTIVE",
+      resourceStatus: "PUBLISHED",
       intakes: 2,
       deletable: false,
     });
 
     const archive = await request(app)
-      .patch(`/api/v1/categories/${ids.freeCategory}/archive`)
+      .patch(`/api/v1/courses/${ids.freeCourse}/archive`)
       .set("Cookie", adminCookie());
     expect(archive.status).toBe(409);
     expect(archive.body.code).toBe("CATALOG_ARCHIVE_BLOCKED");

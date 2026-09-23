@@ -17,6 +17,8 @@ function valuesEqual(a, b) {
 }
 
 const usageInclude = {
+  recordingObject: true,
+  materialObject: true,
   courseSessions: {
     orderBy: [{ retiredAt: "asc" }, { createdAt: "asc" }],
     select: {
@@ -29,13 +31,9 @@ const usageInclude = {
         select: {
           code: true,
           courseId: true,
-          categoryId: true,
+          serviceId: true,
           course: { select: { title: true } },
-          category: {
-            select: {
-              service: { select: { slug: true } },
-            },
-          },
+          service: { select: { slug: true } },
         },
       },
     },
@@ -180,10 +178,14 @@ export async function updateSafely(id, data) {
       const resultingStatus = data.status ?? current.status;
       const resultingRecordingUrl =
         data.recordingUrl !== undefined ? data.recordingUrl : current.recordingUrl;
-      if (resultingStatus === "READY" && !resultingRecordingUrl) {
+      const resultingRecordingObjectId =
+        data.recordingObjectId !== undefined
+          ? data.recordingObjectId
+          : current.recordingObjectId;
+      if (resultingStatus === "READY" && !resultingRecordingUrl && !resultingRecordingObjectId) {
         throw new ValidationError(
-          "A ready session must have a recording URL.",
-          "recordingUrl",
+          "A ready session must have a recording URL or uploaded recording.",
+          "recordingObjectId",
         );
       }
 
@@ -233,7 +235,7 @@ export async function restoreSafely(id) {
       }
       const restoredStatus =
         current.courseSessions.length > 0 ? "READY" : "DRAFT";
-      if (restoredStatus === "READY" && !current.recordingUrl) {
+      if (restoredStatus === "READY" && !current.recordingUrl && !current.recordingObjectId) {
         throw new ConflictError(
           "This used session cannot be restored until its recording is available.",
         );
@@ -260,6 +262,8 @@ export async function duplicate(id) {
         description: source.description,
         recordingUrl: source.recordingUrl,
         materialUrl: source.materialUrl,
+        recordingObjectId: source.recordingObjectId,
+        materialObjectId: source.materialObjectId,
         quizUrl: source.quizUrl,
         feedbackUrl: source.feedbackUrl,
         durationMinutes: source.durationMinutes,

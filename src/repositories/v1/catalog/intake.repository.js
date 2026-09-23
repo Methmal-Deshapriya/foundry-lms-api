@@ -4,7 +4,7 @@ import { acquireTransactionLock } from "../learning/transactionLock.repository.j
 import { recomputeCourseEnrollmentStatus } from "./course.repository.js";
 
 export const intakeInclude = {
-  category: { include: { service: true } },
+  service: true,
   course: true,
   _count: {
     select: {
@@ -32,8 +32,8 @@ export function findPublishedFreeIntakeById(intakeId) {
     where: {
       id: intakeId,
       status: "OPEN_ACTIVE",
-      course: { archivedAt: null },
-      category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
+      course: { archivedAt: null, status: "PUBLISHED" },
+      service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" },
     },
     include: intakeInclude,
   });
@@ -41,10 +41,9 @@ export function findPublishedFreeIntakeById(intakeId) {
 
 export async function findAdmin(filters, limit, offset) {
   const where = {
-    ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+    ...(filters.serviceId ? { serviceId: filters.serviceId } : {}),
     ...(filters.courseId ? { courseId: filters.courseId } : {}),
     ...(filters.status ? { status: filters.status } : {}),
-    ...(filters.serviceId ? { category: { serviceId: filters.serviceId } } : {}),
     ...(filters.q ? { OR: [
       { code: { contains: filters.q, mode: "insensitive" } },
       { intakeKey: { contains: filters.q, mode: "insensitive" } },
@@ -57,7 +56,7 @@ export async function findAdmin(filters, limit, offset) {
       where,
       take: limit,
       skip: offset,
-      orderBy: [{ category: { sortOrder: "asc" } }, { course: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ course: { sortOrder: "asc" } }, { course: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
       include: intakeInclude,
     }),
   ]);
@@ -94,25 +93,25 @@ export async function suggestIntakeDefaults(courseId) {
 export async function create(courseId, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initialCourse = await transaction.course.findUnique({ where: { id: courseId }, select: { category: { select: { serviceId: true } } } });
+      const initialCourse = await transaction.course.findUnique({ where: { id: courseId }, select: { serviceId: true } });
       if (!initialCourse) throw new NotFoundError("Course not found.");
-      await acquireTransactionLock(transaction, `learning-service:${initialCourse.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initialCourse.serviceId}`);
       await acquireTransactionLock(transaction, `course:${courseId}`);
       const course = await transaction.course.findUnique({
         where: { id: courseId },
-        include: { category: { include: { service: true } }, intakes: { select: { id: true } } },
+        include: { service: true, intakes: { select: { id: true } } },
       });
       if (!course) throw new NotFoundError("Course not found.");
-      if (course.archivedAt || course.category.status === "ARCHIVED" || course.category.service.status === "ARCHIVED") {
+      if (course.archivedAt || course.service.status === "ARCHIVED") {
         throw new ConflictError("Archived catalog setup cannot create intakes.");
       }
-      if (course.category.service.courseMode === "EVERGREEN" && course.intakes.length > 0) {
+      if (course.service.courseMode === "EVERGREEN" && course.intakes.length > 0) {
         throw new ConflictError("A Free Learning course can have only one evergreen intake.");
       }
       const intake = await transaction.intake.create({
         data: {
           courseId: course.id,
-          categoryId: course.categoryId,
+          serviceId: course.serviceId,
           intakeKey: data.intakeKey,
           code: `${course.intakeCodePrefix}-${data.intakeKey}`,
           startDate: data.startDate ?? null,
@@ -136,10 +135,10 @@ export async function updateSetup(id, data) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.intake.findUnique({
         where: { id },
-        select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+        select: { serviceId: true, courseId: true },
       });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `intake:${id}`);
       const current = await transaction.intake.findUnique({ where: { id } });
@@ -194,18 +193,18 @@ export async function transitionStatus(id, expectedStatus, targetStatus) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.intake.findUnique({
         where: { id },
-        select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+        select: { serviceId: true, courseId: true },
       });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `intake:${id}`);
-      const intake = await transaction.intake.findUnique({ where: { id }, include: { category: { include: { service: true } }, course: true } });
+      const intake = await transaction.intake.findUnique({ where: { id }, include: { service: true, course: true } });
       if (!intake) return null;
       if (intake.status !== expectedStatus) throw new ConflictError("Intake status changed. Refresh and try again.", "STALE_INTAKE_STATUS");
       if (targetStatus === "OPEN_ACTIVE") {
-        if (intake.category.service.status !== "ACTIVE" || intake.category.status !== "PUBLISHED" || intake.course.archivedAt) throw new ConflictError("Only an intake under an active service/course and published category can be opened.");
-        if (intake.category.service.courseMode === "EVERGREEN") {
+        if (intake.service.status !== "ACTIVE" || intake.course.status !== "PUBLISHED" || intake.course.archivedAt) throw new ConflictError("Only an intake under an active service and a published course can be opened.");
+        if (intake.service.courseMode === "EVERGREEN") {
           const visible = await transaction.courseSession.count({
             where: {
               intakeId: id,
@@ -300,10 +299,10 @@ export async function removePermanently(id) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.intake.findUnique({
         where: { id },
-        select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+        select: { serviceId: true, courseId: true },
       });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `intake:${id}`);
       const intake = await transaction.intake.findUnique({

@@ -2,6 +2,7 @@
  * Data Transformers
  * Handles sanitization and formatting of database entities for API responses.
  */
+import { resolveThumbnailUrl, toStoredObjectSummary } from "./thumbnails.js";
 
 /**
  * Sanitize user object by removing sensitive fields.
@@ -27,6 +28,8 @@ export function transformProject(project) {
   if (!project) return null;
   return {
     ...project,
+    thumbnailUrl: resolveThumbnailUrl(project),
+    thumbnailObject: toStoredObjectSummary(project.thumbnailObject, resolveThumbnailUrl(project)),
     user: project.user ? transformUser(project.user) : undefined,
   };
 }
@@ -47,7 +50,7 @@ export function transformPublicProject(project) {
     id: project.id,
     title: project.title,
     description: project.description,
-    thumbnailUrl: project.thumbnailUrl,
+    thumbnailUrl: resolveThumbnailUrl(project),
     projectUrl: project.projectUrl,
     githubUrl: project.githubUrl,
     demoUrl: project.demoUrl,

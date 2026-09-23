@@ -2,6 +2,7 @@
  * Dashboard Model - The "Front Page Layout"
  * Shapes the raw aggregate query results into each dashboard's response.
  */
+import { resolveThumbnailUrl } from "../../../utils/thumbnails.js";
 
 export function toStudentDashboardResponse(summary) {
   return {
@@ -16,8 +17,7 @@ export function toStudentDashboardResponse(summary) {
       status: enrollment.status,
       updatedAt: enrollment.updatedAt,
       courseTitle: enrollment.course?.title ?? null,
-      thumbnailUrl: enrollment.course?.thumbnailUrl ?? null,
-      categoryVisualKey: enrollment.course?.category?.visualKey ?? null,
+      thumbnailUrl: enrollment.course ? resolveThumbnailUrl(enrollment.course) : null,
       intakeCode: enrollment.intake?.code ?? null,
       progress: summary.progressByEnrollment.get(enrollment.id) ?? null,
     })),

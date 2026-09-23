@@ -10,6 +10,8 @@ export const sessionContentSchema = z.object({
   description: z.string().trim().max(5000).nullable().optional(),
   recordingUrl: nullableSecureHttpUrlSchema,
   materialUrl: nullableSecureHttpUrlSchema,
+  recordingObjectId: z.string().uuid().nullable().optional(),
+  materialObjectId: z.string().uuid().nullable().optional(),
   quizUrl: nullableSecureHttpUrlSchema,
   feedbackUrl: nullableSecureHttpUrlSchema,
   durationMinutes: z.number().int().min(1).max(10080).nullable().optional(),
@@ -21,12 +23,18 @@ export const createSessionLibrarySchema = sessionContentSchema
     status: z.enum(["DRAFT", "READY"]).default("DRAFT"),
   })
   .superRefine((data, context) => {
-    if (data.status === "READY" && !data.recordingUrl) {
+    if (data.status === "READY" && !data.recordingUrl && !data.recordingObjectId) {
       context.addIssue({
         code: "custom",
         message: "A ready session must have a recording URL.",
-        path: ["recordingUrl"],
+        path: ["recordingObjectId"],
       });
+    }
+    if (data.recordingUrl && data.recordingObjectId) {
+      context.addIssue({ code: "custom", message: "Use either an uploaded recording or an external recording URL, not both.", path: ["recordingObjectId"] });
+    }
+    if (data.materialUrl && data.materialObjectId) {
+      context.addIssue({ code: "custom", message: "Use either an uploaded material or an external material URL, not both.", path: ["materialObjectId"] });
     }
   });
 

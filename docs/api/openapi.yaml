@@ -31,6 +31,7 @@ tags:
   - name: 12 Projects
   - name: 13 Audit Logs
   - name: 14 Service Overview
+  - name: 15 Object Storage
 security:
   - cookieAuth: []
 paths:
@@ -375,6 +376,18 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/users/{targetUserId}:
+    get:
+      tags: [02 Users]
+      operationId: getUserAdmin
+      summary: Get one user's profile and activity summary
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/TargetUserId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
   /api/v1/users/{targetUserId}/promote:
     patch:
       tags: [02 Users]
@@ -413,11 +426,28 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/catalog/{serviceSlug}/categories:
+  /api/v1/catalog/explore:
     get:
       tags: [03 Public Catalog]
-      operationId: listPublicCategories
-      summary: List published service categories
+      operationId: explorePublicCourses
+      summary: Explore published courses across active services
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/CourseLevelFilter"
+        - $ref: "#/components/parameters/AccessTypeFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/catalog/{serviceSlug}/courses:
+    get:
+      tags: [03 Public Catalog]
+      operationId: listPublicCourses
+      summary: List published courses under an active service
       x-access: PUBLIC
       security: []
       parameters:
@@ -426,21 +456,7 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
-  /api/v1/catalog/{serviceSlug}/categories/{categorySlug}:
-    get:
-      tags: [03 Public Catalog]
-      operationId: getPublicCategory
-      summary: Get published category and courses
-      x-access: PUBLIC
-      security: []
-      parameters:
-        - $ref: "#/components/parameters/ServiceSlug"
-        - $ref: "#/components/parameters/CategorySlug"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/catalog/{serviceSlug}/categories/{categorySlug}/courses/{courseSlug}:
+  /api/v1/catalog/{serviceSlug}/courses/{courseSlug}:
     get:
       tags: [03 Public Catalog]
       operationId: getPublicCourse
@@ -449,136 +465,7 @@ paths:
       security: []
       parameters:
         - $ref: "#/components/parameters/ServiceSlug"
-        - $ref: "#/components/parameters/CategorySlug"
         - $ref: "#/components/parameters/CourseSlug"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/categories:
-    get:
-      tags: [04 Categories]
-      operationId: listCategoriesAdmin
-      summary: List categories for administration
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/ServiceIdFilter"
-        - $ref: "#/components/parameters/CatalogStatusFilter"
-        - $ref: "#/components/parameters/SearchQuery"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    post:
-      tags: [04 Categories]
-      operationId: createCategory
-      summary: Create category draft
-      x-access: ADMIN
-      requestBody:
-        $ref: "#/components/requestBodies/CreateCategory"
-      responses:
-        "201":
-          $ref: "#/components/responses/Created"
-
-  /api/v1/categories/{categoryId}:
-    get:
-      tags: [04 Categories]
-      operationId: getCategoryAdmin
-      summary: Get category for administration
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    patch:
-      tags: [04 Categories]
-      operationId: updateCategory
-      summary: Update category
-      x-access: ADMIN
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      requestBody:
-        $ref: "#/components/requestBodies/UpdateCategory"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-    delete:
-      tags: [04 Categories]
-      operationId: deleteCategoryPermanently
-      summary: "[DESTRUCTIVE] Permanently delete archived category"
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Deletes only archived catalog setup without course curriculum or learner history.
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-        "409":
-          $ref: "#/components/responses/CatalogDeletionBlocked"
-
-  /api/v1/categories/{categoryId}/deletion-impact:
-    get:
-      tags: [04 Categories]
-      operationId: getCategoryDeletionImpact
-      summary: Preview whether permanent category deletion is safe
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Aggregates child course-intake curriculum and protected learner history without changing data.
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/categories/{categoryId}/publish:
-    patch:
-      tags: [04 Categories]
-      operationId: publishCategory
-      summary: Publish category
-      x-access: SUPER_ADMIN
-      description: Super-admin only.
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/categories/{categoryId}/unpublish:
-    patch:
-      tags: [04 Categories]
-      operationId: unpublishCategory
-      summary: Unpublish category
-      x-access: SUPER_ADMIN
-      description: Super-admin only.
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/categories/{categoryId}/archive:
-    patch:
-      tags: [04 Categories]
-      operationId: archiveCategory
-      summary: Archive category and child courses
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Preserves existing learner records and session content.
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
-      responses:
-        "200":
-          $ref: "#/components/responses/Success"
-
-  /api/v1/categories/{categoryId}/unarchive:
-    patch:
-      tags: [04 Categories]
-      operationId: unarchiveCategory
-      summary: Restore category as draft
-      x-access: SUPER_ADMIN
-      description: Super-admin only. Child courses remain archived.
-      parameters:
-        - $ref: "#/components/parameters/CategoryId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -681,6 +568,30 @@ paths:
         this course has ever run (grouped by courseId instead of intakeId).
         Districts and per-session engagement are intake-workspace-only and
         are not included here, since curricula can differ between intakes.
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/publish:
+    patch:
+      tags: [05 Courses]
+      operationId: publishCourse
+      summary: Publish a course to the public catalog
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/courses/{courseId}/unpublish:
+    patch:
+      tags: [05 Courses]
+      operationId: unpublishCourse
+      summary: Return a published course to draft
+      x-access: SUPER_ADMIN
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -1536,6 +1447,26 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/dashboard/student:
+    get:
+      tags: [00 System]
+      operationId: getStudentDashboard
+      summary: Get the current user's student dashboard summary
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/dashboard/admin:
+    get:
+      tags: [00 System]
+      operationId: getAdminDashboard
+      summary: Get the administrator dashboard summary
+      x-access: ADMIN
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
   /api/v1/audit/logs:
     get:
       tags: [13 Audit Logs]
@@ -1570,6 +1501,43 @@ paths:
           example: "2026-08-31T23:59:59.999Z"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/storage/uploads:
+    post:
+      tags: [15 Object Storage]
+      operationId: createObjectUploadIntent
+      summary: Create a short-lived direct R2 upload intent
+      x-access: ADMIN
+      description: Creates a pending object record and a presigned PUT URL. Cloudflare credentials are never returned to the client.
+      requestBody:
+        $ref: "#/components/requestBodies/CreateObjectUploadIntent"
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+
+  /api/v1/storage/uploads/{storedObjectId}/complete:
+    post:
+      tags: [15 Object Storage]
+      operationId: completeObjectUpload
+      summary: Verify and finalize a direct R2 upload
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/StoredObjectId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/storage/objects/{storedObjectId}/access:
+    get:
+      tags: [15 Object Storage]
+      operationId: getStoredObjectAccess
+      summary: Get an administrator access URL for a ready object
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/StoredObjectId"
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1707,6 +1675,12 @@ components:
       required: true
       schema: { type: string, format: uuid }
       example: "{{projectId}}"
+    StoredObjectId:
+      name: storedObjectId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{storedObjectId}}"
     RoleFilter:
       name: role
       in: query
@@ -1846,6 +1820,25 @@ components:
       schema: { type: integer, minimum: 0, default: 0 }
 
   requestBodies:
+    CreateObjectUploadIntent:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [purpose, fileName, contentType, sizeBytes]
+            properties:
+              purpose:
+                type: string
+                enum: [COURSE_THUMBNAIL, SESSION_RECORDING, SESSION_MATERIAL]
+              fileName: { type: string, minLength: 1, maxLength: 255 }
+              contentType: { type: string, minLength: 1, maxLength: 150 }
+              sizeBytes: { type: integer, minimum: 1, maximum: 5368709120 }
+          example:
+            purpose: COURSE_THUMBNAIL
+            fileName: ai-ml-ignition.webp
+            contentType: image/webp
+            sizeBytes: 245760
     Register:
       required: true
       content:
@@ -2535,6 +2528,7 @@ components:
           maxItems: 30
           items: { type: string }
         thumbnailUrl: { type: string, format: uri, nullable: true }
+        thumbnailObjectId: { type: string, format: uuid, nullable: true, description: Ready COURSE_THUMBNAIL object. Mutually exclusive with thumbnailUrl. }
         sortOrder: { type: integer, minimum: 0 }
         intakeCodePrefix:
           type: string
@@ -2581,6 +2575,7 @@ components:
           maxItems: 30
           items: { type: string }
         thumbnailUrl: { type: string, format: uri, nullable: true }
+        thumbnailObjectId: { type: string, format: uuid, nullable: true, description: Ready COURSE_THUMBNAIL object. Mutually exclusive with thumbnailUrl. }
         sortOrder: { type: integer, minimum: 0 }
     CreateIntakeInput:
       type: object
@@ -2620,6 +2615,8 @@ components:
         description: { type: string, nullable: true }
         recordingUrl: { type: string, format: uri, nullable: true }
         materialUrl: { type: string, format: uri, nullable: true }
+        recordingObjectId: { type: string, format: uuid, nullable: true, description: Ready private SESSION_RECORDING object. }
+        materialObjectId: { type: string, format: uuid, nullable: true, description: Ready private SESSION_MATERIAL object. }
         quizUrl: { type: string, format: uri, nullable: true }
         feedbackUrl: { type: string, format: uri, nullable: true }
         durationMinutes: { type: integer, minimum: 1, nullable: true }
@@ -2639,6 +2636,8 @@ components:
         description: { type: string, nullable: true }
         recordingUrl: { type: string, format: uri, nullable: true }
         materialUrl: { type: string, format: uri, nullable: true }
+        recordingObjectId: { type: string, format: uuid, nullable: true }
+        materialObjectId: { type: string, format: uuid, nullable: true }
         quizUrl: { type: string, format: uri, nullable: true }
         feedbackUrl: { type: string, format: uri, nullable: true }
         durationMinutes: { type: integer, minimum: 1, nullable: true }

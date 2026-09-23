@@ -20,17 +20,16 @@ export function findCurriculum(intakeId, includeRetired = false) {
 async function lockIntake(transaction, intakeId) {
   const initial = await transaction.intake.findUnique({
     where: { id: intakeId },
-    select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+    select: { serviceId: true, courseId: true },
   });
   if (!initial) throw new NotFoundError("Intake not found.");
-  await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
-  await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+  await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
   await acquireTransactionLock(transaction, `course:${initial.courseId}`);
   await acquireTransactionLock(transaction, `intake:${intakeId}`);
-  const intake = await transaction.intake.findUnique({ where: { id: intakeId }, include: { course: true, category: { include: { service: true } } } });
+  const intake = await transaction.intake.findUnique({ where: { id: intakeId }, include: { course: true, service: true } });
   if (!intake) throw new NotFoundError("Intake not found.");
   if (["COMPLETED", "CANCELLED", "ARCHIVED"].includes(intake.status)) throw new ConflictError("Terminal intakes have a frozen curriculum.");
-  if (intake.category.service.status === "ARCHIVED" || intake.course.archivedAt || intake.category.status === "ARCHIVED") throw new ConflictError("Archived catalog setup is read-only.");
+  if (intake.service.status === "ARCHIVED" || intake.course.archivedAt || intake.course.status === "ARCHIVED") throw new ConflictError("Archived catalog setup is read-only.");
   return intake;
 }
 
@@ -61,8 +60,8 @@ function isVisibleNow(item, now = new Date()) {
 async function protectOpenFreeCurriculum(transaction, intake, item, nextStatus = null, nextAvailableAt = null) {
   if (
     intake.status !== "OPEN_ACTIVE" ||
-    intake.category.service.courseMode !== "EVERGREEN" ||
-    intake.category.service.accessType !== "FREE"
+    intake.service.courseMode !== "EVERGREEN" ||
+    intake.service.accessType !== "FREE"
   ) {
     return;
   }

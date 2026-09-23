@@ -19,6 +19,7 @@ export async function findById(id) {
       user: true,
       intake: { include: { course: true } },
       enrollment: true,
+      thumbnailObject: true,
     },
   });
 }
@@ -28,6 +29,7 @@ const publicProjectSelect = {
   title: true,
   description: true,
   thumbnailUrl: true,
+  thumbnailObject: { select: { status: true, objectKey: true } },
   projectUrl: true,
   githubUrl: true,
   demoUrl: true,
@@ -60,6 +62,7 @@ export async function findByUserId(userId, { limit, cursor }) {
     where: { userId },
     include: {
       intake: { include: { course: true } },
+      thumbnailObject: true,
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
@@ -97,7 +100,7 @@ export async function findAllAdmin({ q = "", limit, cursor, offset = null, intak
       prisma.studentProject.count({ where }),
       prisma.studentProject.findMany({
         where,
-        include: { user: true, intake: { include: { course: true } } },
+        include: { user: true, intake: { include: { course: true } }, thumbnailObject: true },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit,
         skip: offset,
@@ -108,7 +111,7 @@ export async function findAllAdmin({ q = "", limit, cursor, offset = null, intak
 
   const rows = await prisma.studentProject.findMany({
     where,
-    include: { user: true, intake: { include: { course: true } } },
+    include: { user: true, intake: { include: { course: true } }, thumbnailObject: true },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -186,13 +189,13 @@ export async function createForEnrollment(requester, data) {
         where: { id: data.enrollmentId },
         select: {
           intakeId: true,
-          intake: { select: { category: { select: { serviceId: true } } } },
+          intake: { select: { serviceId: true } },
         },
       });
       if (!initial) throw new NotFoundError("Enrollment not found.");
       await acquireTransactionLock(
         transaction,
-        `learning-service:${initial.intake.category.serviceId}`,
+        `learning-service:${initial.intake.serviceId}`,
       );
       await acquireTransactionLock(transaction, `intake:${initial.intakeId}`);
       await acquireTransactionLock(
@@ -207,7 +210,7 @@ export async function createForEnrollment(requester, data) {
       const enrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         include: {
-          intake: { include: { category: { include: { service: true } } } },
+          intake: { include: { service: true } },
         },
       });
       if (!user || user.role !== "STUDENT" || !user.emailVerified) {
@@ -228,9 +231,22 @@ export async function createForEnrollment(requester, data) {
       if (!["OPEN_ACTIVE", "CLOSED_ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.intake.status)) {
         throw new ForbiddenError("The selected intake does not currently allow project submission.");
       }
-      if (!hasLearningAccess(enrollment, enrollment.intake.category.service)) {
+      if (!hasLearningAccess(enrollment, enrollment.intake.service)) {
         throw new ForbiddenError(
           "The selected enrollment does not have valid learning access.",
+        );
+      }
+      // One project per enrollment — checked under the same enrollment lock
+      // acquired above, so two concurrent submissions against the same
+      // enrollment can't both slip through.
+      const existing = await transaction.studentProject.findFirst({
+        where: { enrollmentId: data.enrollmentId },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new ConflictError(
+          "A project has already been submitted for this enrollment.",
+          "PROJECT_ALREADY_SUBMITTED",
         );
       }
 

@@ -3,11 +3,12 @@ import { ConflictError, handlePrismaError } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
 const include = {
-  category: { include: { service: true } },
+  service: true,
+  thumbnailObject: true,
   intakes: {
     orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
     include: {
-      category: true,
+      service: true,
       course: true,
       _count: { select: { courseSessions: true, enrollments: true, studentProjects: true } },
     },
@@ -15,8 +16,26 @@ const include = {
   _count: { select: { intakes: true } },
 };
 
+// A Course is always served once created — see the 2026-08-30 rename plan
+// §8. Enrollment availability is communicated via `enrollmentStatus`, not by
+// hiding the course from the public catalog.
+const publicCourseWhere = { archivedAt: null };
+
 export function findById(id) {
   return prisma.course.findUnique({ where: { id }, include });
+}
+
+/**
+ * Public Level-2 listing — every published course directly under a service.
+ * Replaces the old Category-grouped browse path (see the 2026-09-22
+ * category layer removal plan).
+ */
+export function findPublicByService(serviceId) {
+  return prisma.course.findMany({
+    where: { serviceId, status: "PUBLISHED", ...publicCourseWhere, service: { status: "ACTIVE" } },
+    orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
+    include: { service: true, thumbnailObject: true },
+  });
 }
 
 /**
@@ -26,12 +45,14 @@ export function findById(id) {
  * currently OPEN_ACTIVE intake (if any) is included for the caller to resolve
  * the enroll target and show seats/dates.
  */
-export function findPublicDetail(serviceId, categorySlug, courseSlug) {
+export function findPublicDetail(serviceId, courseSlug) {
   return prisma.course.findFirst({
     where: {
       slug: courseSlug,
-      archivedAt: null,
-      category: { serviceId, slug: categorySlug, status: "PUBLISHED", service: { status: "ACTIVE" } },
+      serviceId,
+      status: "PUBLISHED",
+      ...publicCourseWhere,
+      service: { status: "ACTIVE" },
     },
     include: {
       intakes: {
@@ -39,13 +60,8 @@ export function findPublicDetail(serviceId, categorySlug, courseSlug) {
         take: 1,
         include: { _count: { select: { enrollments: { where: { status: { not: "CANCELLED" } } } } } },
       },
-      category: {
-        include: {
-          service: true,
-          courses: { where: { enrollmentStatus: { not: "COMING_SOON" }, archivedAt: null }, select: { level: true } },
-          _count: { select: { courses: { where: { enrollmentStatus: { not: "COMING_SOON" }, archivedAt: null } } } },
-        },
-      },
+      service: true,
+      thumbnailObject: true,
     },
   });
 }
@@ -53,12 +69,13 @@ export function findPublicDetail(serviceId, categorySlug, courseSlug) {
 /**
  * Public "Explore" listing — every published course across every active
  * service, flattened into one filterable/searchable list. Unlike the
- * per-category browse path, callers only ever know slugs (never ids), so
+ * per-service browse path, callers only ever know slugs (never ids), so
  * every filter here is slug-based.
  */
 export async function findPublicExplore(filters, limit, offset) {
   const where = {
     archivedAt: null,
+    status: "PUBLISHED",
     ...(filters.level ? { level: filters.level } : {}),
     ...(filters.minPrice != null || filters.maxPrice != null
       ? {
@@ -76,14 +93,10 @@ export async function findPublicExplore(filters, limit, offset) {
           ],
         }
       : {}),
-    category: {
-      status: "PUBLISHED",
-      ...(filters.category ? { slug: filters.category } : {}),
-      service: {
-        status: "ACTIVE",
-        ...(filters.service ? { slug: filters.service } : {}),
-        ...(filters.accessType ? { accessType: filters.accessType } : {}),
-      },
+    service: {
+      status: "ACTIVE",
+      ...(filters.service ? { slug: filters.service } : {}),
+      ...(filters.accessType ? { accessType: filters.accessType } : {}),
     },
   };
 
@@ -91,8 +104,8 @@ export async function findPublicExplore(filters, limit, offset) {
     prisma.course.count({ where }),
     prisma.course.findMany({
       where,
-      include: { category: { include: { service: true } } },
-      orderBy: [{ category: { sortOrder: "asc" } }, { sortOrder: "asc" }, { title: "asc" }],
+      include: { service: true, thumbnailObject: true },
+      orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
       take: limit,
       skip: offset,
     }),
@@ -103,8 +116,8 @@ export async function findPublicExplore(filters, limit, offset) {
 
 export async function findAdmin(filters, limit, offset) {
   const where = {
-    ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
-    ...(filters.serviceId ? { category: { serviceId: filters.serviceId } } : {}),
+    ...(filters.serviceId ? { serviceId: filters.serviceId } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
     ...(filters.level ? { level: filters.level } : {}),
     ...(filters.enrollmentStatus ? { enrollmentStatus: filters.enrollmentStatus } : {}),
     ...(!filters.includeArchived ? { archivedAt: null } : {}),
@@ -124,7 +137,7 @@ export async function findAdmin(filters, limit, offset) {
       where,
       take: limit,
       skip: offset,
-      orderBy: [{ category: { sortOrder: "asc" } }, { title: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { title: "asc" }],
       include,
     }),
   ]);
@@ -134,14 +147,11 @@ export async function findAdmin(filters, limit, offset) {
 export async function create(data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initialCategory = await transaction.category.findUnique({ where: { id: data.categoryId }, select: { serviceId: true } });
-      if (!initialCategory) throw new ConflictError("Category no longer exists.");
-      await acquireTransactionLock(transaction, `learning-service:${initialCategory.serviceId}`);
-      await acquireTransactionLock(transaction, `catalog-category:${data.categoryId}`);
-      const category = await transaction.category.findUnique({ where: { id: data.categoryId }, include: { service: true } });
-      if (!category) throw new ConflictError("Category no longer exists.");
-      if (category.status === "ARCHIVED" || category.service.status === "ARCHIVED") {
-        throw new ConflictError("Courses cannot be created under an archived category.");
+      await acquireTransactionLock(transaction, `learning-service:${data.serviceId}`);
+      const service = await transaction.learningService.findUnique({ where: { id: data.serviceId } });
+      if (!service) throw new ConflictError("Learning service no longer exists.");
+      if (service.status === "ARCHIVED") {
+        throw new ConflictError("Courses cannot be created under an archived learning service.");
       }
       return transaction.course.create({ data, include });
     });
@@ -153,10 +163,9 @@ export async function create(data) {
 export async function update(id, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.course.findUnique({ where: { id }, select: { categoryId: true, category: { select: { serviceId: true } } } });
+      const initial = await transaction.course.findUnique({ where: { id }, select: { serviceId: true } });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
-      await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${id}`);
       const current = await transaction.course.findUnique({ where: { id } });
       if (!current) return null;
@@ -168,28 +177,67 @@ export async function update(id, data) {
   }
 }
 
-export async function setArchived(id, archived) {
+/**
+ * Ported from category.repository.js's setPublication — Course now owns its
+ * own Draft/Published/Archived lifecycle directly, taking over exactly what
+ * Category's status used to gate for public visibility (see the 2026-09-22
+ * category layer removal plan §3).
+ */
+export async function setPublication(id, publish) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.course.findUnique({ where: { id }, select: { categoryId: true, category: { select: { serviceId: true } } } });
+      const initial = await transaction.course.findUnique({ where: { id }, select: { serviceId: true } });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
-      await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${id}`);
-      const current = await transaction.course.findUnique({
-        where: { id },
-        include: { category: { select: { status: true, service: { select: { status: true } } } }, intakes: { select: { status: true } } },
-      });
+      const current = await transaction.course.findUnique({ where: { id }, include: { service: true } });
       if (!current) return null;
-      if (!archived && (current.category.status === "ARCHIVED" || current.category.service.status === "ARCHIVED")) {
-        throw new ConflictError("Restore the parent category before restoring this course.");
-      }
-      if (archived && current.intakes.some(({ status }) => ["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(status))) {
-        throw new ConflictError("Complete or cancel every active intake before archiving this course.");
+      if (current.status === "ARCHIVED") throw new ConflictError("Archived courses cannot be published.");
+      if (publish && current.service.status !== "ACTIVE") {
+        throw new ConflictError("Activate the parent learning service before publishing this course.");
       }
       return transaction.course.update({
         where: { id },
-        data: { archivedAt: archived ? new Date() : null },
+        data: { status: publish ? "PUBLISHED" : "DRAFT" },
+        include,
+      });
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+export async function setArchived(id, archived) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      const initial = await transaction.course.findUnique({ where: { id }, select: { serviceId: true } });
+      if (!initial) return null;
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
+      await acquireTransactionLock(transaction, `course:${id}`);
+      const current = await transaction.course.findUnique({
+        where: { id },
+        include: { service: { select: { status: true } }, intakes: { select: { status: true } } },
+      });
+      if (!current) return null;
+      if (!archived && current.service.status === "ARCHIVED") {
+        throw new ConflictError("Activate the parent learning service before restoring this course.");
+      }
+      if (archived && current.intakes.some(({ status }) => ["OPEN_ACTIVE", "CLOSED_ACTIVE"].includes(status))) {
+        throw new ConflictError(
+          "Complete or cancel every active intake before archiving this course.",
+          "CATALOG_ARCHIVE_BLOCKED",
+        );
+      }
+      return transaction.course.update({
+        where: { id },
+        data: {
+          archivedAt: archived ? new Date() : null,
+          // Archiving now also moves status to ARCHIVED (mirrors what
+          // archiving a Category used to do to its courses); restoring drops
+          // back to DRAFT — an admin must explicitly re-publish, same as
+          // Category's restore() used to require.
+          status: archived ? "ARCHIVED" : "DRAFT",
+        },
         include,
       });
     });
@@ -224,27 +272,26 @@ export async function findDeletionImpact(id) {
   return {
     resourceType: "COURSE",
     resourceId: id,
-    resourceStatus: course.archivedAt ? "ARCHIVED" : "ACTIVE",
+    resourceStatus: course.status,
     intakes: course._count.intakes,
     history,
-    deletable: Boolean(course.archivedAt) && course._count.intakes === 0,
+    deletable: course.status === "ARCHIVED" && course._count.intakes === 0,
   };
 }
 
 export async function remove(id) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initial = await transaction.course.findUnique({ where: { id }, select: { categoryId: true, category: { select: { serviceId: true } } } });
+      const initial = await transaction.course.findUnique({ where: { id }, select: { serviceId: true } });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
-      await acquireTransactionLock(transaction, `catalog-category:${initial.categoryId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${id}`);
       const current = await transaction.course.findUnique({
         where: { id },
         include: { _count: { select: { intakes: true } } },
       });
       if (!current) return null;
-      if (!current.archivedAt) throw new ConflictError("Archive the course first.");
+      if (current.status !== "ARCHIVED") throw new ConflictError("Archive the course first.");
       if (current._count.intakes > 0) {
         throw new ConflictError("A course with intake history cannot be permanently deleted.");
       }

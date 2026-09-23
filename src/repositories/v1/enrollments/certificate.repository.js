@@ -11,7 +11,7 @@ const certificateInclude = {
     include: {
       user: true,
       course: true,
-      intake: { include: { category: true } },
+      intake: true,
     },
   },
 };
@@ -115,7 +115,7 @@ export async function findUserCertificates(userId, { limit, cursor }) {
     include: {
       enrollment: {
         include: {
-          course: { include: { category: true } },
+          course: true,
         },
       },
     },
@@ -233,7 +233,7 @@ export async function revokeIssued(id, data) {
       const lifecycleContext = {
         enrollmentStatus: current.enrollment.status,
         intakeStatus: current.enrollment.intake.status,
-        categoryStatus: current.enrollment.intake.category.status,
+        courseStatus: current.enrollment.course.status,
       };
       const certificate = await transaction.certificate.update({
         where: { id },

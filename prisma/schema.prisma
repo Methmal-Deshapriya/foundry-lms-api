@@ -67,6 +67,24 @@ enum SessionStatus {
   ARCHIVED
 }
 
+enum StoredObjectScope {
+  PUBLIC
+  PRIVATE
+}
+
+enum StoredObjectPurpose {
+  COURSE_THUMBNAIL
+  SESSION_RECORDING
+  SESSION_MATERIAL
+  PROJECT_THUMBNAIL
+}
+
+enum StoredObjectStatus {
+  PENDING
+  READY
+  FAILED
+}
+
 enum CourseEnrollmentStatus {
   COMING_SOON // no intake exists yet
   OPEN // has an OPEN_ACTIVE intake right now
@@ -147,16 +165,17 @@ model User {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  enrollments               Enrollment[]        @relation("StudentEnrollments")
-  managedEnrollments        Enrollment[]        @relation("EnrollmentManager")
-  recordedPayments          Payment[]
-  studentProjects           StudentProject[]
-  actorAuditLogs            AuditLog[]          @relation("ActorRelation")
-  passwordResetTokens       PasswordResetToken[]
-  emailOtps                 EmailOtp[]
-  loginChallenges           LoginChallenge[]
-  enrollmentRequests        EnrollmentRequest[] @relation("EnrollmentRequestStudent")
-  contactedEnrollmentRequests EnrollmentRequest[] @relation("EnrollmentRequestContactedBy")
+  enrollments                 Enrollment[]         @relation("StudentEnrollments")
+  managedEnrollments          Enrollment[]         @relation("EnrollmentManager")
+  recordedPayments            Payment[]
+  studentProjects             StudentProject[]
+  actorAuditLogs              AuditLog[]           @relation("ActorRelation")
+  passwordResetTokens         PasswordResetToken[]
+  emailOtps                   EmailOtp[]
+  loginChallenges             LoginChallenge[]
+  enrollmentRequests          EnrollmentRequest[]  @relation("EnrollmentRequestStudent")
+  contactedEnrollmentRequests EnrollmentRequest[]  @relation("EnrollmentRequestContactedBy")
+  uploadedObjects             StoredObject[]       @relation("StoredObjectUploader")
 
   @@index([role, emailVerified, email, id])
   @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_first_name_trgm_idx")
@@ -226,33 +245,11 @@ model LearningService {
   createdAt          DateTime                   @default(now()) @map("created_at")
   updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at")
 
-  categories Category[]
+  courses Course[]
+  intakes Intake[]
 
   @@index([status, sortOrder, title])
   @@map("learning_services")
-}
-
-model Category {
-  id            String        @id @default(uuid())
-  serviceId     String        @map("service_id")
-  slug          String
-  title         String
-  description   String
-  audienceLabel String?       @map("audience_label")
-  visualKey     String        @map("visual_key")
-  badgeLabel    String?       @map("badge_label")
-  status        CatalogStatus @default(DRAFT)
-  sortOrder     Int           @default(0) @map("sort_order")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
-
-  courses Course[]
-  intakes Intake[]
-  service LearningService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-
-  @@unique([serviceId, slug])
-  @@index([serviceId, status, sortOrder])
-  @@map("categories")
 }
 
 /// The real-world program a student browses and enrolls in. Holds every piece of
@@ -261,7 +258,7 @@ model Category {
 /// 2026-08-30 course-to-program-intake rename plan for the full reasoning).
 model Course {
   id                 String                 @id @default(uuid())
-  categoryId         String                 @map("category_id")
+  serviceId          String                 @map("service_id")
   slug               String
   title              String
   summary            String
@@ -273,6 +270,7 @@ model Course {
   skills             String[]               @default([])
   prerequisites      String[]               @default([])
   thumbnailUrl       String?                @map("thumbnail_url")
+  thumbnailObjectId  String?                @map("thumbnail_object_id")
   sortOrder          Int                    @default(0) @map("sort_order")
   price              Decimal                @default(0) @db.Decimal(12, 2)
   currency           String                 @default("LKR")
@@ -280,20 +278,24 @@ model Course {
   certificateEnabled Boolean                @map("certificate_enabled")
   discountAmount     Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
   enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
+  status             CatalogStatus          @default(DRAFT) // publish lifecycle — formerly gated by the (now-removed) Category's status
   archivedAt         DateTime?              @map("archived_at")
   createdAt          DateTime               @default(now()) @map("created_at")
   updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
 
-  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  service            LearningService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  thumbnailObject    StoredObject?       @relation("CourseThumbnailObject", fields: [thumbnailObjectId], references: [id], onDelete: Restrict)
   intakes            Intake[]
   payments           Payment[]
   enrollments        Enrollment[]
   enrollmentRequests EnrollmentRequest[]
 
-  @@unique([id, categoryId])
-  @@unique([categoryId, slug])
-  @@index([categoryId, archivedAt, title])
-  @@index([categoryId, enrollmentStatus, sortOrder])
+  @@unique([id, serviceId])
+  @@unique([serviceId, slug])
+  @@index([serviceId, archivedAt, title])
+  @@index([serviceId, enrollmentStatus, sortOrder])
+  @@index([serviceId, status, sortOrder])
+  @@index([thumbnailObjectId])
   @@map("courses")
 }
 
@@ -303,7 +305,7 @@ model Course {
 model Intake {
   id              String       @id @default(uuid())
   courseId        String       @map("course_id")
-  categoryId      String       @map("category_id") // denormalized off Course, same reasoning as Course.categoryId off Category
+  serviceId       String       @map("service_id") // denormalized off Course, same reasoning as Course.serviceId off LearningService
   intakeKey       String       @map("intake_key")
   code            String       @unique
   startDate       DateTime?    @map("start_date") @db.Date
@@ -314,8 +316,8 @@ model Intake {
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at")
 
-  course             Course              @relation(fields: [courseId, categoryId], references: [id, categoryId], onDelete: Restrict)
-  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  course             Course              @relation(fields: [courseId, serviceId], references: [id, serviceId], onDelete: Restrict)
+  service            LearningService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   enrollments        Enrollment[]
   courseSessions     CourseSession[]
   studentProjects    StudentProject[]
@@ -325,7 +327,7 @@ model Intake {
   @@unique([courseId, intakeKey])
   @@unique([id, courseId]) // lets Enrollment/Payment/EnrollmentRequest FK against (intakeId, courseId), guaranteeing the intake actually belongs to the course claimed
   @@index([courseId, status, startDate])
-  @@index([categoryId, status])
+  @@index([serviceId, status])
   @@map("intakes")
 }
 
@@ -365,24 +367,58 @@ model Enrollment {
 }
 
 model Session {
-  id              String        @id @default(uuid())
-  title           String
-  description     String?
-  recordingUrl    String?       @map("recording_url")
-  materialUrl     String?       @map("material_url")
-  quizUrl         String?       @map("quiz_url")
-  feedbackUrl     String?       @map("feedback_url")
-  durationMinutes Int?          @map("duration_minutes")
-  status          SessionStatus @default(DRAFT)
-  tags            String[]      @default([])
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+  id                String        @id @default(uuid())
+  title             String
+  description       String?
+  recordingUrl      String?       @map("recording_url")
+  materialUrl       String?       @map("material_url")
+  recordingObjectId String?       @map("recording_object_id")
+  materialObjectId  String?       @map("material_object_id")
+  quizUrl           String?       @map("quiz_url")
+  feedbackUrl       String?       @map("feedback_url")
+  durationMinutes   Int?          @map("duration_minutes")
+  status            SessionStatus @default(DRAFT)
+  tags              String[]      @default([])
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  courseSessions CourseSession[]
+  courseSessions  CourseSession[]
+  recordingObject StoredObject?   @relation("SessionRecordingObject", fields: [recordingObjectId], references: [id], onDelete: Restrict)
+  materialObject  StoredObject?   @relation("SessionMaterialObject", fields: [materialObjectId], references: [id], onDelete: Restrict)
 
   @@index([status, updatedAt(sort: Desc)])
   @@index([tags], type: Gin)
+  @@index([recordingObjectId])
+  @@index([materialObjectId])
   @@map("sessions")
+}
+
+model StoredObject {
+  id                String              @id @default(uuid())
+  objectKey         String              @unique @map("object_key")
+  scope             StoredObjectScope
+  purpose           StoredObjectPurpose
+  status            StoredObjectStatus  @default(PENDING)
+  originalFileName  String              @map("original_file_name")
+  contentType       String              @map("content_type")
+  declaredSizeBytes BigInt              @map("declared_size_bytes")
+  actualSizeBytes   BigInt?             @map("actual_size_bytes")
+  etag              String?
+  uploadedByUserId  String              @map("uploaded_by_user_id")
+  readyAt           DateTime?           @map("ready_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @default(now()) @updatedAt @map("updated_at")
+
+  uploadedBy        User             @relation("StoredObjectUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  courseThumbnails  Course[]         @relation("CourseThumbnailObject")
+  sessionRecordings Session[]        @relation("SessionRecordingObject")
+  sessionMaterials  Session[]        @relation("SessionMaterialObject")
+  projectThumbnails StudentProject[] @relation("ProjectThumbnailObject")
+
+  @@index([status, createdAt])
+  @@index([uploadedByUserId, createdAt(sort: Desc)])
+  @@index([purpose, status])
+  @@map("stored_objects")
 }
 
 model CourseSession {
@@ -513,35 +549,38 @@ model Certificate {
 }
 
 model StudentProject {
-  id            String        @id @default(uuid())
-  userId        String        @map("user_id")
-  intakeId      String        @map("intake_id")
-  enrollmentId  String        @map("enrollment_id")
-  title         String
-  description   String?
-  thumbnailUrl  String?       @map("thumbnail_url")
-  projectUrl    String?       @map("project_url")
-  githubUrl     String?       @map("github_url")
-  demoUrl       String?       @map("demo_url")
-  technologies  Json          @default("[]")
-  status        ProjectStatus @default(PENDING)
-  reviewedBy    String?       @map("reviewed_by")
-  reviewedAt    DateTime?     @map("reviewed_at")
-  adminFeedback String?       @map("admin_feedback")
-  isPublic      Boolean       @default(false) @map("is_public")
-  displayOrder  Int           @default(0) @map("display_order")
-  likeCount     Int           @default(0) @map("like_count")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
+  id                String        @id @default(uuid())
+  userId            String        @map("user_id")
+  intakeId          String        @map("intake_id")
+  enrollmentId      String        @map("enrollment_id")
+  title             String
+  description       String?
+  thumbnailUrl      String?       @map("thumbnail_url")
+  thumbnailObjectId String?       @map("thumbnail_object_id")
+  projectUrl        String?       @map("project_url")
+  githubUrl         String?       @map("github_url")
+  demoUrl           String?       @map("demo_url")
+  technologies      Json          @default("[]")
+  status            ProjectStatus @default(PENDING)
+  reviewedBy        String?       @map("reviewed_by")
+  reviewedAt        DateTime?     @map("reviewed_at")
+  adminFeedback     String?       @map("admin_feedback")
+  isPublic          Boolean       @default(false) @map("is_public")
+  displayOrder      Int           @default(0) @map("display_order")
+  likeCount         Int           @default(0) @map("like_count")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  intake     Intake     @relation(fields: [intakeId], references: [id], onDelete: Restrict)
-  enrollment Enrollment @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  intake          Intake        @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  enrollment      Enrollment    @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
+  thumbnailObject StoredObject? @relation("ProjectThumbnailObject", fields: [thumbnailObjectId], references: [id], onDelete: Restrict)
 
   @@index([intakeId, status, isPublic])
   @@index([userId, createdAt(sort: Desc)])
   @@index([enrollmentId])
   @@index([likeCount(sort: Desc), createdAt(sort: Desc)])
+  @@index([thumbnailObjectId])
   @@map("student_projects")
 }
 

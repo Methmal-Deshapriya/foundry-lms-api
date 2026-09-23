@@ -15,6 +15,10 @@ import {
   ENTITY_TYPES,
 } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
+import {
+  assertAttachableStoredObject,
+  toStoredObjectResponse,
+} from "../storage/storedObject.service.js";
 
 function parse(schema, data) {
   const validation = schema.safeParse(data);
@@ -31,18 +35,17 @@ function toSessionLibraryResponse(session) {
     intakeCount: courseUsages.length,
     activeIntakeCount: courseUsages.filter(({ retiredAt }) => !retiredAt).length,
     courseCount: new Set(courseUsages.map(({ intake }) => intake?.courseId)).size,
-    // categoryId/serviceSlug are kept only to build the click-through link to
-    // the intake's workspace — the parent hierarchy names (course, category,
-    // service) aren't displayed anywhere, so they're deliberately not
-    // joined/selected here at all.
+    // serviceSlug is kept only to build the click-through link to the
+    // intake's workspace — the parent hierarchy names (course, service)
+    // aren't displayed anywhere, so they're deliberately not joined/selected
+    // here at all.
     courses: courseUsages.map((courseSession) => ({
       courseSessionId: courseSession.id,
       intakeId: courseSession.intakeId,
       courseId: courseSession.intake?.courseId,
       courseTitle: courseSession.intake?.course?.title,
       intakeCode: courseSession.intake?.code,
-      categoryId: courseSession.intake?.categoryId,
-      serviceSlug: courseSession.intake?.category?.service?.slug,
+      serviceSlug: courseSession.intake?.service?.slug,
       orderIndex: courseSession.orderIndex,
       retiredAt: courseSession.retiredAt,
       deliveryStatus: courseSession.deliveryStatus,
@@ -51,6 +54,8 @@ function toSessionLibraryResponse(session) {
 
   return {
     ...session,
+    recordingObject: toStoredObjectResponse(session.recordingObject),
+    materialObject: toStoredObjectResponse(session.materialObject),
     courseSessions: undefined,
     usage,
   };
@@ -93,6 +98,14 @@ export async function getSessionLibraryItemService(id) {
 
 export async function createSessionLibraryItemService(data, actorId) {
   const input = parse(createSessionLibrarySchema, data);
+  if (input.recordingObjectId) {
+    await assertAttachableStoredObject(input.recordingObjectId, "SESSION_RECORDING");
+    input.recordingUrl = null;
+  }
+  if (input.materialObjectId) {
+    await assertAttachableStoredObject(input.materialObjectId, "SESSION_MATERIAL");
+    input.materialUrl = null;
+  }
   const session = await sessionRepo.create(input);
   recordActionService({
     actorUserId: actorId,
@@ -107,6 +120,18 @@ export async function createSessionLibraryItemService(data, actorId) {
 
 export async function updateSessionLibraryItemService(id, data, actorId) {
   const input = parse(updateSessionLibrarySchema, data);
+  if (input.recordingObjectId) {
+    await assertAttachableStoredObject(input.recordingObjectId, "SESSION_RECORDING");
+    input.recordingUrl = null;
+  } else if (input.recordingUrl) {
+    input.recordingObjectId = null;
+  }
+  if (input.materialObjectId) {
+    await assertAttachableStoredObject(input.materialObjectId, "SESSION_MATERIAL");
+    input.materialUrl = null;
+  } else if (input.materialUrl) {
+    input.materialObjectId = null;
+  }
   const { previous: current, session: updated, changedFields } =
     await sessionRepo.updateSafely(id, input);
   if (changedFields.length === 0) return toSessionLibraryResponse(updated);

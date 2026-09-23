@@ -19,11 +19,11 @@ function servicePolicy(free) {
 }
 
 function course(free = false, overrides = {}) {
-  return { id: courseId, title: "Course", slug: "course", summary: "Summary", level: "BEGINNER", durationValue: 1, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, category: { service: servicePolicy(free) }, ...overrides };
+  return { id: courseId, title: "Course", slug: "course", summary: "Summary", level: "BEGINNER", durationValue: 1, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, service: servicePolicy(free), ...overrides };
 }
 
 function intake(free = false, overrides = {}) {
-  return { id: intakeId, intakeKey: free ? "EVERGREEN" : "2026-B1", code: free ? "COURSE-EVERGREEN" : "COURSE-2026-B1", status: "OPEN_ACTIVE", category: { service: servicePolicy(free) }, ...overrides };
+  return { id: intakeId, intakeKey: free ? "EVERGREEN" : "2026-B1", code: free ? "COURSE-EVERGREEN" : "COURSE-2026-B1", status: "OPEN_ACTIVE", service: servicePolicy(free), ...overrides };
 }
 
 function enrollment(overrides = {}) {
