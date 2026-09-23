@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import { getCorsOrigins } from "./config/runtimeConfig.js";
 import { checkDatabaseReadiness } from "./utils/prisma.js";
 import { checkEmailReadiness } from "./utils/email.js";
 import { checkRateLimitStoreReadiness } from "./config/rateLimitStore.js";
@@ -50,7 +51,7 @@ app.use(
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    origin: process.env.CORS_ORIGIN ? getCorsOrigins() : "http://localhost:3000",
     credentials: true,
   }),
 );

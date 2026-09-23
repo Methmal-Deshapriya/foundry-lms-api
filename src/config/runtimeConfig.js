@@ -8,6 +8,25 @@ function requireUrl(name) {
   }
 }
 
+/** CORS_ORIGIN allows more than one origin (e.g. localhost plus a forwarded
+ * dev-tunnel URL) as a comma-separated list — this is the one place that
+ * splits and normalizes it, shared by validation here and the cors
+ * middleware in app.js so the two can never drift apart. */
+export function getCorsOrigins() {
+  const raw = process.env.CORS_ORIGIN?.trim();
+  if (!raw) throw new Error("CORS_ORIGIN is required.");
+  return raw.split(",").map((entry) => {
+    const trimmed = entry.trim();
+    try {
+      return new URL(trimmed).origin;
+    } catch {
+      throw new Error(
+        "CORS_ORIGIN must be a comma-separated list of valid absolute URLs.",
+      );
+    }
+  });
+}
+
 /** Fail at process startup instead of discovering broken security or public
  * certificate configuration on the first affected request. */
 export function validateRuntimeConfig() {
@@ -19,10 +38,11 @@ export function validateRuntimeConfig() {
     throw new Error("JWT_SECRET must contain at least 32 UTF-8 bytes.");
   }
   const clientOrigin = requireUrl("CLIENT_URL");
-  const corsOrigin = requireUrl("CORS_ORIGIN");
+  const corsOrigins = getCorsOrigins();
   if (
     process.env.NODE_ENV === "production" &&
-    (!clientOrigin.startsWith("https://") || !corsOrigin.startsWith("https://"))
+    (!clientOrigin.startsWith("https://") ||
+      corsOrigins.some((origin) => !origin.startsWith("https://")))
   ) {
     throw new Error("CLIENT_URL and CORS_ORIGIN must use HTTPS in production.");
   }
