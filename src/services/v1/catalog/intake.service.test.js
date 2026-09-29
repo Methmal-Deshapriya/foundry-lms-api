@@ -54,6 +54,7 @@ describe("intake analytics service", () => {
         { type: "TOP_UP", _count: 2, _sum: { amount: 50000 } },
       ],
       districtRows: [{ district: "Colombo", count: 9 }],
+      alStreamRows: [{ stream: "Science", count: 6 }],
       sessionRows: [
         { id: "cs-1", orderIndex: 1, session: { title: "Intro" }, _count: { completions: 30 } },
       ],
@@ -81,6 +82,7 @@ describe("intake analytics service", () => {
     expect(result.revenue).toEqual({ total: 1650000, currency: "LKR" });
     expect(result.successRate).toEqual({ completedPct: 8.9, certificatesIssued: 3, certificateEligible: 4 });
     expect(result.districts).toEqual([{ district: "Colombo", count: 9 }]);
+    expect(result.alStreams).toEqual([{ stream: "Science", count: 6 }]);
     expect(result.sessionEngagement).toEqual([
       { courseSessionId: "cs-1", title: "Intro", orderIndex: 1, completions: 30, eligible: 42, pct: 71.4 },
     ]);

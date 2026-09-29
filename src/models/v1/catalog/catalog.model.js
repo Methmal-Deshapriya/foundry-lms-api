@@ -1,4 +1,11 @@
 import { resolveThumbnailUrl, toStoredObjectSummary } from "../../../utils/thumbnails.js";
+import { publicObjectUrl } from "../../../config/r2.js";
+
+function resolveExplainerVideoThumbnailUrl(course) {
+  return course.explainerVideoThumbnailObject?.status === "READY"
+    ? publicObjectUrl(course.explainerVideoThumbnailObject.objectKey)
+    : null;
+}
 
 const LEVEL_LABELS = {
   OPEN: "Open",
@@ -56,6 +63,10 @@ export function toPublicCourseDetail(course) {
     skills: course.skills,
     prerequisites: course.prerequisites,
     thumbnailUrl: resolveThumbnailUrl(course),
+    targetAudience: course.targetAudience,
+    whyPursueSteps: course.whyPursueSteps,
+    explainerVideoUrl: course.explainerVideoUrl,
+    explainerVideoThumbnailUrl: resolveExplainerVideoThumbnailUrl(course),
     service: { slug: course.service?.slug, title: course.service?.title },
     openIntake: openIntake
       ? {
@@ -98,6 +109,10 @@ export function toAdminCourse(course) {
     ...course,
     thumbnailUrl: resolveThumbnailUrl(course),
     thumbnailObject: toStoredObjectSummary(course.thumbnailObject, resolveThumbnailUrl(course)),
+    explainerVideoThumbnailObject: toStoredObjectSummary(
+      course.explainerVideoThumbnailObject,
+      resolveExplainerVideoThumbnailUrl(course),
+    ),
     price: Number(course.price),
     discountAmount: Number(course.discountAmount),
     intakes: Array.isArray(course.intakes)

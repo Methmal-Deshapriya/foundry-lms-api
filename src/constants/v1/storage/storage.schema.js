@@ -5,6 +5,9 @@ export const STORED_OBJECT_PURPOSES = Object.freeze([
   "SESSION_RECORDING",
   "SESSION_MATERIAL",
   "PROJECT_THUMBNAIL",
+  "SERVICE_HERO",
+  "SERVICE_CARD",
+  "COURSE_EXPLAINER_VIDEO_THUMBNAIL",
 ]);
 
 export const createUploadIntentSchema = z.object({

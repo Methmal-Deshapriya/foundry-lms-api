@@ -5,6 +5,7 @@ import { acquireTransactionLock } from "../learning/transactionLock.repository.j
 const include = {
   service: true,
   thumbnailObject: true,
+  explainerVideoThumbnailObject: true,
   intakes: {
     orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
     include: {
@@ -62,6 +63,7 @@ export function findPublicDetail(serviceId, courseSlug) {
       },
       service: true,
       thumbnailObject: true,
+      explainerVideoThumbnailObject: true,
     },
   });
 }
@@ -340,6 +342,10 @@ export async function findCurrentOpenIntakeId(courseId) {
  * Districts and per-session engagement are intake-workspace-only — they
  * don't aggregate meaningfully across intakes that may each run different
  * curricula — see the 2026-08-31 course detail page improvement plan §4.
+ * A/L stream is a student attribute rather than a curriculum one, so it
+ * does aggregate meaningfully across intakes — same raw-query pattern as
+ * intake.repository.js's district/A-L-stream breakdown, filtered on
+ * course_id instead of intake_id.
  */
 export async function getAnalytics(courseId) {
   const course = await prisma.course.findUnique({
@@ -348,13 +354,19 @@ export async function getAnalytics(courseId) {
   });
   if (!course) return null;
 
-  const [statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount] = await Promise.all([
+  const [statusGroups, revenueAgg, paymentTypeGroups, alStreamRows, projectGroups, certificatesIssuedCount] = await Promise.all([
     prisma.enrollment.groupBy({ by: ["status"], where: { courseId }, _count: true }),
     prisma.payment.aggregate({ where: { courseId }, _sum: { amount: true } }),
     prisma.payment.groupBy({ by: ["type"], where: { courseId }, _sum: { amount: true }, _count: true }),
+    prisma.$queryRaw`
+      SELECT u.al_stream AS stream, COUNT(*)::int AS count
+      FROM enrollments e JOIN users u ON u.id = e.user_id
+      WHERE e.course_id = ${courseId} AND e.status != 'CANCELLED' AND u.al_stream IS NOT NULL
+      GROUP BY u.al_stream ORDER BY count DESC
+    `,
     prisma.studentProject.groupBy({ by: ["status"], where: { intake: { courseId } }, _count: true }),
     prisma.certificate.count({ where: { enrollment: { courseId }, status: "ISSUED" } }),
   ]);
 
-  return { course, statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount };
+  return { course, statusGroups, revenueAgg, paymentTypeGroups, alStreamRows, projectGroups, certificatesIssuedCount };
 }

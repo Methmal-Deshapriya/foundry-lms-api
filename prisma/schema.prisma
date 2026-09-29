@@ -77,6 +77,9 @@ enum StoredObjectPurpose {
   SESSION_RECORDING
   SESSION_MATERIAL
   PROJECT_THUMBNAIL
+  SERVICE_HERO
+  SERVICE_CARD
+  COURSE_EXPLAINER_VIDEO_THUMBNAIL
 }
 
 enum StoredObjectStatus {
@@ -242,13 +245,35 @@ model LearningService {
   paymentRequirement LearningPaymentRequirement @map("payment_requirement")
   status             LearningServiceStatus      @default(DRAFT)
   sortOrder          Int                        @default(0) @map("sort_order")
+  // Everything below is the public Level-2 page's own content — the hook
+  // headline, the short card blurb, the two bespoke marketing tags shown on
+  // the hero (course count is derived, not stored), the card/hero images,
+  // and the "how it works" steps + FAQ — all of which used to live only in a
+  // hardcoded frontend config keyed by slug, so a service created through
+  // the admin UI rendered with nothing. See the 2026-09-24 dynamic service
+  // content plan. `summary` is nullable and falls back to `description` (the
+  // fuller admin/hero text) so existing rows keep rendering; every other
+  // field here is required at creation time going forward.
+  summary            String?
+  heroHeadline       String?                    @map("hero_headline")
+  heroTags           String[]                   @default([]) @map("hero_tags")
+  cardImageObjectId  String?                    @map("card_image_object_id")
+  heroImageObjectId  String?                    @map("hero_image_object_id")
+  /// Array of { title, description }, rendered in order — see ServiceProcess.tsx.
+  processSteps       Json                       @default("[]") @map("process_steps")
+  /// Array of { question, answer }, rendered in order — see ServiceFaq.tsx.
+  faqItems           Json                       @default("[]") @map("faq_items")
   createdAt          DateTime                   @default(now()) @map("created_at")
   updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at")
 
-  courses Course[]
-  intakes Intake[]
+  courses         Course[]
+  intakes         Intake[]
+  cardImageObject StoredObject? @relation("ServiceCardImageObject", fields: [cardImageObjectId], references: [id], onDelete: Restrict)
+  heroImageObject StoredObject? @relation("ServiceHeroImageObject", fields: [heroImageObjectId], references: [id], onDelete: Restrict)
 
   @@index([status, sortOrder, title])
+  @@index([cardImageObjectId])
+  @@index([heroImageObjectId])
   @@map("learning_services")
 }
 
@@ -257,38 +282,47 @@ model LearningService {
 /// here, not on Intake, because it never varies between intakes (see the
 /// 2026-08-30 course-to-program-intake rename plan for the full reasoning).
 model Course {
-  id                 String                 @id @default(uuid())
-  serviceId          String                 @map("service_id")
-  slug               String
-  title              String
-  summary            String
-  description        String
-  level              CourseLevel
-  durationValue      Int?                   @map("duration_value")
-  durationUnit       DurationUnit?          @map("duration_unit")
-  highlights         String[]               @default([])
-  skills             String[]               @default([])
-  prerequisites      String[]               @default([])
-  thumbnailUrl       String?                @map("thumbnail_url")
-  thumbnailObjectId  String?                @map("thumbnail_object_id")
-  sortOrder          Int                    @default(0) @map("sort_order")
-  price              Decimal                @default(0) @db.Decimal(12, 2)
-  currency           String                 @default("LKR")
-  intakeCodePrefix   String                 @unique @map("intake_code_prefix")
-  certificateEnabled Boolean                @map("certificate_enabled")
-  discountAmount     Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
-  enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
-  status             CatalogStatus          @default(DRAFT) // publish lifecycle — formerly gated by the (now-removed) Category's status
-  archivedAt         DateTime?              @map("archived_at")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
+  id                              String                 @id @default(uuid())
+  serviceId                       String                 @map("service_id")
+  slug                            String
+  title                           String
+  summary                         String
+  description                     String
+  level                           CourseLevel
+  durationValue                   Int?                   @map("duration_value")
+  durationUnit                    DurationUnit?          @map("duration_unit")
+  highlights                      String[]               @default([])
+  skills                          String[]               @default([])
+  prerequisites                   String[]               @default([])
+  thumbnailUrl                    String?                @map("thumbnail_url")
+  thumbnailObjectId               String?                @map("thumbnail_object_id")
+  sortOrder                       Int                    @default(0) @map("sort_order")
+  price                           Decimal                @default(0) @db.Decimal(12, 2)
+  currency                        String                 @default("LKR")
+  intakeCodePrefix                String                 @unique @map("intake_code_prefix")
+  certificateEnabled              Boolean                @map("certificate_enabled")
+  discountAmount                  Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
+  enrollmentStatus                CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
+  status                          CatalogStatus          @default(DRAFT) // publish lifecycle — formerly gated by the (now-removed) Category's status
+  // Public course-detail-page marketing content, all optional and editable
+  // after creation like highlights/skills/prerequisites above — see the
+  // 2026-09-25 course explainer content plan.
+  targetAudience                  String?                @map("target_audience") // "Who this course is for" — a short descriptive sentence
+  /// Array of { title, description }, rendered as numbered "why pursue this course" steps — see ApiCourseDetail.tsx.
+  whyPursueSteps                  Json                   @default("[]") @map("why_pursue_steps")
+  explainerVideoUrl               String?                @map("explainer_video_url") // YouTube URL, played the same way as the landing page's AboutVideo
+  explainerVideoThumbnailObjectId String?                @map("explainer_video_thumbnail_object_id")
+  archivedAt                      DateTime?              @map("archived_at")
+  createdAt                       DateTime               @default(now()) @map("created_at")
+  updatedAt                       DateTime               @default(now()) @updatedAt @map("updated_at")
 
-  service            LearningService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  thumbnailObject    StoredObject?       @relation("CourseThumbnailObject", fields: [thumbnailObjectId], references: [id], onDelete: Restrict)
-  intakes            Intake[]
-  payments           Payment[]
-  enrollments        Enrollment[]
-  enrollmentRequests EnrollmentRequest[]
+  service                       LearningService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  thumbnailObject               StoredObject?       @relation("CourseThumbnailObject", fields: [thumbnailObjectId], references: [id], onDelete: Restrict)
+  explainerVideoThumbnailObject StoredObject?       @relation("CourseExplainerVideoThumbnailObject", fields: [explainerVideoThumbnailObjectId], references: [id], onDelete: Restrict)
+  intakes                       Intake[]
+  payments                      Payment[]
+  enrollments                   Enrollment[]
+  enrollmentRequests            EnrollmentRequest[]
 
   @@unique([id, serviceId])
   @@unique([serviceId, slug])
@@ -296,6 +330,7 @@ model Course {
   @@index([serviceId, enrollmentStatus, sortOrder])
   @@index([serviceId, status, sortOrder])
   @@index([thumbnailObjectId])
+  @@index([explainerVideoThumbnailObjectId])
   @@map("courses")
 }
 
@@ -409,11 +444,14 @@ model StoredObject {
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @default(now()) @updatedAt @map("updated_at")
 
-  uploadedBy        User             @relation("StoredObjectUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
-  courseThumbnails  Course[]         @relation("CourseThumbnailObject")
-  sessionRecordings Session[]        @relation("SessionRecordingObject")
-  sessionMaterials  Session[]        @relation("SessionMaterialObject")
-  projectThumbnails StudentProject[] @relation("ProjectThumbnailObject")
+  uploadedBy                     User              @relation("StoredObjectUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  courseThumbnails               Course[]          @relation("CourseThumbnailObject")
+  courseExplainerVideoThumbnails Course[]          @relation("CourseExplainerVideoThumbnailObject")
+  sessionRecordings              Session[]         @relation("SessionRecordingObject")
+  sessionMaterials               Session[]         @relation("SessionMaterialObject")
+  projectThumbnails              StudentProject[]  @relation("ProjectThumbnailObject")
+  serviceHeroImages              LearningService[] @relation("ServiceHeroImageObject")
+  serviceCardImages              LearningService[] @relation("ServiceCardImageObject")
 
   @@index([status, createdAt])
   @@index([uploadedByUserId, createdAt(sort: Desc)])

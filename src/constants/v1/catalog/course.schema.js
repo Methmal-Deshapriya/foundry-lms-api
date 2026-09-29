@@ -5,12 +5,24 @@ import {
   COURSE_ENROLLMENT_STATUSES,
   DURATION_UNITS,
 } from "./catalog.constants.js";
-import { nullableSecureHttpUrlSchema } from "../shared/url.schema.js";
+import { nullableSecureHttpUrlSchema, secureHttpUrlSchema } from "../shared/url.schema.js";
 import { LEARNING_ACCESS_TYPES } from "./learningService.schema.js";
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CODE_PREFIX_REGEX = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
 const optionalStringArray = z.array(z.string().trim().min(1).max(160)).max(30).optional();
+
+const YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"]);
+const nullableYoutubeUrlSchema = secureHttpUrlSchema
+  .refine((value) => YOUTUBE_HOSTS.has(new URL(value).hostname.toLowerCase()), "Must be a youtube.com or youtu.be URL.")
+  .nullable()
+  .optional();
+
+const whyPursueStep = z.object({
+  title: z.string().trim().min(2).max(120),
+  description: z.string().trim().min(5).max(300),
+}).strict();
+const optionalWhyPursueSteps = z.array(whyPursueStep).max(8).optional();
 
 // The real-world program a student browses and enrolls in — see the
 // 2026-08-30 course-to-program-intake rename plan. Every field here is
@@ -31,6 +43,10 @@ const courseObject = z.object({
   prerequisites: optionalStringArray,
   thumbnailUrl: nullableSecureHttpUrlSchema,
   thumbnailObjectId: z.string().uuid().nullable().optional(),
+  targetAudience: z.string().trim().min(10).max(300).nullable().optional(),
+  whyPursueSteps: optionalWhyPursueSteps,
+  explainerVideoUrl: nullableYoutubeUrlSchema,
+  explainerVideoThumbnailObjectId: z.string().uuid().nullable().optional(),
   sortOrder: z.number().int().min(0).optional(),
   intakeCodePrefix: z.string().trim().min(2).max(80).regex(CODE_PREFIX_REGEX),
   certificateEnabled: z.boolean({
@@ -55,6 +71,13 @@ function validateDurationConsistency(data, context) {
       code: "custom",
       message: "Use either an uploaded thumbnail or an external thumbnail URL, not both.",
       path: ["thumbnailObjectId"],
+    });
+  }
+  if (data.explainerVideoThumbnailObjectId && !data.explainerVideoUrl) {
+    context.addIssue({
+      code: "custom",
+      message: "An explainer video thumbnail requires an explainer video URL.",
+      path: ["explainerVideoThumbnailObjectId"],
     });
   }
 }

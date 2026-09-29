@@ -131,6 +131,7 @@ export async function getIntakeAnalyticsService(intakeId) {
     revenueAgg,
     paymentTypeGroups,
     districtRows,
+    alStreamRows,
     sessionRows,
     projectGroups,
     certificatesIssuedCount,
@@ -164,6 +165,7 @@ export async function getIntakeAnalyticsService(intakeId) {
       certificateEligible: intake.course.certificateEnabled ? completed : 0,
     },
     districts: districtRows.map((row) => ({ district: row.district, count: row.count })),
+    alStreams: alStreamRows.map((row) => ({ stream: row.stream, count: row.count })),
     sessionEngagement: sessionRows.map((row) => ({
       courseSessionId: row.id,
       title: row.session.title,

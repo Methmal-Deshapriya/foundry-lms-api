@@ -92,6 +92,7 @@ describe("course analytics service", () => {
         { type: "PARTIAL", _count: 15, _sum: { amount: 400000 } },
         { type: "TOP_UP", _count: 5, _sum: { amount: 100000 } },
       ],
+      alStreamRows: [{ stream: "Science", count: 12 }],
       projectGroups: [
         { status: "PENDING", _count: 4 },
         { status: "APPROVED", _count: 20 },
@@ -116,8 +117,11 @@ describe("course analytics service", () => {
     expect(result.revenue).toEqual({ total: 4500000, currency: "LKR" });
     expect(result.successRate).toEqual({ completedPct: 30, certificatesIssued: 28, certificateEligible: 30 });
     expect(result.projects).toEqual({ pending: 4, approved: 20, rejected: 2 });
+    expect(result.alStreams).toEqual([{ stream: "Science", count: 12 }]);
     // Course-level rollup intentionally has no districts/sessionEngagement —
     // curricula can differ between intakes. See §4 of the 2026-08-31 plan.
+    // A/L stream is a student attribute, not a curriculum one, so it does
+    // aggregate across intakes.
     expect(result.districts).toBeUndefined();
     expect(result.sessionEngagement).toBeUndefined();
   });

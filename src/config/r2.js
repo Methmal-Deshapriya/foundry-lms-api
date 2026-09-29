@@ -96,6 +96,19 @@ export async function inspectObject({ scope, objectKey }) {
   );
 }
 
+// Downloads the object's own bytes (server-side, not a presigned URL) so the
+// caller can inspect content the HEAD-only inspectObject() can't see — e.g.
+// decoding actual pixel dimensions to enforce an exact-size policy. Only
+// used for small, already size-capped uploads (images), never large media.
+export async function fetchObjectBuffer({ scope, objectKey }) {
+  const response = await getR2Client().send(
+    new GetObjectCommand({ Bucket: bucketForScope(scope), Key: objectKey }),
+  );
+  const chunks = [];
+  for await (const chunk of response.Body) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
 export async function createDownloadUrl({ scope, objectKey, fileName }) {
   if (scope === "PUBLIC") return publicObjectUrl(objectKey);
   const config = getR2Config();

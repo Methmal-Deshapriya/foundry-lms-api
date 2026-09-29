@@ -249,6 +249,7 @@ export async function getAnalytics(intakeId) {
     revenueAgg,
     paymentTypeGroups,
     districtRows,
+    alStreamRows,
     sessionRows,
     projectGroups,
     certificatesIssuedCount,
@@ -265,6 +266,13 @@ export async function getAnalytics(intakeId) {
       FROM enrollments e JOIN users u ON u.id = e.user_id
       WHERE e.intake_id = ${intakeId} AND e.status != 'CANCELLED' AND u.district IS NOT NULL
       GROUP BY u.district ORDER BY count DESC
+    `,
+    // Same shape as the district breakdown above, grouped on A/L stream instead.
+    prisma.$queryRaw`
+      SELECT u.al_stream AS stream, COUNT(*)::int AS count
+      FROM enrollments e JOIN users u ON u.id = e.user_id
+      WHERE e.intake_id = ${intakeId} AND e.status != 'CANCELLED' AND u.al_stream IS NOT NULL
+      GROUP BY u.al_stream ORDER BY count DESC
     `,
     prisma.courseSession.findMany({
       where: { intakeId, retiredAt: null },
@@ -287,6 +295,7 @@ export async function getAnalytics(intakeId) {
     revenueAgg,
     paymentTypeGroups,
     districtRows,
+    alStreamRows,
     sessionRows,
     projectGroups,
     certificatesIssuedCount,

@@ -63,7 +63,7 @@ function paymentTypeBreakdown(groups, type) {
 export async function getCourseAnalyticsService(courseId) {
   const data = await repository.getAnalytics(courseId);
   if (!data) throw new NotFoundError("Course not found.");
-  const { course, statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount } = data;
+  const { course, statusGroups, revenueAgg, paymentTypeGroups, alStreamRows, projectGroups, certificatesIssuedCount } = data;
 
   const active = countByKey(statusGroups, "status", "ACTIVE");
   const completed = countByKey(statusGroups, "status", "COMPLETED");
@@ -84,6 +84,7 @@ export async function getCourseAnalyticsService(courseId) {
       certificatesIssued: certificatesIssuedCount,
       certificateEligible: course.certificateEnabled ? completed : 0,
     },
+    alStreams: alStreamRows.map((row) => ({ stream: row.stream, count: row.count })),
     projects: {
       pending: countByKey(projectGroups, "status", "PENDING"),
       approved: countByKey(projectGroups, "status", "APPROVED"),
@@ -100,6 +101,9 @@ export async function createCourseService(data, actorId) {
   validatePricingPolicy(service, input.price);
   if (input.thumbnailObjectId) {
     await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
+  }
+  if (input.explainerVideoThumbnailObjectId) {
+    await assertAttachableStoredObject(input.explainerVideoThumbnailObjectId, "COURSE_EXPLAINER_VIDEO_THUMBNAIL");
   }
   const course = await repository.create({ ...input, currency: COURSE_CURRENCY });
   recordActionService({
@@ -123,6 +127,9 @@ export async function updateCourseService(id, data, actorId) {
   if (input.price !== undefined) validatePricingPolicy(current.service, input.price);
   if (input.thumbnailObjectId) {
     await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
+  }
+  if (input.explainerVideoThumbnailObjectId) {
+    await assertAttachableStoredObject(input.explainerVideoThumbnailObjectId, "COURSE_EXPLAINER_VIDEO_THUMBNAIL");
   }
   if (input.thumbnailObjectId) input.thumbnailUrl = null;
   if (input.thumbnailUrl) input.thumbnailObjectId = null;

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { imageSize } from "image-size";
 import {
   createDownloadUrl,
   createUploadUrl,
+  fetchObjectBuffer,
   getR2Config,
   inspectObject,
   isR2Enabled,
@@ -56,6 +58,40 @@ const PURPOSE_POLICIES = Object.freeze({
     contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
     maxBytesEnv: "R2_MAX_PROJECT_THUMBNAIL_BYTES",
     defaultMaxBytes: 5_242_880,
+  },
+  SERVICE_HERO: {
+    scope: "PUBLIC",
+    prefix: "service-hero-images",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_SERVICE_HERO_BYTES",
+    defaultMaxBytes: 10_485_760,
+    // The service detail page's hero illustration is laid out at a fixed
+    // aspect ratio next to the headline text — an arbitrary size would
+    // either stretch or letterbox, so the exact pixel size is enforced here
+    // rather than left to admin judgement. See the 2026-09-24 dynamic
+    // service content plan.
+    expectedDimensions: { width: 1374, height: 1145 },
+  },
+  SERVICE_CARD: {
+    scope: "PUBLIC",
+    prefix: "service-card-images",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_SERVICE_CARD_BYTES",
+    defaultMaxBytes: 10_485_760,
+    // The home page "What we offer" card image sits in a fixed 16:9 frame —
+    // same reasoning as SERVICE_HERO's expectedDimensions above.
+    expectedDimensions: { width: 1672, height: 941 },
+  },
+  COURSE_EXPLAINER_VIDEO_THUMBNAIL: {
+    scope: "PUBLIC",
+    prefix: "course-explainer-video-thumbnails",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_COURSE_EXPLAINER_THUMBNAIL_BYTES",
+    defaultMaxBytes: 5_242_880,
+    // The course-detail page plays this the same way the landing page's
+    // AboutVideo does — a fixed 16:9 frame (standard YouTube thumbnail
+    // resolution) so it never stretches or letterboxes.
+    expectedDimensions: { width: 1280, height: 720 },
   },
 });
 
@@ -215,6 +251,17 @@ export async function completeUploadService(idValue, actorId, actorRole) {
       "UPLOAD_TYPE_MISMATCH",
     );
   }
+  const expectedDimensions = PURPOSE_POLICIES[object.purpose]?.expectedDimensions;
+  if (expectedDimensions) {
+    const buffer = await fetchObjectBuffer({ scope: object.scope, objectKey: object.objectKey });
+    const { width, height } = imageSize(buffer);
+    if (width !== expectedDimensions.width || height !== expectedDimensions.height) {
+      throw new ValidationError(
+        `Image must be exactly ${expectedDimensions.width}×${expectedDimensions.height}px (uploaded file is ${width}×${height}px).`,
+        "dimensions",
+      );
+    }
+  }
   const ready = await repository.markReady(id, {
     actualSizeBytes: BigInt(actualSize),
     etag: head.ETag?.replaceAll('"', "") ?? null,
@@ -253,6 +300,9 @@ export async function assertAttachableStoredObject(id, purpose) {
     SESSION_RECORDING: "recordingObjectId",
     SESSION_MATERIAL: "materialObjectId",
     PROJECT_THUMBNAIL: "thumbnailObjectId",
+    SERVICE_HERO: "heroImageObjectId",
+    SERVICE_CARD: "cardImageObjectId",
+    COURSE_EXPLAINER_VIDEO_THUMBNAIL: "explainerVideoThumbnailObjectId",
   }[purpose];
   const parsedId = parse(storedObjectIdSchema, id);
   const object = await repository.findById(parsedId);

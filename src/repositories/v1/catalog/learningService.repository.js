@@ -2,7 +2,7 @@ import prisma from "../../../utils/prisma.js";
 import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
-const include = { _count: { select: { courses: true } } };
+const include = { _count: { select: { courses: true } }, heroImageObject: true, cardImageObject: true };
 
 export function findById(id) {
   return prisma.learningService.findUnique({ where: { id }, include });
@@ -37,7 +37,7 @@ export async function findAdmin(filters, limit, offset) {
 }
 
 export function findPublic() {
-  return prisma.learningService.findMany({ where: { status: "ACTIVE" }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] });
+  return prisma.learningService.findMany({ where: { status: "ACTIVE" }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }], include: { heroImageObject: true, cardImageObject: true } });
 }
 
 /**
@@ -106,6 +106,66 @@ export async function findAdminSummaries(serviceIds) {
       JOIN intakes intake ON intake.id = enrollment.intake_id
       WHERE intake.service_id = ANY(${serviceIds}::text[])
       GROUP BY intake.service_id
+    ),
+    -- Revenue + payment-type breakdown — see the 2026-09-24 hierarchical
+    -- admin summaries plan. Payment.intakeId already carries the existing
+    -- [intakeId, createdAt] index; Intake.serviceId is indexed too, so this
+    -- joins on two already-indexed columns, same shape as learner_stats above.
+    revenue_stats AS (
+      SELECT intake.service_id, COALESCE(SUM(payment.amount), 0) AS total
+      FROM payments payment
+      JOIN intakes intake ON intake.id = payment.intake_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
+    ),
+    payment_type_stats AS (
+      SELECT intake.service_id,
+        COUNT(*) FILTER (WHERE payment.type = 'FULL')::int AS full_count,
+        COALESCE(SUM(payment.amount) FILTER (WHERE payment.type = 'FULL'), 0) AS full_amount,
+        COUNT(*) FILTER (WHERE payment.type = 'PARTIAL')::int AS partial_count,
+        COALESCE(SUM(payment.amount) FILTER (WHERE payment.type = 'PARTIAL'), 0) AS partial_amount,
+        COUNT(*) FILTER (WHERE payment.type = 'TOP_UP')::int AS top_up_count,
+        COALESCE(SUM(payment.amount) FILTER (WHERE payment.type = 'TOP_UP'), 0) AS top_up_amount
+      FROM payments payment
+      JOIN intakes intake ON intake.id = payment.intake_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
+    ),
+    -- Certificates issued — Certificate only FKs to Enrollment, so this is
+    -- the one two-hop join (enrollment -> intake), still landing on
+    -- Enrollment's existing [intakeId, status] index.
+    certificate_stats AS (
+      SELECT intake.service_id,
+        COUNT(*) FILTER (WHERE certificate.status = 'ISSUED')::int AS issued
+      FROM certificates certificate
+      JOIN enrollments enrollment ON enrollment.id = certificate.enrollment_id
+      JOIN intakes intake ON intake.id = enrollment.intake_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
+    ),
+    -- Certificate-eligible = completed enrollments in a course that actually
+    -- issues certificates — the same definition course/intake-level analytics
+    -- already use (getCourseAnalyticsService/getIntakeAnalyticsService),
+    -- summed platform-wide per service instead of per course.
+    eligible_stats AS (
+      SELECT course.service_id,
+        COUNT(*) FILTER (WHERE enrollment.status = 'COMPLETED' AND course.certificate_enabled)::int AS eligible
+      FROM enrollments enrollment
+      JOIN courses course ON course.id = enrollment.course_id
+      WHERE course.service_id = ANY(${serviceIds}::text[])
+      GROUP BY course.service_id
+    ),
+    -- StudentProject carries intake_id directly, so this is a single join,
+    -- same shape as intake_stats above.
+    project_stats AS (
+      SELECT intake.service_id,
+        COUNT(*) FILTER (WHERE project.status = 'PENDING')::int AS pending,
+        COUNT(*) FILTER (WHERE project.status = 'APPROVED')::int AS approved,
+        COUNT(*) FILTER (WHERE project.status = 'REJECTED')::int AS rejected
+      FROM student_projects project
+      JOIN intakes intake ON intake.id = project.intake_id
+      WHERE intake.service_id = ANY(${serviceIds}::text[])
+      GROUP BY intake.service_id
     )
     SELECT service.id AS "serviceId",
       COALESCE(course_status.total, 0)::int AS "courseTotal",
@@ -123,12 +183,29 @@ export async function findAdminSummaries(serviceIds) {
       COALESCE(learner.active_unique, 0)::int AS "activeUniqueLearners",
       COALESCE(learner.total_unique, 0)::int AS "totalUniqueLearners",
       COALESCE(learner.active_enrollments, 0)::int AS "activeEnrollments",
-      COALESCE(learner.payment_attention, 0)::int AS "paymentAttentionCount"
+      COALESCE(learner.payment_attention, 0)::int AS "paymentAttentionCount",
+      COALESCE(revenue.total, 0) AS "revenueTotal",
+      COALESCE(payment_type.full_count, 0)::int AS "paymentFullCount",
+      COALESCE(payment_type.full_amount, 0) AS "paymentFullAmount",
+      COALESCE(payment_type.partial_count, 0)::int AS "paymentPartialCount",
+      COALESCE(payment_type.partial_amount, 0) AS "paymentPartialAmount",
+      COALESCE(payment_type.top_up_count, 0)::int AS "paymentTopUpCount",
+      COALESCE(payment_type.top_up_amount, 0) AS "paymentTopUpAmount",
+      COALESCE(certificate.issued, 0)::int AS "certificatesIssued",
+      COALESCE(eligible.eligible, 0)::int AS "certificatesEligible",
+      COALESCE(project.pending, 0)::int AS "projectsPending",
+      COALESCE(project.approved, 0)::int AS "projectsApproved",
+      COALESCE(project.rejected, 0)::int AS "projectsRejected"
     FROM learning_services service
     LEFT JOIN course_status_stats course_status ON course_status.service_id = service.id
     LEFT JOIN intake_stats intake ON intake.service_id = service.id
     LEFT JOIN curriculum_stats curriculum ON curriculum.service_id = service.id
     LEFT JOIN learner_stats learner ON learner.service_id = service.id
+    LEFT JOIN revenue_stats revenue ON revenue.service_id = service.id
+    LEFT JOIN payment_type_stats payment_type ON payment_type.service_id = service.id
+    LEFT JOIN certificate_stats certificate ON certificate.service_id = service.id
+    LEFT JOIN eligible_stats eligible ON eligible.service_id = service.id
+    LEFT JOIN project_stats project ON project.service_id = service.id
     WHERE service.id = ANY(${serviceIds}::text[])
   `;
 }
