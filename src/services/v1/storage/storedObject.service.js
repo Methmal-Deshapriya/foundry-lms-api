@@ -4,6 +4,7 @@ import { imageSize } from "image-size";
 import {
   createDownloadUrl,
   createUploadUrl,
+  deleteObject,
   fetchObjectBuffer,
   getR2Config,
   inspectObject,
@@ -93,13 +94,24 @@ const PURPOSE_POLICIES = Object.freeze({
     // resolution) so it never stretches or letterboxes.
     expectedDimensions: { width: 1280, height: 720 },
   },
+  STUDENT_AVATAR: {
+    scope: "PUBLIC",
+    prefix: "student-avatars",
+    contentTypes: ["image/jpeg", "image/png", "image/webp"],
+    maxBytesEnv: "R2_MAX_STUDENT_AVATAR_BYTES",
+    // The client shrinks every avatar to a 512px WebP (~50 KB) before
+    // uploading, so 1 MB is generous headroom while keeping each student's
+    // footprint tiny. Only one avatar per student is ever kept — see
+    // deleteStoredObjectService below.
+    defaultMaxBytes: 1_048_576,
+  },
 });
 
 // Every other purpose is admin-only (gated by STORAGE_MANAGE at the route
 // level). Project thumbnails are the one purpose a student uploads directly,
 // so this is the one exception carved out below rather than opening the
 // whole endpoint up by role.
-const SELF_SERVICE_PURPOSES = new Set(["PROJECT_THUMBNAIL"]);
+const SELF_SERVICE_PURPOSES = new Set(["PROJECT_THUMBNAIL", "STUDENT_AVATAR"]);
 
 function parse(schema, value) {
   const result = schema.safeParse(value);
@@ -303,6 +315,7 @@ export async function assertAttachableStoredObject(id, purpose) {
     SERVICE_HERO: "heroImageObjectId",
     SERVICE_CARD: "cardImageObjectId",
     COURSE_EXPLAINER_VIDEO_THUMBNAIL: "explainerVideoThumbnailObjectId",
+    STUDENT_AVATAR: "avatarObjectId",
   }[purpose];
   const parsedId = parse(storedObjectIdSchema, id);
   const object = await repository.findById(parsedId);
@@ -326,5 +339,26 @@ export async function privateStoredObjectUrl(object) {
     scope: object.scope,
     objectKey: object.objectKey,
     fileName: object.originalFileName,
+  });
+}
+
+/**
+ * Permanently deletes a stored object — its bytes in R2 and its row. Call
+ * only once nothing references it any more (e.g. after a replacement has
+ * been saved). The R2 delete goes first: if it fails, the row survives and
+ * still points at the bytes, so nothing is silently orphaned.
+ */
+export async function deleteStoredObjectService(object, actorId) {
+  if (!object) return;
+  requireR2();
+  await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+  await repository.deleteById(object.id);
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.STORED_OBJECT_DELETED,
+    entityType: ENTITY_TYPES.STORED_OBJECT,
+    entityId: object.id,
+    description: `Deleted superseded ${object.purpose.toLowerCase().replaceAll("_", " ")} "${object.originalFileName}".`,
+    metadata: { purpose: object.purpose, scope: object.scope },
   });
 }

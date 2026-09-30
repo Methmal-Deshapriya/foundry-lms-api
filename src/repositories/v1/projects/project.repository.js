@@ -40,7 +40,7 @@ const publicProjectSelect = {
   likeCount: true,
   createdAt: true,
   updatedAt: true,
-  user: { select: { firstName: true, lastName: true } },
+  user: { select: { firstName: true, lastName: true, studentProfile: { select: { slug: true, publishConsentAt: true } } } },
   intake: { select: { course: { select: { title: true } } } },
 };
 

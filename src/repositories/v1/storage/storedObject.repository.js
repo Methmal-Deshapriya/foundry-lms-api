@@ -9,6 +9,14 @@ export async function create(data) {
   }
 }
 
+export async function deleteById(id) {
+  try {
+    return await prisma.storedObject.delete({ where: { id } });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
 export function findById(id) {
   return prisma.storedObject.findUnique({ where: { id } });
 }

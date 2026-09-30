@@ -62,7 +62,13 @@ export function transformPublicProject(project) {
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     user: project.user
-      ? { firstName: project.user.firstName, lastName: project.user.lastName }
+      ? {
+          firstName: project.user.firstName,
+          lastName: project.user.lastName,
+          // This project is itself approved + public, so a consented profile
+          // is published — link the student's name to it.
+          profileSlug: project.user.studentProfile?.publishConsentAt ? project.user.studentProfile.slug : null,
+        }
       : undefined,
     course: project.intake?.course ? { title: project.intake.course.title } : undefined,
   };

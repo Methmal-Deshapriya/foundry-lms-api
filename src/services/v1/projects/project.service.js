@@ -1,7 +1,8 @@
 import * as projectRepo from "../../../repositories/v1/projects/project.repository.js";
 import { createProjectSchema, updateProjectSchema, reviewProjectSchema } from "../../../constants/v1/projects/projects.schema.js";
 import { ALL_PROJECT_STATUSES } from "../../../constants/v1/projects/projects.constants.js";
-import { ValidationError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
+import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from "../../../utils/Errors.js";
+import { hasProfile } from "../profiles/profile.service.js";
 import { assertAttachableStoredObject } from "../storage/storedObject.service.js";
 import {
   transformProject,
@@ -28,6 +29,12 @@ export async function submitProjectService(requester, data) {
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
   const input = validation.data;
+  // Public profiles exist only for students who submit projects, so the
+  // profile is set up first (the frontend runs it as the opening stages of
+  // the submission flow) — see the 2026-10-01 public student profile plan.
+  if (!(await hasProfile(requester.id))) {
+    throw new ConflictError("Set up your public profile before submitting a project.", "PROFILE_REQUIRED");
+  }
   if (input.thumbnailObjectId) {
     await assertAttachableStoredObject(input.thumbnailObjectId, "PROJECT_THUMBNAIL");
     input.thumbnailUrl = null;

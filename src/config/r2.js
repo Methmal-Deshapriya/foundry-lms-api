@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -107,6 +108,14 @@ export async function fetchObjectBuffer({ scope, objectKey }) {
   const chunks = [];
   for await (const chunk of response.Body) chunks.push(chunk);
   return Buffer.concat(chunks);
+}
+
+// Permanently removes an object's bytes from its bucket. Used when a
+// one-per-owner file (e.g. a student's avatar) is replaced, so superseded
+// uploads don't accumulate in R2. R2 treats deleting a missing key as
+// success, so this is safe to retry.
+export async function deleteObject({ scope, objectKey }) {
+  await getR2Client().send(new DeleteObjectCommand({ Bucket: bucketForScope(scope), Key: objectKey }));
 }
 
 export async function createDownloadUrl({ scope, objectKey, fileName }) {

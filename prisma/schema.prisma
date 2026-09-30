@@ -80,6 +80,7 @@ enum StoredObjectPurpose {
   SERVICE_HERO
   SERVICE_CARD
   COURSE_EXPLAINER_VIDEO_THUMBNAIL
+  STUDENT_AVATAR
 }
 
 enum StoredObjectStatus {
@@ -172,6 +173,7 @@ model User {
   managedEnrollments          Enrollment[]         @relation("EnrollmentManager")
   recordedPayments            Payment[]
   studentProjects             StudentProject[]
+  studentProfile              StudentProfile?
   actorAuditLogs              AuditLog[]           @relation("ActorRelation")
   passwordResetTokens         PasswordResetToken[]
   emailOtps                   EmailOtp[]
@@ -452,6 +454,7 @@ model StoredObject {
   projectThumbnails              StudentProject[]  @relation("ProjectThumbnailObject")
   serviceHeroImages              LearningService[] @relation("ServiceHeroImageObject")
   serviceCardImages              LearningService[] @relation("ServiceCardImageObject")
+  studentProfileAvatar           StudentProfile?   @relation("StudentProfileAvatarObject")
 
   @@index([status, createdAt])
   @@index([uploadedByUserId, createdAt(sort: Desc)])
@@ -638,4 +641,33 @@ model AuditLog {
   @@index([actorUserId])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+// A student's public portfolio page (/students/<slug>). Created only through
+// the project-submission flow, and publicly visible only once the student has
+// consented AND has at least one approved public project — see the
+// 2026-10-01 public student profile plan. Holds only what the student chose
+// to publish; everything else on the page (projects, certificates) is read
+// from their own records. Never exposes contact or personal details.
+model StudentProfile {
+  id               String    @id @default(uuid())
+  userId           String    @unique @map("user_id")
+  slug             String    @unique
+  headline         String?
+  bio              String?
+  interests        String[]  @default([])
+  careerGoals      String[]  @default([]) @map("career_goals")
+  linkedinUrl      String?   @map("linkedin_url")
+  githubUrl        String?   @map("github_url")
+  portfolioUrl     String?   @map("portfolio_url")
+  // One picture per student: replacing it deletes the old file from R2.
+  avatarObjectId   String?   @unique @map("avatar_object_id")
+  publishConsentAt DateTime? @map("publish_consent_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatarObject StoredObject? @relation("StudentProfileAvatarObject", fields: [avatarObjectId], references: [id], onDelete: SetNull)
+
+  @@map("student_profiles")
 }
