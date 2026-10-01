@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../../config/r2.js", () => ({
   createDownloadUrl: vi.fn(),
   createUploadUrl: vi.fn(),
+  deleteObject: vi.fn(),
+  fetchObjectBuffer: vi.fn(),
   getR2Config: vi.fn(() => ({ uploadTtlSeconds: 300 })),
   inspectObject: vi.fn(),
   isR2Enabled: vi.fn(() => true),
@@ -13,6 +15,9 @@ vi.mock("../../../repositories/v1/storage/storedObject.repository.js", () => ({
   findById: vi.fn(),
   markReady: vi.fn(),
   markFailed: vi.fn(),
+  countRecentPending: vi.fn(async () => 0),
+  deleteIfUnreferenced: vi.fn(async () => true),
+  findCleanupCandidates: vi.fn(async () => []),
 }));
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
 
@@ -20,8 +25,11 @@ import * as r2 from "../../../config/r2.js";
 import * as repository from "../../../repositories/v1/storage/storedObject.repository.js";
 import {
   assertAttachableStoredObject,
+  cleanupStorageService,
   completeUploadService,
+  deleteStoredObjectService,
   createUploadIntentService,
+  getStoredObjectAccessService,
   privateStoredObjectUrl,
 } from "./storedObject.service.js";
 
@@ -181,5 +189,111 @@ describe("stored-object service", () => {
       scope: "PRIVATE",
       objectKey: object.objectKey,
     }));
+  });
+});
+
+describe("who may use a stored object", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(["PAYMENT_PROOF", "EXPENSE_RECEIPT"])("keeps %s downloads to super admins", async (purpose) => {
+    repository.findById.mockResolvedValue({ ...pendingObject, status: "READY", scope: "PRIVATE", purpose });
+    await expect(getStoredObjectAccessService(id, { id: "a-1", role: "ADMIN" })).rejects.toMatchObject({ statusCode: 403 });
+    expect(r2.createDownloadUrl).not.toHaveBeenCalled();
+
+    r2.createDownloadUrl.mockResolvedValue("https://signed.example/x");
+    await expect(getStoredObjectAccessService(id, { id: "s-1", role: "SUPER_ADMIN" })).resolves.toMatchObject({ url: "https://signed.example/x" });
+  });
+
+  it("still lets any admin open other private files", async () => {
+    repository.findById.mockResolvedValue({ ...pendingObject, status: "READY", scope: "PRIVATE", purpose: "SESSION_MATERIAL" });
+    r2.createDownloadUrl.mockResolvedValue("https://signed.example/y");
+    await expect(getStoredObjectAccessService(id, { id: "a-1", role: "ADMIN" })).resolves.toMatchObject({ url: "https://signed.example/y" });
+  });
+
+  it("refuses to attach a file someone else uploaded when an owner is required", async () => {
+    repository.findById.mockResolvedValue({ ...pendingObject, status: "READY", purpose: "PROJECT_THUMBNAIL", uploadedByUserId: "student-b" });
+    await expect(assertAttachableStoredObject(id, "PROJECT_THUMBNAIL", { ownerUserId: "student-a" })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(assertAttachableStoredObject(id, "PROJECT_THUMBNAIL", { ownerUserId: "student-b" })).resolves.toMatchObject({ id });
+  });
+});
+
+describe("uploads that fail their checks (M04-01, M04-08)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    r2.isR2Enabled.mockReturnValue(true);
+  });
+
+  it("deletes the bytes and marks the row FAILED on a size mismatch", async () => {
+    repository.findById.mockResolvedValue(pendingObject);
+    r2.inspectObject.mockResolvedValue({ ContentLength: 10, ContentType: "image/webp" });
+    await expect(completeUploadService(id, "actor-1")).rejects.toMatchObject({ code: "UPLOAD_SIZE_MISMATCH" });
+    expect(r2.deleteObject).toHaveBeenCalledWith({ scope: "PUBLIC", objectKey: pendingObject.objectKey });
+    expect(repository.markFailed).toHaveBeenCalledWith(id);
+  });
+
+  it("deletes the bytes on a type mismatch", async () => {
+    repository.findById.mockResolvedValue(pendingObject);
+    r2.inspectObject.mockResolvedValue({ ContentLength: 1024, ContentType: "text/html" });
+    await expect(completeUploadService(id, "actor-1")).rejects.toMatchObject({ code: "UPLOAD_TYPE_MISMATCH" });
+    expect(r2.deleteObject).toHaveBeenCalled();
+    expect(repository.markReady).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 'not a valid image' for undecodable bytes on a fixed-size purpose", async () => {
+    repository.findById.mockResolvedValue({ ...pendingObject, purpose: "SERVICE_HERO", objectKey: `service-heroes/2026/10/${id}.webp` });
+    r2.inspectObject.mockResolvedValue({ ContentLength: 1024, ContentType: "image/webp" });
+    r2.fetchObjectBuffer.mockResolvedValue(Buffer.from("definitely not an image"));
+    await expect(completeUploadService(id, "actor-1")).rejects.toMatchObject({ statusCode: 400, field: "dimensions" });
+    expect(repository.markFailed).toHaveBeenCalledWith(id);
+  });
+
+  it("signs the declared size into the upload URL", async () => {
+    repository.create.mockImplementation(async (data) => ({ ...pendingObject, ...data }));
+    r2.createUploadUrl.mockResolvedValue("https://signed-upload.example");
+    await createUploadIntentService({ purpose: "COURSE_THUMBNAIL", fileName: "c.webp", contentType: "image/webp", sizeBytes: 2048 }, "actor-1", "ADMIN");
+    expect(r2.createUploadUrl).toHaveBeenCalledWith(expect.objectContaining({ contentType: "image/webp", contentLength: 2048 }));
+  });
+
+  it("caps a student's uploads in flight (M04-02)", async () => {
+    repository.countRecentPending.mockResolvedValueOnce(5);
+    await expect(
+      createUploadIntentService({ purpose: "PROJECT_THUMBNAIL", fileName: "p.webp", contentType: "image/webp", sizeBytes: 100 }, "student-1", "STUDENT"),
+    ).rejects.toMatchObject({ statusCode: 429, code: "TOO_MANY_PENDING_UPLOADS" });
+  });
+});
+
+describe("deleting files (M04-04, M04-07)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    r2.isR2Enabled.mockReturnValue(true);
+  });
+  const ready = { ...pendingObject, status: "READY" };
+
+  it("keeps the bytes when the row is still referenced", async () => {
+    repository.deleteIfUnreferenced.mockResolvedValueOnce(false);
+    await deleteStoredObjectService(ready, "actor-1");
+    expect(r2.deleteObject).not.toHaveBeenCalled();
+  });
+
+  it("deletes the row before the bytes", async () => {
+    await deleteStoredObjectService(ready, "actor-1");
+    expect(repository.deleteIfUnreferenced.mock.invocationCallOrder[0]).toBeLessThan(r2.deleteObject.mock.invocationCallOrder[0]);
+  });
+
+  it("cleanup skips a file that was attached after it was listed", async () => {
+    repository.findCleanupCandidates.mockResolvedValueOnce([ready, { ...ready, id: "other", objectKey: "x/other.webp" }]);
+    repository.deleteIfUnreferenced.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const result = await cleanupStorageService({ dryRun: false });
+    expect(result).toMatchObject({ deleted: 1, failed: 0 });
+    expect(r2.deleteObject).toHaveBeenCalledTimes(1);
+    expect(r2.deleteObject).toHaveBeenCalledWith({ scope: "PUBLIC", objectKey: "x/other.webp" });
+  });
+
+  it("a dry run lists files and deletes nothing", async () => {
+    repository.findCleanupCandidates.mockResolvedValueOnce([ready]);
+    const result = await cleanupStorageService({ dryRun: true });
+    expect(result).toMatchObject({ dryRun: true, count: 1 });
+    expect(repository.deleteIfUnreferenced).not.toHaveBeenCalled();
+    expect(r2.deleteObject).not.toHaveBeenCalled();
   });
 });

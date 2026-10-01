@@ -30,6 +30,8 @@ router.get(
   "/:enrollmentId/sessions/:courseSessionId",
   classroomController.getSession,
 );
+router.get("/:enrollmentId/sessions/:courseSessionId/recording", classroomController.getSessionFile("recording"));
+router.get("/:enrollmentId/sessions/:courseSessionId/material", classroomController.getSessionFile("material"));
 router.post(
   "/:enrollmentId/sessions/:courseSessionId/complete",
   classroomController.completeSession,

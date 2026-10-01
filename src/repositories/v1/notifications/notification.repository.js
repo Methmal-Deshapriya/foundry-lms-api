@@ -1,4 +1,5 @@
 import prisma from "../../../utils/prisma.js";
+import { BALANCE_PAYMENT_SELECT } from "../../../utils/paymentBalance.js";
 import { handlePrismaError } from "../../../utils/Errors.js";
 
 /**
@@ -40,7 +41,8 @@ export function findPartialPayers({ courseId, intakeId }) {
       id: true,
       user: { select: { id: true, firstName: true, email: true, role: true } },
       course: { select: { title: true, price: true } },
-      payments: { select: { amount: true } },
+      agreedPrice: true,
+      payments: { select: BALANCE_PAYMENT_SELECT },
     },
   });
 }
@@ -54,16 +56,24 @@ const adminNotificationInclude = {
   _count: { select: { receipts: { where: { readAt: { not: null } } } } },
 };
 
+// Live counts per status for the filter pills, with the search applied but
+// not the status (code review M09-10).
+async function statusSummary(model, searchWhere) {
+  const groups = await model.groupBy({ by: ["status"], where: searchWhere, _count: { _all: true } });
+  const count = (status) => groups.find((group) => group.status === status)?._count._all ?? 0;
+  const summary = { draft: count("DRAFT"), published: count("PUBLISHED"), archived: count("ARCHIVED") };
+  return { all: summary.draft + summary.published + summary.archived, ...summary };
+}
+
 export async function findNotificationsPage({ status, q, limit, offset }) {
-  const where = {
-    ...(status ? { status } : {}),
-    ...(q ? { OR: [{ title: { contains: q, mode: "insensitive" } }, { message: { contains: q, mode: "insensitive" } }] } : {}),
-  };
-  const [total, rows] = await Promise.all([
+  const searchWhere = q ? { OR: [{ title: { contains: q, mode: "insensitive" } }, { message: { contains: q, mode: "insensitive" } }] } : {};
+  const where = { ...searchWhere, ...(status ? { status } : {}) };
+  const [total, rows, summary] = await Promise.all([
     prisma.notification.count({ where }),
     prisma.notification.findMany({ where, include: adminNotificationInclude, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: limit, skip: offset }),
+    statusSummary(prisma.notification, searchWhere),
   ]);
-  return { total, rows };
+  return { total, rows, summary };
 }
 
 export function findNotificationById(id) {
@@ -90,6 +100,49 @@ export function deleteNotification(id) {
   return prisma.notification.delete({ where: { id } });
 }
 
+/** A changed title or message is new to everyone: clear "read", keep dismissals (M09-04). */
+export function resetReads(notificationId) {
+  return prisma.notificationReceipt.updateMany({ where: { notificationId, readAt: { not: null } }, data: { readAt: null } });
+}
+
+// ---------------------------------------------------------- reminder emails
+
+const SEND_CLAIM_TTL_MS = 15 * 60_000;
+
+/**
+ * Claim the right to email this notification (code review M09-01). Only one
+ * send runs at a time; a claim left by a crashed send expires after 15 min.
+ */
+export async function claimEmailSend(id, now = new Date()) {
+  const { count } = await prisma.notification.updateMany({
+    where: { id, OR: [{ emailSendingAt: null }, { emailSendingAt: { lt: new Date(now.getTime() - SEND_CLAIM_TTL_MS) } }] },
+    data: { emailSendingAt: now },
+  });
+  return count === 1;
+}
+
+export function releaseEmailSend(id) {
+  return prisma.notification.update({ where: { id }, data: { emailSendingAt: null }, select: { id: true } });
+}
+
+/** Students this reminder has already been emailed to. */
+export async function findEmailedUserIds(notificationId) {
+  const rows = await prisma.notificationReceipt.findMany({ where: { notificationId, emailedAt: { not: null } }, select: { userId: true } });
+  return rows.map((row) => row.userId);
+}
+
+export function markEmailed(notificationId, userId, now = new Date()) {
+  return prisma.notificationReceipt.upsert({
+    where: { notificationId_userId: { notificationId, userId } },
+    create: { notificationId, userId, emailedAt: now },
+    update: { emailedAt: now },
+  });
+}
+
+export function countEmailed(notificationId) {
+  return prisma.notificationReceipt.count({ where: { notificationId, emailedAt: { not: null } } });
+}
+
 // ------------------------------------------------------------ student: notifications
 
 export function findStudentEnrollments(userId) {
@@ -100,16 +153,20 @@ export function findStudentEnrollments(userId) {
       intakeId: true,
       paymentStatus: true,
       course: { select: { title: true, price: true } },
-      payments: { select: { amount: true } },
+      agreedPrice: true,
+      payments: { select: BALANCE_PAYMENT_SELECT },
     },
   });
 }
 
-export function findVisibleNotifications(userId, { courseIds, intakeIds, partialCourseIds, partialIntakeIds, interestCourseIds = [] }, now = new Date()) {
+export function findVisibleNotifications(userId, { courseIds, intakeIds, partialCourseIds, partialIntakeIds, interests = [] }, now = new Date()) {
   const audienceMatch = [
     { audience: "ALL_STUDENTS" },
     ...(courseIds.length ? [{ audience: "COURSE", courseId: { in: courseIds } }] : []),
-    ...(interestCourseIds.length ? [{ audience: "COURSE_INTEREST", courseId: { in: interestCourseIds } }] : []),
+    // An "enrollment is open" notice goes to students who asked before it
+    // was published, not to ones who pressed "Notify me" afterwards
+    // (code review M09-03).
+    ...interests.map((interest) => ({ audience: "COURSE_INTEREST", courseId: interest.courseId, publishedAt: { gte: interest.createdAt } })),
     ...(intakeIds.length ? [{ audience: "INTAKE", intakeId: { in: intakeIds } }] : []),
     ...(partialCourseIds.length
       ? [
@@ -129,7 +186,9 @@ export function findVisibleNotifications(userId, { courseIds, intakeIds, partial
       status: "PUBLISHED",
       ...liveWindow(now),
       OR: audienceMatch,
-      NOT: { receipts: { some: { userId, dismissedAt: { not: null } } } },
+      // Dismissed notifications are hidden, except payment reminders, which
+      // can't be dismissed (decided 2026-10-01; code review M09-04).
+      NOT: { audience: { not: "PARTIAL_PAYERS" }, receipts: { some: { userId, dismissedAt: { not: null } } } },
     },
     include: {
       receipts: { where: { userId }, select: { readAt: true } },
@@ -167,15 +226,14 @@ export async function markManyRead(notificationIds, userId, now = new Date()) {
 const promotionInclude = { imageObject: true, createdBy: { select: { firstName: true, lastName: true } } };
 
 export async function findPromotionsPage({ status, q, limit, offset }) {
-  const where = {
-    ...(status ? { status } : {}),
-    ...(q ? { OR: [{ internalName: { contains: q, mode: "insensitive" } }, { headline: { contains: q, mode: "insensitive" } }] } : {}),
-  };
-  const [total, rows] = await Promise.all([
+  const searchWhere = q ? { OR: [{ internalName: { contains: q, mode: "insensitive" } }, { headline: { contains: q, mode: "insensitive" } }] } : {};
+  const where = { ...searchWhere, ...(status ? { status } : {}) };
+  const [total, rows, summary] = await Promise.all([
     prisma.promotion.count({ where }),
     prisma.promotion.findMany({ where, include: promotionInclude, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: limit, skip: offset }),
+    statusSummary(prisma.promotion, searchWhere),
   ]);
-  return { total, rows };
+  return { total, rows, summary };
 }
 
 export function findPromotionById(id) {
@@ -213,7 +271,7 @@ export function deletePromotion(id) {
 // ---------------------------------------------------------- course interest
 
 export function findInterestCourseIds(userId) {
-  return prisma.courseInterest.findMany({ where: { userId }, select: { courseId: true } });
+  return prisma.courseInterest.findMany({ where: { userId }, select: { courseId: true, createdAt: true } });
 }
 
 export function findInterest(userId, courseId) {

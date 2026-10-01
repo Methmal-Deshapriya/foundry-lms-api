@@ -7,7 +7,21 @@ export const LEARNING_PAYMENT_REQUIREMENTS = Object.freeze(["REQUIRED", "NOT_REQ
 export const LEARNING_SERVICE_STATUSES = Object.freeze(["DRAFT", "ACTIVE", "ARCHIVED"]);
 
 const key = z.string().trim().min(2).max(60).regex(/^[A-Z0-9]+(?:_[A-Z0-9]+)*$/);
-const slug = z.string().trim().min(2).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+// Service pages live at /<slug>, next to the app's own top-level pages, so a
+// service may not take one of their names (code review M06-09). Keep in
+// sync with the folders directly under foundry_lms_client/src/app.
+export const RESERVED_SERVICE_SLUGS = new Set([
+  "account", "admin", "api", "certificates", "consultations", "dashboard", "explore", "forgot-password",
+  "my-courses", "projects", "reset-password", "sign-in", "sign-up", "students", "verify-email", "verify-login",
+  "login", "logout", "register", "settings", "help", "support", "about", "contact", "privacy", "terms", "sitemap.xml", "robots.txt",
+]);
+const slug = z
+  .string()
+  .trim()
+  .min(2)
+  .max(100)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  .refine((value) => !RESERVED_SERVICE_SLUGS.has(value), "That address is used by another page of the site — choose a different slug.");
 
 const policyFields = {
   accessType: z.enum(LEARNING_ACCESS_TYPES),
@@ -79,7 +93,7 @@ export const updateLearningServiceSchema = z.object({
 
 export const learningServiceAdminFiltersSchema = z.object({
   status: z.enum(LEARNING_SERVICE_STATUSES).optional(),
-  includeArchived: z.coerce.boolean().default(true),
+  includeArchived: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
   q: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),

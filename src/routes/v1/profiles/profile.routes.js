@@ -19,5 +19,8 @@ router.get("/public/:slug", profileController.getPublicProfile);
 router.use(authenticate);
 router.get("/me", requirePermission(PERMISSIONS.PROJECTS_SUBMIT), profileController.getMyProfile);
 router.put("/me", requirePermission(PERMISSIONS.PROJECTS_SUBMIT), profileController.saveMyProfile);
+// Show / hide the public page (withdraw consent) — code review M08-01.
+router.post("/me/publish", requirePermission(PERMISSIONS.PROJECTS_SUBMIT), profileController.publishMyProfile);
+router.delete("/me/publish", requirePermission(PERMISSIONS.PROJECTS_SUBMIT), profileController.unpublishMyProfile);
 
 export default router;

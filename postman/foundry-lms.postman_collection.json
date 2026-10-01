@@ -357,6 +357,44 @@
           }
         },
         {
+          "name": "[SIGNED IN] Change password while signed in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{registrationPassword}}\",\n  \"newPassword\": \"{{newPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nNeeds the current password. Ends every other session and sets a fresh HTTP-only authentication cookie on this one.\n\nOperation ID: changePassword"
+          }
+        },
+        {
           "name": "[PUBLIC] Request password reset",
           "request": {
             "method": "POST",
@@ -684,6 +722,84 @@
               ]
             },
             "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Super admins cannot be demoted through this route.\n\nOperation ID: demoteUser"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Sign a user out of every session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/revoke-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "revoke-sessions"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Ends every session the user has (securityVersion), audited. Not for your own account (code review M10-05).\n\nOperation ID: revokeUserSessions"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Suspend an account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "suspend"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. The account can't sign in and every session is refused until reactivated. Refuses your own account and the last super admin who can sign in (code review M10-05).\n\nOperation ID: suspendUser"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Reactivate a suspended account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/reactivate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "reactivate"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Lets a suspended account sign in again (code review M10-05).\n\nOperation ID: reactivateUser"
           }
         }
       ]
@@ -1392,6 +1508,12 @@
                   "key": "q",
                   "value": "ai",
                   "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "",
+                  "description": "recent lists the newest intakes first.",
                   "disabled": true
                 },
                 {
@@ -2248,6 +2370,62 @@
           }
         },
         {
+          "name": "[SIGNED IN] Open a session's uploaded recording",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/sessions/{{courseSessionId}}/recording",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "sessions",
+                "{{courseSessionId}}",
+                "recording"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nRe-checks classroom access, then redirects (302) to a freshly signed link that plays inline.\n\nOperation ID: openSessionRecording"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Download a session's uploaded material",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/{{enrollmentId}}/sessions/{{courseSessionId}}/material",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "{{enrollmentId}}",
+                "sessions",
+                "{{courseSessionId}}",
+                "material"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nRe-checks classroom access, then redirects (302) to a freshly signed download link.\n\nOperation ID: openSessionMaterial"
+          }
+        },
+        {
           "name": "[STUDENT] Mark accessible session complete",
           "request": {
             "method": "POST",
@@ -2610,6 +2788,31 @@
               ]
             },
             "description": "Access: ADMIN + SUPER ADMIN\n\nReturns ordered per-student CREATED or FAILED results. Writes are serialized behind the intake-enrollment lock so capacity and duplicate decisions remain concurrency-safe. Once a locked transaction proves capacity is exhausted, the remaining eligible rows receive COURSE_CAPACITY_REACHED without opening additional insert transactions.\n\nOperation ID: bulkEnrollStudents"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List students who have gone quiet for 14+ days",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enrollments/at-risk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enrollments",
+                "at-risk"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nActive enrollments with no session completed in the last 14 days, for a WhatsApp nudge.\n\nOperation ID: listAtRiskStudents"
           }
         }
       ]
@@ -3214,6 +3417,45 @@
               ]
             },
             "description": "Access: SIGNED IN\n\nOperation ID: listOwnProjects"
+          }
+        },
+        {
+          "name": "[STUDENT] Show or hide my project on the public showcase",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isPublic\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/projects/{{projectId}}/visibility",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "projects",
+                "{{projectId}}",
+                "visibility"
+              ]
+            },
+            "description": "Access: STUDENT\n\nAllowed in any review status, so an approved project can be taken down.\n\nOperation ID: setMyProjectVisibility"
           }
         },
         {
@@ -3862,7 +4104,7 @@
       "name": "15 Object Storage",
       "item": [
         {
-          "name": "[ADMIN + SUPER ADMIN] Create a short-lived direct R2 upload intent",
+          "name": "[SIGNED IN] Create a short-lived direct R2 upload intent",
           "request": {
             "method": "POST",
             "header": [
@@ -3896,11 +4138,11 @@
                 "uploads"
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nCreates a pending object record and a presigned PUT URL. Cloudflare credentials are never returned to the client.\n\nOperation ID: createObjectUploadIntent"
+            "description": "Access: SIGNED IN\n\nCreates a pending object record and a presigned PUT URL. Cloudflare credentials are never returned to the client. Admins upload any purpose; students only their own project thumbnail or profile picture (checked per purpose in the service).\n\nOperation ID: createObjectUploadIntent"
           }
         },
         {
-          "name": "[ADMIN + SUPER ADMIN] Verify and finalize a direct R2 upload",
+          "name": "[SIGNED IN] Verify and finalize a direct R2 upload",
           "request": {
             "method": "POST",
             "header": [
@@ -3923,7 +4165,7 @@
                 "complete"
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: completeObjectUpload"
+            "description": "Access: SIGNED IN\n\nOperation ID: completeObjectUpload"
           }
         },
         {
@@ -3951,6 +4193,1845 @@
               ]
             },
             "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getStoredObjectAccess"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] [DESTRUCTIVE] Preview or delete unreferenced stored objects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dryRun\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/storage/cleanup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "storage",
+                "cleanup"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\ndryRun defaults to true (preview only); send dryRun false to delete.\n\nOperation ID: runStorageCleanup"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[PUBLIC] [DESTRUCTIVE] Scheduled storage cleanup (GitHub Actions)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/storage/cleanup/scheduled",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "storage",
+                "cleanup",
+                "scheduled"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nAuthorized by the x-cleanup-secret header (STORAGE_CLEANUP_SECRET), not a login. Answers 404 to anything else.\n\nOperation ID: runScheduledStorageCleanup"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "16 Payments",
+      "item": [
+        {
+          "name": "[SUPER ADMIN ONLY] List the payment ledger",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Start of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "End of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "serviceId",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "courseId",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "intakeId",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "method",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "summary",
+                  "value": "",
+                  "description": "false skips the totals; used by the CSV export.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: listPayments"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] List students with a balance still owed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/outstanding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "outstanding"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: listOutstandingPayments"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Monthly payment totals for a year",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/summary/monthly",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "summary",
+                "monthly"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: getMonthlyPaymentSummary"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Get one ledger entry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: getPayment"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Record a refund against an incoming payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"reason\": \"Student withdrew in week one.\",\n  \"method\": \"BANK_TRANSFER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}/refund",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}",
+                "refund"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nAdds a negative REFUND entry; the original entry is never edited.\n\nOperation ID: refundPayment"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Reverse a mistaken ledger entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Entered against the wrong student.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}/reverse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}",
+                "reverse"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nAdds an equal and opposite REVERSAL entry.\n\nOperation ID: reversePayment"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Complete a payment's method, date, reference or proof",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"BANK_TRANSFER\",\n  \"externalReference\": \"BOC-778812\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}/details",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}",
+                "details"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOnly descriptive details; the amount, type and enrollment are never editable.\n\nOperation ID: updatePaymentDetails"
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Notifications & Promotions",
+      "item": [
+        {
+          "name": "[PUBLIC] Get the promotion banner currently live on the landing page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/promotions/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "promotions",
+                "active"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: getActivePromotion"
+          }
+        },
+        {
+          "name": "[SIGNED IN] List my notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "me"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: listMyNotifications"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Mark all my notifications read",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/me/read-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "me",
+                "read-all"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: markAllNotificationsRead"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Mark one notification read",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/me/{{notificationId}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "me",
+                "{{notificationId}}",
+                "read"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: markNotificationRead"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Dismiss one notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/me/{{notificationId}}/dismiss",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "me",
+                "{{notificationId}}",
+                "dismiss"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nPayment reminders can't be dismissed (403).\n\nOperation ID: dismissNotification"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Check whether I asked to be notified when a course opens",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/interests/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "interests",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: getMyCourseInterest"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Notify me when this course opens",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/interests/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "interests",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: addMyCourseInterest"
+          }
+        },
+        {
+          "name": "[SIGNED IN] Stop notifying me about this course",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/interests/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "interests",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: SIGNED IN\n\nOperation ID: removeMyCourseInterest"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List landing-page promotions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/promotions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "promotions"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: listPromotions"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create a promotion draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"internalName\": \"October intake push\",\n  \"headline\": \"Enrollments open for the October intake\",\n  \"badge\": \"New\",\n  \"theme\": \"DARK\",\n  \"ctaLabel\": \"Explore courses\",\n  \"ctaUrl\": \"/explore\",\n  \"showCountdown\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/promotions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "promotions"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: createPromotion"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"promotionId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update a promotion",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"internalName\": \"October intake push\",\n  \"headline\": \"Enrollments open for the October intake\",\n  \"badge\": \"New\",\n  \"theme\": \"DARK\",\n  \"ctaLabel\": \"Explore courses\",\n  \"ctaUrl\": \"/explore\",\n  \"showCountdown\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/promotions/{{promotionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "promotions",
+                "{{promotionId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: updatePromotion"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] [DESTRUCTIVE] Delete a promotion",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/promotions/{{promotionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "promotions",
+                "{{promotionId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: deletePromotion"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Publish a promotion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/promotions/{{promotionId}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "promotions",
+                "{{promotionId}}",
+                "publish"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: publishPromotion"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Archive a promotion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/promotions/{{promotionId}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "promotions",
+                "{{promotionId}}",
+                "archive"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: archivePromotion"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] List notifications (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: listAdminNotifications"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Create a notification draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Orientation this Saturday\",\n  \"message\": \"Join the welcome session at 10:00 AM.\",\n  \"audience\": \"ALL_STUDENTS\",\n  \"linkLabel\": \"View courses\",\n  \"linkUrl\": \"/my-courses\",\n  \"pinned\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: createNotification"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"notificationId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Count how many students an audience reaches",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/reach",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "reach"
+              ],
+              "query": [
+                {
+                  "key": "audience",
+                  "value": "",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "courseId",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "intakeId",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getNotificationReach"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Emails sent today and this month against the Resend limits",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/email-quota",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "email-quota"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getEmailQuota"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Count students waiting for a course to open",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/interests/{{courseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "interests",
+                "{{courseId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: getCourseInterestCount"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Count who a payment reminder's email goes to, and how many already had it",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/{{notificationId}}/email-recipients",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "{{notificationId}}",
+                "email-recipients"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nReturns { total, alreadyEmailed, pending }. Publishing again with sendEmail emails only the pending students (code review M09-02).\n\nOperation ID: getNotificationEmailRecipients"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Update a notification",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Orientation this Saturday\",\n  \"message\": \"Join the welcome session at 10:00 AM.\",\n  \"audience\": \"ALL_STUDENTS\",\n  \"linkLabel\": \"View courses\",\n  \"linkUrl\": \"/my-courses\",\n  \"pinned\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/{{notificationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "{{notificationId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: updateNotification"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] [DESTRUCTIVE] Delete a notification",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/{{notificationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "{{notificationId}}"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: deleteNotification"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get(\"allowDestructiveRequests\") !== \"true\") {",
+                  "  throw new Error(\"Destructive requests are blocked. Set allowDestructiveRequests=true in the selected environment only for an intentional test.\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Publish a notification (optionally email payment reminders)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sendEmail\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/{{notificationId}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "{{notificationId}}",
+                "publish"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nsendEmail is only honoured for PARTIAL_PAYERS reminders and checks the daily email quota first.\n\nOperation ID: publishNotification"
+          }
+        },
+        {
+          "name": "[ADMIN + SUPER ADMIN] Archive a notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/admin/{{notificationId}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "admin",
+                "{{notificationId}}",
+                "archive"
+              ]
+            },
+            "description": "Access: ADMIN + SUPER ADMIN\n\nOperation ID: archiveNotification"
+          }
+        }
+      ]
+    },
+    {
+      "name": "18 Partner Earnings",
+      "item": [
+        {
+          "name": "[SUPER ADMIN ONLY] Each partner's earned, paid out and still owed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/overview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "overview"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Start of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "End of the range (inclusive).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: getPartnerEarningsOverview"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Revenue, expenses, profit and partner shares per intake",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/by-intake",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "by-intake"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Start of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "End of the range (inclusive).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: getPartnerEarningsByIntake"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] List partners and their split history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/shares",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "shares"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: listPartnerShareSets"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Start a new partner split from a date",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"effectiveFrom\": \"2027-01-01T00:00:00.000Z\",\n  \"note\": \"New split from January\",\n  \"entries\": [\n    {\n      \"partnerId\": \"{{partnerId}}\",\n      \"percent\": 100\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/shares",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "shares"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nEntries must cover every partner and add up to 100.\n\nOperation ID: createPartnerShareSet"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] List expenses",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/expenses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "expenses"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Start of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "End of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "intakeId",
+                  "value": "",
+                  "description": "An intake id, or GENERAL for expenses not tied to one intake.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: listExpenses"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Record an expense",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"spentAt\": \"2026-10-01T06:30:00.000Z\",\n  \"amount\": 2500,\n  \"category\": \"ADVERTISING\",\n  \"description\": \"Facebook ads for the October intake\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/expenses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "expenses"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOTHER needs a description of at least 3 characters. paidByPartnerId null means paid from the business account.\n\nOperation ID: createExpense"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"expenseId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Get one expense (with a receipt link)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/expenses/{{expenseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "expenses",
+                "{{expenseId}}"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: getExpense"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Reverse a mistaken expense",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Entered against the wrong student.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/expenses/{{expenseId}}/reverse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "expenses",
+                "{{expenseId}}",
+                "reverse"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: reverseExpense"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] List payouts to partners",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/payouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "payouts"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Start of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "End of the range (inclusive).",
+                  "disabled": true
+                },
+                {
+                  "key": "partnerId",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: listPayouts"
+          }
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Record a payout to a partner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partnerId\": \"{{partnerId}}\",\n  \"amount\": 10000,\n  \"paidAt\": \"2026-10-01T06:30:00.000Z\",\n  \"method\": \"BANK_TRANSFER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/payouts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "payouts"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: createPayout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"payoutId\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[SUPER ADMIN ONLY] Reverse a mistaken payout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Entered against the wrong student.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/partner-earnings/payouts/{{payoutId}}/reverse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "partner-earnings",
+                "payouts",
+                "{{payoutId}}",
+                "reverse"
+              ]
+            },
+            "description": "Access: SUPER ADMIN ONLY\n\nOperation ID: reversePayout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "19 Student Profiles",
+      "item": [
+        {
+          "name": "[STUDENT] Show my public profile again",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profiles/me/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profiles",
+                "me",
+                "publish"
+              ]
+            },
+            "description": "Access: STUDENT\n\nOperation ID: publishMyStudentProfile"
+          }
+        },
+        {
+          "name": "[STUDENT] Hide my public profile (withdraw consent)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profiles/me/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profiles",
+                "me",
+                "publish"
+              ]
+            },
+            "description": "Access: STUDENT\n\nOperation ID: unpublishMyStudentProfile"
+          }
+        },
+        {
+          "name": "[PUBLIC] Get a published student profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profiles/public/{{profileSlug}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profiles",
+                "public",
+                "{{profileSlug}}"
+              ]
+            },
+            "description": "Access: PUBLIC\n\nOperation ID: getPublicStudentProfile"
+          }
+        },
+        {
+          "name": "[STUDENT] Get my public profile settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profiles/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profiles",
+                "me"
+              ]
+            },
+            "description": "Access: STUDENT\n\nOperation ID: getMyStudentProfile"
+          }
+        },
+        {
+          "name": "[STUDENT] Create or update my public profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"nimal-perera\",\n  \"headline\": \"Aspiring data analyst\",\n  \"interests\": [\n    \"Python\",\n    \"Data\"\n  ],\n  \"publishConsent\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/profiles/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "profiles",
+                "me"
+              ]
+            },
+            "description": "Access: STUDENT\n\npublishConsent must be true on every save.\n\nOperation ID: saveMyStudentProfile"
           }
         }
       ]

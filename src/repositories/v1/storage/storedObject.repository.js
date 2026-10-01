@@ -9,14 +9,6 @@ export async function create(data) {
   }
 }
 
-export async function deleteById(id) {
-  try {
-    return await prisma.storedObject.delete({ where: { id } });
-  } catch (error) {
-    throw handlePrismaError(error);
-  }
-}
-
 export function findById(id) {
   return prisma.storedObject.findUnique({ where: { id } });
 }
@@ -74,9 +66,36 @@ export function findCleanupCandidates(olderThan, limit) {
   return prisma.storedObject.findMany({
     where: {
       createdAt: { lt: olderThan },
-      OR: [{ status: { in: ["PENDING", "FAILED"] } }, { status: "READY", ...UNREFERENCED }],
+      // The reference check applies to every status, not just READY: cheap
+      // insurance should anything ever attach a non-READY object.
+      status: { in: ["PENDING", "FAILED", "READY"] },
+      ...UNREFERENCED,
     },
     orderBy: { createdAt: "asc" },
     take: limit,
   });
 }
+
+/**
+ * Deletes the row only if nothing references it at this moment, in one
+ * statement, so a form that attaches the object at the same time either
+ * keeps it (the delete matches nothing) or is refused by its own FK check.
+ * Callers delete the R2 bytes only when this returns true, so a live record
+ * can never end up pointing at a deleted file (code review M04-04/M04-07).
+ */
+export async function deleteIfUnreferenced(id) {
+  try {
+    const { count } = await prisma.storedObject.deleteMany({ where: { id, ...UNREFERENCED } });
+    return count === 1;
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+/** Uploads a user started but hasn't completed recently (for the per-user cap). */
+export function countRecentPending(userId, since) {
+  return prisma.storedObject.count({ where: { uploadedByUserId: userId, status: "PENDING", createdAt: { gte: since } } });
+}
+
+// Exported so a test can check it covers every StoredObject relation.
+export const UNREFERENCED_RELATIONS = Object.keys(UNREFERENCED);

@@ -16,9 +16,27 @@ export function transformUser(user) {
 /**
  * Transform certificate for response.
  */
+// An allow-list: the certificate's own fields plus just enough about the
+// enrollment to label it. Never the student's full user row (phone,
+// address, date of birth…) or whole course/intake records (M08-13).
 export function transformCertificate(certificate) {
   if (!certificate) return null;
-  return certificate;
+  const { enrollment, ...own } = certificate;
+  return {
+    ...own,
+    ...(enrollment
+      ? {
+          enrollment: {
+            id: enrollment.id,
+            userId: enrollment.userId,
+            status: enrollment.status,
+            user: enrollment.user ? { id: enrollment.user.id, firstName: enrollment.user.firstName, lastName: enrollment.user.lastName, email: enrollment.user.email } : undefined,
+            course: enrollment.course ? { id: enrollment.course.id, title: enrollment.course.title, slug: enrollment.course.slug } : undefined,
+            intake: enrollment.intake ? { id: enrollment.intake.id, code: enrollment.intake.code } : undefined,
+          },
+        }
+      : {}),
+  };
 }
 
 /**
@@ -26,11 +44,19 @@ export function transformCertificate(certificate) {
  */
 export function transformProject(project) {
   if (!project) return null;
+  const { intake, ...own } = project;
   return {
-    ...project,
+    ...own,
     thumbnailUrl: resolveThumbnailUrl(project),
     thumbnailObject: toStoredObjectSummary(project.thumbnailObject, resolveThumbnailUrl(project)),
-    user: project.user ? transformUser(project.user) : undefined,
+    // Only who submitted it — not their phone, address or date of birth
+    // (M08-13).
+    user: project.user
+      ? { id: project.user.id, firstName: project.user.firstName, lastName: project.user.lastName, email: project.user.email }
+      : undefined,
+    // The client reads the course as project.course (M08-05).
+    intake: intake ? { id: intake.id, code: intake.code, ...(intake.course ? { course: { id: intake.course.id, title: intake.course.title } } : {}) } : undefined,
+    course: intake?.course ? { id: intake.course.id, title: intake.course.title } : undefined,
   };
 }
 

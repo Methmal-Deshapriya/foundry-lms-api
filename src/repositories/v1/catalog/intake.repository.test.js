@@ -4,9 +4,10 @@ const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
     course: { findUnique: vi.fn(), update: vi.fn() },
-    intake: { findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
+    intake: { findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    notification: { updateMany: vi.fn() },
     courseSession: { findMany: vi.fn(), count: vi.fn() },
-    enrollment: { count: vi.fn() },
+    enrollment: { count: vi.fn(), updateMany: vi.fn() },
   };
   return {
     transaction,
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("../../../utils/prisma.js", () => ({ default: mocks.prisma }));
 
-import { create, updateSetup } from "./intake.repository.js";
+import { create, transitionStatus, updateSetup } from "./intake.repository.js";
 
 const courseId = "20000000-0000-4000-8000-000000000001";
 const serviceId = "20000000-0000-4000-8000-000000000003";
@@ -100,5 +101,34 @@ describe("intake repository invariants", () => {
       code: "INTAKE_CAPACITY_BELOW_ENROLLMENT_COUNT",
       statusCode: 409,
     });
+  });
+});
+
+describe("closing enrollment ends the 'Enrollment is open' notice (M09-03)", () => {
+  const openIntake = { id: intakeId, courseId, serviceId, status: "OPEN_ACTIVE", service: { status: "ACTIVE" }, course: { status: "PUBLISHED" } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    mocks.transaction.intake.findUnique.mockResolvedValueOnce({ serviceId, courseId }).mockResolvedValueOnce(openIntake);
+    mocks.transaction.intake.update.mockResolvedValue({ ...openIntake, status: "CLOSED_ACTIVE" });
+    mocks.transaction.intake.findFirst.mockResolvedValue(null);
+  });
+
+  for (const target of ["CLOSED_ACTIVE", "CANCELLED"]) {
+    it(`archives the course's notice when the intake moves to ${target}`, async () => {
+      await transitionStatus(intakeId, "OPEN_ACTIVE", target);
+      expect(mocks.transaction.notification.updateMany).toHaveBeenCalledWith({
+        where: { audience: "COURSE_INTEREST", courseId, status: "PUBLISHED" },
+        data: { status: "ARCHIVED" },
+      });
+    });
+  }
+
+  it("leaves notices alone for intakes that weren't open", async () => {
+    mocks.transaction.intake.findUnique.mockReset();
+    mocks.transaction.intake.findUnique.mockResolvedValueOnce({ serviceId, courseId }).mockResolvedValueOnce({ ...openIntake, status: "CLOSED_ACTIVE" });
+    await transitionStatus(intakeId, "CLOSED_ACTIVE", "CANCELLED");
+    expect(mocks.transaction.notification.updateMany).not.toHaveBeenCalled();
   });
 });

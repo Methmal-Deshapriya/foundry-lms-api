@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
     course: { findUnique: vi.fn() },
+    enrollment: { findFirst: vi.fn(async () => null) },
     enrollmentRequest: { findFirst: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   };
   return {
@@ -25,6 +26,10 @@ const otherIntakeId = "30000000-0000-4000-8000-000000000003";
 const studentId = "30000000-0000-4000-8000-000000000004";
 const requestId = "30000000-0000-4000-8000-000000000005";
 const actorId = "30000000-0000-4000-8000-000000000006";
+// A published course under a paid, admin-enrolled service: the only kind a
+// student may request a seat in.
+const paidService = { status: "ACTIVE", accessType: "PAID", courseMode: "SEASONAL", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" };
+const paidCourse = { id: courseId, status: "PUBLISHED", archivedAt: null, service: paidService };
 
 describe("enrollmentRequest repository invariants", () => {
   beforeEach(() => {
@@ -34,7 +39,7 @@ describe("enrollmentRequest repository invariants", () => {
 
   describe("create", () => {
     it("rejects when the course has no currently open intake", async () => {
-      mocks.transaction.course.findUnique.mockResolvedValue({ id: courseId, intakes: [] });
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, intakes: [] });
 
       await expect(create(courseId, studentId, "0771234567")).rejects.toMatchObject({
         code: "COURSE_NOT_ENROLLING",
@@ -43,8 +48,34 @@ describe("enrollmentRequest repository invariants", () => {
       expect(mocks.transaction.enrollmentRequest.create).not.toHaveBeenCalled();
     });
 
+    it("answers 404 for an unpublished course, without creating anything", async () => {
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, status: "DRAFT", intakes: [{ id: intakeId }] });
+      await expect(create(courseId, studentId, "0771234567")).rejects.toMatchObject({ statusCode: 404 });
+      expect(mocks.transaction.enrollmentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 for an archived course", async () => {
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, archivedAt: new Date(), intakes: [{ id: intakeId }] });
+      await expect(create(courseId, studentId, "0771234567")).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("refuses a request for a free (self-enrolled) course", async () => {
+      const freeService = { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" };
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, service: freeService, intakes: [{ id: intakeId }] });
+      await expect(create(courseId, studentId, "0771234567")).rejects.toMatchObject({ code: "COURSE_NOT_ENROLLING" });
+      expect(mocks.transaction.enrollmentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses a request from a student already enrolled in the open intake (M05-04)", async () => {
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, intakes: [{ id: intakeId }] });
+      mocks.transaction.enrollmentRequest.findFirst.mockResolvedValue(null);
+      mocks.transaction.enrollment.findFirst.mockResolvedValueOnce({ id: "enrollment-1" });
+      await expect(create(courseId, studentId, "0771234567")).rejects.toMatchObject({ code: "ALREADY_ENROLLED" });
+      expect(mocks.transaction.enrollmentRequest.create).not.toHaveBeenCalled();
+    });
+
     it("rejects a second open request from the same student for the same course", async () => {
-      mocks.transaction.course.findUnique.mockResolvedValue({ id: courseId, intakes: [{ id: intakeId }] });
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, intakes: [{ id: intakeId }] });
       mocks.transaction.enrollmentRequest.findFirst.mockResolvedValue({ id: "existing-request" });
 
       await expect(create(courseId, studentId, "0771234567")).rejects.toMatchObject({
@@ -55,7 +86,7 @@ describe("enrollmentRequest repository invariants", () => {
     });
 
     it("serializes concurrent submissions with an advisory lock keyed on course+student, then creates against the open intake", async () => {
-      mocks.transaction.course.findUnique.mockResolvedValue({ id: courseId, intakes: [{ id: intakeId }] });
+      mocks.transaction.course.findUnique.mockResolvedValue({ ...paidCourse, intakes: [{ id: intakeId }] });
       mocks.transaction.enrollmentRequest.findFirst.mockResolvedValue(null);
       mocks.transaction.enrollmentRequest.create.mockResolvedValue({ id: requestId });
 

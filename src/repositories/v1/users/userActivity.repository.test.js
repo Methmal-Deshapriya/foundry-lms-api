@@ -36,6 +36,7 @@ import {
   findPaymentsRecordedByUser,
   findStudentProjectsForUser,
 } from "./userActivity.repository.js";
+import { queryShapeProblems } from "../../../testUtils/prismaShape.js";
 
 const userId = "90000000-0000-4000-8000-000000000001";
 
@@ -110,5 +111,40 @@ describe("user activity repository", () => {
     expect(mocks.auditLogFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { actorUserId: userId }, take: 10 }),
     );
+  });
+});
+
+describe("user activity query shapes match the real schema (M10-01)", () => {
+  it("catches a removed relation", () => {
+    expect(queryShapeProblems("Enrollment", { include: { course: { include: { category: true } } } })).toEqual([
+      "Enrollment.course.category: no such field on Course",
+    ]);
+  });
+
+  it("every section's query uses fields that exist", async () => {
+    for (const fn of [mocks.enrollmentCount, mocks.paymentCount, mocks.certificateCount, mocks.studentProjectCount, mocks.enrollmentRequestCount, mocks.auditLogCount]) fn.mockResolvedValue(0);
+    for (const fn of [mocks.enrollmentFindMany, mocks.paymentFindMany, mocks.certificateFindMany, mocks.studentProjectFindMany, mocks.enrollmentRequestFindMany, mocks.auditLogFindMany]) fn.mockResolvedValue([]);
+    await Promise.all([
+      findEnrollmentsForUser(userId),
+      findManagedEnrollmentsForUser(userId),
+      findPaymentsRecordedByUser(userId),
+      findPaymentsForUser(userId),
+      findCertificatesForUser(userId),
+      findStudentProjectsForUser(userId),
+      findEnrollmentRequestsForUser(userId),
+      findAuditLogsForActor(userId),
+    ]);
+    const calls = [
+      ["Enrollment", mocks.enrollmentFindMany],
+      ["Payment", mocks.paymentFindMany],
+      ["Certificate", mocks.certificateFindMany],
+      ["StudentProject", mocks.studentProjectFindMany],
+      ["EnrollmentRequest", mocks.enrollmentRequestFindMany],
+      ["AuditLog", mocks.auditLogFindMany],
+    ];
+    for (const [model, fn] of calls) {
+      expect(fn).toHaveBeenCalled();
+      for (const [args] of fn.mock.calls) expect(queryShapeProblems(model, args)).toEqual([]);
+    }
   });
 });

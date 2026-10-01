@@ -33,8 +33,8 @@ export class ValidationError extends CustomError {
  * 401 Unauthorized — Use when the user is not logged in.
  */
 export class UnauthorizedError extends CustomError {
-  constructor(message = "Unauthorized request") {
-    super(message, 401, "UNAUTHORIZED");
+  constructor(message = "Unauthorized request", code = "UNAUTHORIZED") {
+    super(message, 401, code);
   }
 }
 
@@ -143,6 +143,26 @@ export class MethodNotAllowedError extends CustomError {
 export class NotModifiedError extends CustomError {
   constructor(message = "Resource not modified") {
     super(message, 304, "NOT_MODIFIED");
+  }
+}
+
+/**
+ * 429 Too Many Requests — for limits enforced in a service (per account),
+ * rather than by the per-request rate-limit middleware.
+ */
+export class TooManyRequestsError extends CustomError {
+  constructor(message = "Too many requests. Please try again later.", code = "TOO_MANY_REQUESTS") {
+    super(message, 429, code);
+  }
+}
+
+/**
+ * 503 Service Unavailable — a dependency (e.g. the email provider or its
+ * daily quota) can't serve this request right now; retrying later may work.
+ */
+export class ServiceUnavailableError extends CustomError {
+  constructor(message = "This service is temporarily unavailable.", code = "SERVICE_UNAVAILABLE") {
+    super(message, 503, code);
   }
 }
 

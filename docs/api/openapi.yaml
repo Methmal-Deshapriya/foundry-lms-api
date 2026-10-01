@@ -32,6 +32,10 @@ tags:
   - name: 13 Audit Logs
   - name: 14 Service Overview
   - name: 15 Object Storage
+  - name: 16 Payments
+  - name: 17 Notifications & Promotions
+  - name: 18 Partner Earnings
+  - name: 19 Student Profiles
 security:
   - cookieAuth: []
 paths:
@@ -296,6 +300,19 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/auth/change-password:
+    post:
+      tags: [01 Authentication]
+      operationId: changePassword
+      summary: Change password while signed in
+      x-access: AUTHENTICATED
+      description: Needs the current password. Ends every other session and sets a fresh HTTP-only authentication cookie on this one.
+      requestBody:
+        $ref: "#/components/requestBodies/ChangePassword"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
   /api/v1/auth/forgot-password:
     post:
       tags: [01 Authentication]
@@ -408,6 +425,45 @@ paths:
       summary: Demote admin to student
       x-access: SUPER_ADMIN
       description: Super-admin only. Super admins cannot be demoted through this route.
+      parameters:
+        - $ref: "#/components/parameters/TargetUserId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users/{targetUserId}/revoke-sessions:
+    post:
+      tags: [02 Users]
+      operationId: revokeUserSessions
+      summary: Sign a user out of every session
+      x-access: SUPER_ADMIN
+      description: "Super-admin only. Ends every session the user has (securityVersion), audited. Not for your own account (code review M10-05)."
+      parameters:
+        - $ref: "#/components/parameters/TargetUserId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users/{targetUserId}/suspend:
+    post:
+      tags: [02 Users]
+      operationId: suspendUser
+      summary: Suspend an account
+      x-access: SUPER_ADMIN
+      description: "Super-admin only. The account can't sign in and every session is refused until reactivated. Refuses your own account and the last super admin who can sign in (code review M10-05)."
+      parameters:
+        - $ref: "#/components/parameters/TargetUserId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/users/{targetUserId}/reactivate:
+    post:
+      tags: [02 Users]
+      operationId: reactivateUser
+      summary: Reactivate a suspended account
+      x-access: SUPER_ADMIN
+      description: "Super-admin only. Lets a suspended account sign in again (code review M10-05)."
       parameters:
         - $ref: "#/components/parameters/TargetUserId"
       responses:
@@ -699,6 +755,11 @@ paths:
         - $ref: "#/components/parameters/CourseIdFilter"
         - $ref: "#/components/parameters/IntakeStatusFilter"
         - $ref: "#/components/parameters/SearchQuery"
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, enum: [catalog, recent] }
+          description: "recent lists the newest intakes first."
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -1028,6 +1089,34 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/{enrollmentId}/sessions/{courseSessionId}/recording:
+    get:
+      tags: [09 Enrollments & Classroom]
+      operationId: openSessionRecording
+      summary: "Open a session's uploaded recording"
+      x-access: AUTHENTICATED
+      description: "Re-checks classroom access, then redirects (302) to a freshly signed link that plays inline."
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+        - $ref: "#/components/parameters/CourseSessionId"
+      responses:
+        "302":
+          description: Redirect to the signed file link.
+
+  /api/v1/enrollments/{enrollmentId}/sessions/{courseSessionId}/material:
+    get:
+      tags: [09 Enrollments & Classroom]
+      operationId: openSessionMaterial
+      summary: "Download a session's uploaded material"
+      x-access: AUTHENTICATED
+      description: "Re-checks classroom access, then redirects (302) to a freshly signed download link."
+      parameters:
+        - $ref: "#/components/parameters/EnrollmentId"
+        - $ref: "#/components/parameters/CourseSessionId"
+      responses:
+        "302":
+          description: Redirect to the signed file link.
 
   /api/v1/enrollments/{enrollmentId}/sessions/{courseSessionId}/complete:
     post:
@@ -1390,6 +1479,30 @@ paths:
         "200":
           $ref: "#/components/responses/Success"
 
+  /api/v1/projects/{projectId}/visibility:
+    patch:
+      tags: [12 Projects]
+      operationId: setMyProjectVisibility
+      summary: "Show or hide my project on the public showcase"
+      x-access: STUDENT
+      description: "Allowed in any review status, so an approved project can be taken down."
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isPublic]
+              properties:
+                isPublic: { type: boolean }
+            example:
+              isPublic: false
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
   /api/v1/projects/{projectId}:
     get:
       tags: [12 Projects]
@@ -1510,8 +1623,8 @@ paths:
       tags: [15 Object Storage]
       operationId: createObjectUploadIntent
       summary: Create a short-lived direct R2 upload intent
-      x-access: ADMIN
-      description: Creates a pending object record and a presigned PUT URL. Cloudflare credentials are never returned to the client.
+      x-access: AUTHENTICATED
+      description: Creates a pending object record and a presigned PUT URL. Cloudflare credentials are never returned to the client. Admins upload any purpose; students only their own project thumbnail or profile picture (checked per purpose in the service).
       requestBody:
         $ref: "#/components/requestBodies/CreateObjectUploadIntent"
       responses:
@@ -1523,7 +1636,7 @@ paths:
       tags: [15 Object Storage]
       operationId: completeObjectUpload
       summary: Verify and finalize a direct R2 upload
-      x-access: ADMIN
+      x-access: AUTHENTICATED
       parameters:
         - $ref: "#/components/parameters/StoredObjectId"
       responses:
@@ -1538,6 +1651,996 @@ paths:
       x-access: ADMIN
       parameters:
         - $ref: "#/components/parameters/StoredObjectId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/enrollments/at-risk:
+    get:
+      tags: [09 Enrollments & Classroom]
+      operationId: listAtRiskStudents
+      summary: "List students who have gone quiet for 14+ days"
+      x-access: ADMIN
+      description: "Active enrollments with no session completed in the last 14 days, for a WhatsApp nudge."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/storage/cleanup:
+    post:
+      tags: [15 Object Storage]
+      operationId: runStorageCleanup
+      summary: "[DESTRUCTIVE] Preview or delete unreferenced stored objects"
+      x-access: SUPER_ADMIN
+      description: "dryRun defaults to true (preview only); send dryRun false to delete."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dryRun: { type: boolean, default: true }
+            example:
+              dryRun: true
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/storage/cleanup/scheduled:
+    post:
+      tags: [15 Object Storage]
+      operationId: runScheduledStorageCleanup
+      summary: "[DESTRUCTIVE] Scheduled storage cleanup (GitHub Actions)"
+      x-access: PUBLIC
+      description: "Authorized by the x-cleanup-secret header (STORAGE_CLEANUP_SECRET), not a login. Answers 404 to anything else."
+      security: []
+      parameters:
+        - name: x-cleanup-secret
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments:
+    get:
+      tags: [16 Payments]
+      operationId: listPayments
+      summary: "List the payment ledger"
+      x-access: SUPER_ADMIN
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "Start of the range (inclusive)."
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "End of the range (inclusive)."
+        - name: serviceId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: courseId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: intakeId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: method
+          in: query
+          required: false
+          schema: { type: string, enum: [CASH, BANK_TRANSFER, ONLINE, OTHER, NONE] }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string, enum: [FULL, PARTIAL, TOP_UP, REFUND, REVERSAL] }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: summary
+          in: query
+          required: false
+          schema: { type: string, enum: ["true", "false"] }
+          description: "false skips the totals; used by the CSV export."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments/outstanding:
+    get:
+      tags: [16 Payments]
+      operationId: listOutstandingPayments
+      summary: "List students with a balance still owed"
+      x-access: SUPER_ADMIN
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments/summary/monthly:
+    get:
+      tags: [16 Payments]
+      operationId: getMonthlyPaymentSummary
+      summary: "Monthly payment totals for a year"
+      x-access: SUPER_ADMIN
+      parameters:
+        - name: year
+          in: query
+          required: false
+          schema: { type: integer, minimum: 2020, maximum: 2100 }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments/{paymentId}:
+    get:
+      tags: [16 Payments]
+      operationId: getPayment
+      summary: "Get one ledger entry"
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments/{paymentId}/refund:
+    post:
+      tags: [16 Payments]
+      operationId: refundPayment
+      summary: "Record a refund against an incoming payment"
+      x-access: SUPER_ADMIN
+      description: "Adds a negative REFUND entry; the original entry is never edited."
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, reason]
+              properties:
+                amount: { type: number, exclusiveMinimum: 0 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+                method: { type: string, enum: [CASH, BANK_TRANSFER, ONLINE, OTHER], nullable: true }
+                paidAt: { type: string, format: date-time }
+            example:
+              amount: 5000
+              reason: "Student withdrew in week one."
+              method: "BANK_TRANSFER"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments/{paymentId}/reverse:
+    post:
+      tags: [16 Payments]
+      operationId: reversePayment
+      summary: "Reverse a mistaken ledger entry"
+      x-access: SUPER_ADMIN
+      description: "Adds an equal and opposite REVERSAL entry."
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+            example:
+              reason: "Entered against the wrong student."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/payments/{paymentId}/details:
+    patch:
+      tags: [16 Payments]
+      operationId: updatePaymentDetails
+      summary: "Complete a payment's method, date, reference or proof"
+      x-access: SUPER_ADMIN
+      description: "Only descriptive details; the amount, type and enrollment are never editable."
+      parameters:
+        - $ref: "#/components/parameters/PaymentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                method: { type: string, enum: [CASH, BANK_TRANSFER, ONLINE, OTHER], nullable: true }
+                paidAt: { type: string, format: date-time }
+                externalReference: { type: string, maxLength: 160, nullable: true }
+                proofObjectId: { type: string, format: uuid, nullable: true }
+            example:
+              method: "BANK_TRANSFER"
+              externalReference: "BOC-778812"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/promotions/active:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: getActivePromotion
+      summary: "Get the promotion banner currently live on the landing page"
+      x-access: PUBLIC
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/me:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: listMyNotifications
+      summary: "List my notifications"
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/me/read-all:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: markAllNotificationsRead
+      summary: "Mark all my notifications read"
+      x-access: AUTHENTICATED
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/me/{notificationId}/read:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: markNotificationRead
+      summary: "Mark one notification read"
+      x-access: AUTHENTICATED
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/me/{notificationId}/dismiss:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: dismissNotification
+      summary: "Dismiss one notification"
+      x-access: AUTHENTICATED
+      description: "Payment reminders can't be dismissed (403)."
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/interests/{courseId}:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: getMyCourseInterest
+      summary: "Check whether I asked to be notified when a course opens"
+      x-access: AUTHENTICATED
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: addMyCourseInterest
+      summary: "Notify me when this course opens"
+      x-access: AUTHENTICATED
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [17 Notifications & Promotions]
+      operationId: removeMyCourseInterest
+      summary: "Stop notifying me about this course"
+      x-access: AUTHENTICATED
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/promotions:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: listPromotions
+      summary: "List landing-page promotions"
+      x-access: ADMIN
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [DRAFT, PUBLISHED, ARCHIVED] }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: createPromotion
+      summary: "Create a promotion draft"
+      x-access: ADMIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [internalName, headline]
+              properties:
+                internalName: { type: string, maxLength: 80 }
+                headline: { type: string, minLength: 3, maxLength: 90 }
+                message: { type: string, maxLength: 200, nullable: true }
+                badge: { type: string, maxLength: 24, nullable: true }
+                theme: { type: string, enum: [DARK, LIGHT, RED], default: DARK }
+                imageObjectId: { type: string, format: uuid, nullable: true }
+                ctaLabel: { type: string, maxLength: 30, nullable: true }
+                ctaUrl: { type: string, maxLength: 300, nullable: true }
+                showCountdown: { type: boolean, default: false }
+                startsAt: { type: string, format: date-time, nullable: true }
+                endsAt: { type: string, format: date-time, nullable: true }
+            example:
+              internalName: "October intake push"
+              headline: "Enrollments open for the October intake"
+              badge: "New"
+              theme: "DARK"
+              ctaLabel: "Explore courses"
+              ctaUrl: "/explore"
+              showCountdown: false
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/promotions/{promotionId}:
+    put:
+      tags: [17 Notifications & Promotions]
+      operationId: updatePromotion
+      summary: "Update a promotion"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/PromotionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [internalName, headline]
+              properties:
+                internalName: { type: string, maxLength: 80 }
+                headline: { type: string, minLength: 3, maxLength: 90 }
+                message: { type: string, maxLength: 200, nullable: true }
+                badge: { type: string, maxLength: 24, nullable: true }
+                theme: { type: string, enum: [DARK, LIGHT, RED], default: DARK }
+                imageObjectId: { type: string, format: uuid, nullable: true }
+                ctaLabel: { type: string, maxLength: 30, nullable: true }
+                ctaUrl: { type: string, maxLength: 300, nullable: true }
+                showCountdown: { type: boolean, default: false }
+                startsAt: { type: string, format: date-time, nullable: true }
+                endsAt: { type: string, format: date-time, nullable: true }
+            example:
+              internalName: "October intake push"
+              headline: "Enrollments open for the October intake"
+              badge: "New"
+              theme: "DARK"
+              ctaLabel: "Explore courses"
+              ctaUrl: "/explore"
+              showCountdown: false
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [17 Notifications & Promotions]
+      operationId: deletePromotion
+      summary: "[DESTRUCTIVE] Delete a promotion"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/PromotionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/promotions/{promotionId}/publish:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: publishPromotion
+      summary: "Publish a promotion"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/PromotionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/promotions/{promotionId}/archive:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: archivePromotion
+      summary: "Archive a promotion"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/PromotionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: listAdminNotifications
+      summary: "List notifications (admin)"
+      x-access: ADMIN
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [DRAFT, PUBLISHED, ARCHIVED] }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: createNotification
+      summary: "Create a notification draft"
+      x-access: ADMIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, message, audience]
+              properties:
+                title: { type: string, minLength: 3, maxLength: 120 }
+                message: { type: string, maxLength: 1000 }
+                audience: { type: string, enum: [ALL_STUDENTS, COURSE, INTAKE, PARTIAL_PAYERS, COURSE_INTEREST] }
+                courseId: { type: string, format: uuid, nullable: true }
+                intakeId: { type: string, format: uuid, nullable: true }
+                linkLabel: { type: string, maxLength: 40, nullable: true }
+                linkUrl: { type: string, maxLength: 300, nullable: true, description: "A page path like /explore or a full https:// link." }
+                pinned: { type: boolean, default: false }
+                startsAt: { type: string, format: date-time, nullable: true }
+                endsAt: { type: string, format: date-time, nullable: true }
+            example:
+              title: "Orientation this Saturday"
+              message: "Join the welcome session at 10:00 AM."
+              audience: "ALL_STUDENTS"
+              linkLabel: "View courses"
+              linkUrl: "/my-courses"
+              pinned: false
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/reach:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: getNotificationReach
+      summary: "Count how many students an audience reaches"
+      x-access: ADMIN
+      parameters:
+        - name: audience
+          in: query
+          required: true
+          schema: { type: string, enum: [ALL_STUDENTS, COURSE, INTAKE, PARTIAL_PAYERS, COURSE_INTEREST] }
+        - name: courseId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: intakeId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/email-quota:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: getEmailQuota
+      summary: "Emails sent today and this month against the Resend limits"
+      x-access: ADMIN
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/interests/{courseId}:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: getCourseInterestCount
+      summary: "Count students waiting for a course to open"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/{notificationId}/email-recipients:
+    get:
+      tags: [17 Notifications & Promotions]
+      operationId: getNotificationEmailRecipients
+      summary: "Count who a payment reminder's email goes to, and how many already had it"
+      description: "Returns { total, alreadyEmailed, pending }. Publishing again with sendEmail emails only the pending students (code review M09-02)."
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/{notificationId}:
+    put:
+      tags: [17 Notifications & Promotions]
+      operationId: updateNotification
+      summary: "Update a notification"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, message, audience]
+              properties:
+                title: { type: string, minLength: 3, maxLength: 120 }
+                message: { type: string, maxLength: 1000 }
+                audience: { type: string, enum: [ALL_STUDENTS, COURSE, INTAKE, PARTIAL_PAYERS, COURSE_INTEREST] }
+                courseId: { type: string, format: uuid, nullable: true }
+                intakeId: { type: string, format: uuid, nullable: true }
+                linkLabel: { type: string, maxLength: 40, nullable: true }
+                linkUrl: { type: string, maxLength: 300, nullable: true, description: "A page path like /explore or a full https:// link." }
+                pinned: { type: boolean, default: false }
+                startsAt: { type: string, format: date-time, nullable: true }
+                endsAt: { type: string, format: date-time, nullable: true }
+            example:
+              title: "Orientation this Saturday"
+              message: "Join the welcome session at 10:00 AM."
+              audience: "ALL_STUDENTS"
+              linkLabel: "View courses"
+              linkUrl: "/my-courses"
+              pinned: false
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [17 Notifications & Promotions]
+      operationId: deleteNotification
+      summary: "[DESTRUCTIVE] Delete a notification"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/{notificationId}/publish:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: publishNotification
+      summary: "Publish a notification (optionally email payment reminders)"
+      x-access: ADMIN
+      description: "sendEmail is only honoured for PARTIAL_PAYERS reminders and checks the daily email quota first."
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sendEmail: { type: boolean, default: false }
+            example:
+              sendEmail: false
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/notifications/admin/{notificationId}/archive:
+    post:
+      tags: [17 Notifications & Promotions]
+      operationId: archiveNotification
+      summary: "Archive a notification"
+      x-access: ADMIN
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/overview:
+    get:
+      tags: [18 Partner Earnings]
+      operationId: getPartnerEarningsOverview
+      summary: "Each partner's earned, paid out and still owed"
+      x-access: SUPER_ADMIN
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "Start of the range (inclusive)."
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "End of the range (inclusive)."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/by-intake:
+    get:
+      tags: [18 Partner Earnings]
+      operationId: getPartnerEarningsByIntake
+      summary: "Revenue, expenses, profit and partner shares per intake"
+      x-access: SUPER_ADMIN
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "Start of the range (inclusive)."
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "End of the range (inclusive)."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/shares:
+    get:
+      tags: [18 Partner Earnings]
+      operationId: listPartnerShareSets
+      summary: "List partners and their split history"
+      x-access: SUPER_ADMIN
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [18 Partner Earnings]
+      operationId: createPartnerShareSet
+      summary: "Start a new partner split from a date"
+      x-access: SUPER_ADMIN
+      description: "Entries must cover every partner and add up to 100."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [effectiveFrom, entries]
+              properties:
+                effectiveFrom: { type: string, format: date-time }
+                note: { type: string, maxLength: 200, nullable: true }
+                entries:
+                  type: array
+                  items:
+                    type: object
+                    required: [partnerId, percent]
+                    properties:
+                      partnerId: { type: string, format: uuid }
+                      percent: { type: number, minimum: 0, maximum: 100 }
+            example:
+              effectiveFrom: "2027-01-01T00:00:00.000Z"
+              note: "New split from January"
+              entries:
+                - { partnerId: "{{partnerId}}", percent: 100 }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/expenses:
+    get:
+      tags: [18 Partner Earnings]
+      operationId: listExpenses
+      summary: "List expenses"
+      x-access: SUPER_ADMIN
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "Start of the range (inclusive)."
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "End of the range (inclusive)."
+        - name: category
+          in: query
+          required: false
+          schema: { type: string, enum: [ADVERTISING, INSTRUCTOR_FEES, SOFTWARE_HOSTING, VENUE, EQUIPMENT, TRANSPORT, OTHER] }
+        - name: intakeId
+          in: query
+          required: false
+          schema: { type: string }
+          description: "An intake id, or GENERAL for expenses not tied to one intake."
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [18 Partner Earnings]
+      operationId: createExpense
+      summary: "Record an expense"
+      x-access: SUPER_ADMIN
+      description: "OTHER needs a description of at least 3 characters. paidByPartnerId null means paid from the business account."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spentAt, amount, category]
+              properties:
+                spentAt: { type: string, format: date-time }
+                amount: { type: number, exclusiveMinimum: 0 }
+                category: { type: string, enum: [ADVERTISING, INSTRUCTOR_FEES, SOFTWARE_HOSTING, VENUE, EQUIPMENT, TRANSPORT, OTHER] }
+                description: { type: string, maxLength: 500, nullable: true }
+                intakeId: { type: string, format: uuid, nullable: true }
+                paidByPartnerId: { type: string, format: uuid, nullable: true }
+                receiptObjectId: { type: string, format: uuid, nullable: true }
+            example:
+              spentAt: "2026-10-01T06:30:00.000Z"
+              amount: 2500
+              category: "ADVERTISING"
+              description: "Facebook ads for the October intake"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/expenses/{expenseId}:
+    get:
+      tags: [18 Partner Earnings]
+      operationId: getExpense
+      summary: "Get one expense (with a receipt link)"
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/ExpenseId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/expenses/{expenseId}/reverse:
+    post:
+      tags: [18 Partner Earnings]
+      operationId: reverseExpense
+      summary: "Reverse a mistaken expense"
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/ExpenseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+            example:
+              reason: "Entered against the wrong student."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/payouts:
+    get:
+      tags: [18 Partner Earnings]
+      operationId: listPayouts
+      summary: "List payouts to partners"
+      x-access: SUPER_ADMIN
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "Start of the range (inclusive)."
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+          description: "End of the range (inclusive)."
+        - name: partnerId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [18 Partner Earnings]
+      operationId: createPayout
+      summary: "Record a payout to a partner"
+      x-access: SUPER_ADMIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partnerId, amount, paidAt]
+              properties:
+                partnerId: { type: string, format: uuid }
+                amount: { type: number, exclusiveMinimum: 0 }
+                paidAt: { type: string, format: date-time }
+                method: { type: string, enum: [CASH, BANK_TRANSFER, ONLINE, OTHER], nullable: true }
+                reference: { type: string, maxLength: 160, nullable: true }
+                note: { type: string, maxLength: 500, nullable: true }
+            example:
+              partnerId: "{{partnerId}}"
+              amount: 10000
+              paidAt: "2026-10-01T06:30:00.000Z"
+              method: "BANK_TRANSFER"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/partner-earnings/payouts/{payoutId}/reverse:
+    post:
+      tags: [18 Partner Earnings]
+      operationId: reversePayout
+      summary: "Reverse a mistaken payout"
+      x-access: SUPER_ADMIN
+      parameters:
+        - $ref: "#/components/parameters/PayoutId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+            example:
+              reason: "Entered against the wrong student."
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/profiles/me/publish:
+    post:
+      tags: [19 Student Profiles]
+      operationId: publishMyStudentProfile
+      summary: "Show my public profile again"
+      x-access: STUDENT
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [19 Student Profiles]
+      operationId: unpublishMyStudentProfile
+      summary: "Hide my public profile (withdraw consent)"
+      x-access: STUDENT
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/profiles/public/{profileSlug}:
+    get:
+      tags: [19 Student Profiles]
+      operationId: getPublicStudentProfile
+      summary: "Get a published student profile"
+      x-access: PUBLIC
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ProfileSlug"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+
+  /api/v1/profiles/me:
+    get:
+      tags: [19 Student Profiles]
+      operationId: getMyStudentProfile
+      summary: "Get my public profile settings"
+      x-access: STUDENT
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    put:
+      tags: [19 Student Profiles]
+      operationId: saveMyStudentProfile
+      summary: "Create or update my public profile"
+      x-access: STUDENT
+      description: "publishConsent must be true on every save."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, publishConsent]
+              properties:
+                slug: { type: string, minLength: 3, maxLength: 40, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
+                headline: { type: string, maxLength: 120, nullable: true }
+                bio: { type: string, maxLength: 600, nullable: true }
+                interests: { type: array, maxItems: 8, items: { type: string, maxLength: 30 } }
+                careerGoals: { type: array, maxItems: 5, items: { type: string, maxLength: 30 } }
+                linkedinUrl: { type: string, nullable: true }
+                githubUrl: { type: string, nullable: true }
+                portfolioUrl: { type: string, nullable: true }
+                avatarObjectId: { type: string, format: uuid, nullable: true }
+                publishConsent: { type: boolean, enum: [true] }
+            example:
+              slug: "nimal-perera"
+              headline: "Aspiring data analyst"
+              interests: ["Python", "Data"]
+              publishConsent: true
       responses:
         "200":
           $ref: "#/components/responses/Success"
@@ -1583,6 +2686,42 @@ components:
             $ref: "#/components/schemas/CatalogDeletionBlockedEnvelope"
 
   parameters:
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{paymentId}}"
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{notificationId}}"
+    PromotionId:
+      name: promotionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{promotionId}}"
+    ExpenseId:
+      name: expenseId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{expenseId}}"
+    PayoutId:
+      name: payoutId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "{{payoutId}}"
+    ProfileSlug:
+      name: profileSlug
+      in: path
+      required: true
+      schema: { type: string, maxLength: 40 }
+      example: "{{profileSlug}}"
     TargetUserId:
       name: targetUserId
       in: path
@@ -1888,6 +3027,19 @@ components:
           example:
             token: "{{resetToken}}"
             newPassword: "{{registrationPassword}}"
+    ChangePassword:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [currentPassword, newPassword]
+            properties:
+              currentPassword: { type: string, format: password }
+              newPassword: { type: string, minLength: 8, format: password }
+          example:
+            currentPassword: "{{registrationPassword}}"
+            newPassword: "{{newPassword}}"
     VerifyOtp:
       required: true
       content:

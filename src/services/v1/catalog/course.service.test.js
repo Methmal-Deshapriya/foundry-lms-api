@@ -75,6 +75,42 @@ describe("course service", () => {
   });
 });
 
+describe("editing a published course", () => {
+  const admin = { id: actorId, role: "ADMIN" };
+  const superAdmin = { id: actorId, role: "SUPER_ADMIN" };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    courseRepository.findById.mockResolvedValue(courseFixture({ status: "PUBLISHED" }));
+    courseRepository.update.mockImplementation(async (id, input) => courseFixture({ status: "PUBLISHED", ...input }));
+  });
+
+  it("refuses a price change from a regular admin", async () => {
+    await expect(updateCourseService(courseId, { price: 500 }, admin)).rejects.toMatchObject({ statusCode: 403, code: "PUBLISHED_COURSE_FIELD_LOCKED" });
+    expect(courseRepository.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link (slug) change from a regular admin", async () => {
+    await expect(updateCourseService(courseId, { slug: "new-link" }, admin)).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("lets a regular admin edit the copy, even when the form resends the unchanged price and slug", async () => {
+    await updateCourseService(courseId, { summary: "A sharper summary for the live course.", price: 1000, slug: "ai-ml-ignition" }, admin);
+    expect(courseRepository.update).toHaveBeenCalled();
+    expect(revalidatePublicCatalogCache).toHaveBeenCalled();
+  });
+
+  it("lets a super admin change the price", async () => {
+    await updateCourseService(courseId, { price: 1500 }, superAdmin);
+    expect(courseRepository.update).toHaveBeenCalledWith(courseId, expect.objectContaining({ price: 1500 }));
+  });
+
+  it("leaves drafts fully editable by any admin", async () => {
+    courseRepository.findById.mockResolvedValue(courseFixture({ status: "DRAFT" }));
+    await updateCourseService(courseId, { price: 1500, slug: "renamed" }, admin);
+    expect(courseRepository.update).toHaveBeenCalled();
+  });
+});
+
 describe("course analytics service", () => {
   beforeEach(() => vi.clearAllMocks());
 

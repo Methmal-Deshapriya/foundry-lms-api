@@ -13,11 +13,24 @@ if (!email || !password || password.length < 8) {
 
 const existing = await prisma.user.findUnique({ where: { email } });
 if (existing) {
+  // Anyone could have registered this address first, with a password only
+  // they know. Taking the account over means: the password given here,
+  // every old session ended, and a loud warning (code review M10-04).
   await prisma.user.update({
     where: { id: existing.id },
-    data: { role: "SUPER_ADMIN", emailVerified: true },
+    data: {
+      role: "SUPER_ADMIN",
+      emailVerified: true,
+      disabledAt: null,
+      password: await bcrypt.hash(password, 10),
+      securityVersion: { increment: 1 },
+    },
   });
-  console.log(`Existing user ${email} promoted to SUPER_ADMIN.`);
+  console.warn(
+    `WARNING: an account for ${email} already existed (role ${existing.role}, created ${existing.createdAt.toISOString()}).\n` +
+      "It is now a SUPER_ADMIN with the BOOTSTRAP_SUPER_ADMIN_PASSWORD you set; its old password and every old session no longer work.\n" +
+      "If you didn't create that account yourself, check the audit log for anything it did before today.",
+  );
 } else {
   await prisma.user.create({
     data: {

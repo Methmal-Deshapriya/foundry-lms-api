@@ -1,6 +1,6 @@
 import * as certificateService from "../../../services/v1/enrollments/certificate.service.js";
 import { ApiResponse } from "../../../utils/responseHandler.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
 
 /**
  * Certificate Controller
@@ -64,7 +64,7 @@ export async function getCertificateDetails(req, res, next) {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role);
+    const isAdmin = hasPermission(req.user.role, PERMISSIONS.CERTIFICATES_MANAGE);
 
     const certificate = await certificateService.getCertificateDetailsService(id, userId, isAdmin);
     return ApiResponse.send(res, certificate, "Certificate details fetched successfully");

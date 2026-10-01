@@ -5,7 +5,8 @@ import {
   createCourseSchema,
   updateCourseSchema,
 } from "../../../constants/v1/catalog/course.schema.js";
-import { ConflictError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
+import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { COURSE_CURRENCY } from "../../../constants/v1/catalog/catalog.constants.js";
@@ -22,10 +23,16 @@ function parse(schema, value) {
   return result.data;
 }
 
-function validatePricingPolicy(service, price) {
+function validatePricingPolicy(service, price, discountAmount = 0) {
   const accessType = service.accessType;
   if (accessType === "FREE" && Number(price) !== 0) throw new ValidationError("Free Learning courses must have zero price.", "price");
   if (accessType === "PAID" && Number(price) <= 0) throw new ValidationError("Paid courses must have a price greater than zero.", "price");
+  // The discount is fixed at creation and every full payment is
+  // price − discount, so it must stay below the price (code review M06-02).
+  if (accessType === "FREE" && Number(discountAmount) !== 0) throw new ValidationError("Free courses can't have a full-payment discount.", "discountAmount");
+  if (Number(discountAmount) > 0 && Number(price) <= Number(discountAmount)) {
+    throw new ValidationError(`The price must stay above the full-payment discount (${Number(discountAmount)}).`, "price");
+  }
 }
 
 export async function listCoursesAdminService(query) {
@@ -98,7 +105,7 @@ export async function createCourseService(data, actorId) {
   const service = await learningServiceRepository.findById(input.serviceId);
   if (!service) throw new NotFoundError("Learning service not found.");
   if (service.status === "ARCHIVED") throw new ConflictError("Learning service is archived.");
-  validatePricingPolicy(service, input.price);
+  validatePricingPolicy(service, input.price, input.discountAmount);
   if (input.thumbnailObjectId) {
     await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
   }
@@ -120,11 +127,44 @@ export async function createCourseService(data, actorId) {
   return toAdminCourse(course);
 }
 
-export async function updateCourseService(id, data, actorId) {
+// Once a course has left Draft, its price and its public link are owner
+// decisions: the price drives what every later payment and top-up is
+// recorded at, and the slug is every shared link and search result. Any
+// admin may still edit the rest of a live course (descriptions, images,
+// highlights) — decided 2026-10-01.
+const PUBLISH_GATED_FIELDS = ["price", "slug"];
+
+function changedPublishGatedFields(current, input) {
+  return PUBLISH_GATED_FIELDS.filter((field) => {
+    if (input[field] === undefined) return false;
+    return field === "price" ? Number(input.price) !== Number(current.price) : input[field] !== current[field];
+  });
+}
+
+/**
+ * @param {string} id
+ * @param {object} data
+ * @param {{ id: string, role: string } | string} actor - the signed-in user
+ *   (a bare id is accepted for older callers, and is treated as having no
+ *   publish rights).
+ */
+export async function updateCourseService(id, data, actor) {
+  const actorId = typeof actor === "string" ? actor : actor?.id;
+  const actorRole = typeof actor === "string" ? null : actor?.role;
   const input = parse(updateCourseSchema, data);
   const current = await repository.findById(id);
   if (!current) throw new NotFoundError("Course not found.");
-  if (input.price !== undefined) validatePricingPolicy(current.service, input.price);
+  const gatedChanges = current.status === "DRAFT" ? [] : changedPublishGatedFields(current, input);
+  if (gatedChanges.length && !hasPermission(actorRole, PERMISSIONS.CATALOG_PUBLISH)) {
+    throw new ForbiddenError(
+      `Only a super admin can change the ${gatedChanges.join(" or ")} of a course that has been published.`,
+      "PUBLISHED_COURSE_FIELD_LOCKED",
+    );
+  }
+  // Checked only when the price actually changes (the edit form resends it).
+  if (input.price !== undefined && Number(input.price) !== Number(current.price)) {
+    validatePricingPolicy(current.service, input.price, current.discountAmount);
+  }
   if (input.thumbnailObjectId) {
     await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
   }

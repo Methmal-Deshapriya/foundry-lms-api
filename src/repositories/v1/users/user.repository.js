@@ -95,3 +95,43 @@ export async function updateUser(id, data) {
     throw handlePrismaError(error);
   }
 }
+
+/**
+ * Change a user's role only if it is still `expectedRole`, and write the
+ * audit row in the same transaction: two concurrent changes can't both pass
+ * their checks, and a role change never goes unrecorded (code review M10-06).
+ * Every session ends (securityVersion). Returns null if the role changed
+ * meanwhile.
+ */
+export async function changeRoleAudited(id, expectedRole, newRole, audit) {
+  return prisma.$transaction(async (transaction) => {
+    const { count } = await transaction.user.updateMany({
+      where: { id, role: expectedRole },
+      data: { role: newRole, securityVersion: { increment: 1 } },
+    });
+    if (count !== 1) return null;
+    await transaction.auditLog.create({ data: audit });
+    return transaction.user.findUnique({ where: { id } });
+  });
+}
+
+/**
+ * Suspend (disabledAt = now) or reactivate (null) an account, end every
+ * session, and record it, in one transaction (code review M10-05).
+ * `revokeOnly` ends the sessions without changing the suspension.
+ */
+export async function updateAccessAudited(id, { disabledAt, revokeOnly = false }, audit) {
+  return prisma.$transaction(async (transaction) => {
+    const user = await transaction.user.update({
+      where: { id },
+      data: { securityVersion: { increment: 1 }, ...(revokeOnly ? {} : { disabledAt }) },
+    });
+    await transaction.auditLog.create({ data: audit });
+    return user;
+  });
+}
+
+/** Super admins who can still sign in. */
+export function countActiveSuperAdmins() {
+  return prisma.user.count({ where: { role: "SUPER_ADMIN", disabledAt: null } });
+}

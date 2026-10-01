@@ -1,4 +1,5 @@
-import { Prisma } from "@prisma/client";
+import { paymentBalance } from "../../../utils/paymentBalance.js";
+import { colomboYear } from "../../../utils/colomboTime.js";
 import * as repository from "../../../repositories/v1/payments/payment.repository.js";
 import {
   monthlySummaryQuerySchema,
@@ -30,9 +31,14 @@ function parse(schema, value) {
 
 const toNumber = (value) => Number(value ?? 0);
 
-/** FA-<year it was paid>-<6-digit sequence>, e.g. FA-2026-000123. */
+/**
+ * FA-<year it was recorded, Sri Lanka time>-<6-digit sequence>, e.g.
+ * FA-2026-000123. From createdAt, which never changes: correcting "Date
+ * received" later must not renumber a receipt already handed to a student
+ * (code review M03-11/M03-12).
+ */
 export function receiptNumber(payment) {
-  const year = new Date(payment.paidAt).getFullYear();
+  const year = colomboYear(payment.createdAt ?? payment.paidAt);
   return `FA-${year}-${String(payment.receiptSequence).padStart(6, "0")}`;
 }
 
@@ -84,10 +90,14 @@ function summarize(byType) {
 
 export async function getLedgerService(query) {
   const filters = parse(paymentLedgerFiltersSchema, query);
-  const [{ total, byType, entries }, outstanding] = await Promise.all([repository.findLedgerPage(filters), getOutstandingTotal()]);
+  const wantsSummary = filters.summary !== "false";
+  const [{ total, byType, entries }, outstanding] = await Promise.all([
+    repository.findLedgerPage(filters),
+    wantsSummary ? getOutstandingTotal() : null,
+  ]);
   return {
     entries: entries.map(toLedgerEntry),
-    summary: { ...summarize(byType), outstanding },
+    summary: wantsSummary ? { ...summarize(byType), outstanding } : null,
     pagination: { total, limit: filters.limit, offset: filters.offset, hasMore: filters.offset + entries.length < total },
   };
 }
@@ -115,8 +125,7 @@ async function loadOutstanding() {
   const rows = await repository.findOutstanding();
   return rows
     .map((enrollment) => {
-      const paid = enrollment.payments.reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
-      const owed = new Prisma.Decimal(enrollment.course.price).minus(paid);
+      const { agreed, netPaid: paid, owed } = paymentBalance(enrollment);
       return {
         enrollmentId: enrollment.id,
         enrolledAt: enrollment.createdAt,
@@ -130,9 +139,9 @@ async function loadOutstanding() {
         course: { id: enrollment.course.id, title: enrollment.course.title, serviceSlug: enrollment.course.service?.slug ?? null },
         intake: enrollment.intake,
         currency: enrollment.course.currency,
-        price: toNumber(enrollment.course.price),
+        price: toNumber(agreed),
         paid: toNumber(paid),
-        owed: Math.max(0, toNumber(owed)),
+        owed: toNumber(owed),
       };
     })
     .filter((row) => row.owed > 0);
@@ -234,7 +243,16 @@ export async function updatePaymentDetailsService(id, data, actorId) {
     entityType: ENTITY_TYPES.PAYMENT,
     entityId: id,
     description: `Updated details of payment ${receiptNumber(current)}.`,
-    metadata: { changedFields: Object.keys(input) },
+    // Before → after for every descriptive field changed, so a corrected
+    // date or reference can always be traced (code review M03-11).
+    metadata: {
+      changedFields: Object.keys(input),
+      changes: Object.fromEntries(
+        ["method", "paidAt", "externalReference", "proofObjectId"]
+          .filter((field) => input[field] !== undefined)
+          .map((field) => [field, { from: current[field] ?? null, to: field === "paidAt" ? new Date(input.paidAt) : input[field] ?? null }]),
+      ),
+    },
   });
   return getPaymentService(id);
 }

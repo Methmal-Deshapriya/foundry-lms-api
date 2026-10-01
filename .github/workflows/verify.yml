@@ -82,6 +82,15 @@ jobs:
       - name: Apply migrations to disposable PostgreSQL
         run: npx prisma migrate deploy
 
+      # The migrations are hand-written: prove the migrated database is
+      # exactly what schema.prisma describes (indexes, unique constraints,
+      # foreign-key actions), not just that the migrations apply
+      # (code review M10-12). Prints the difference, then fails on any.
+      - name: Check migrations match schema.prisma
+        run: |
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
       - name: Run populated learning pipeline
         run: npm run test:pipeline
 

@@ -3,6 +3,7 @@ import * as controller from "../../../controllers/v1/storage/storedObject.contro
 import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
 import { requireAnyPermission, requirePermission } from "../../../middlewares/requirePermission.js";
+import { studentUploadLimiter } from "../../../middlewares/rateLimiters.js";
 
 const router = express.Router();
 
@@ -23,6 +24,7 @@ router.post("/cleanup", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY
 router.post(
   "/uploads",
   requireAnyPermission(PERMISSIONS.STORAGE_MANAGE, PERMISSIONS.PROJECTS_SUBMIT),
+  studentUploadLimiter,
   controller.createUploadIntent,
 );
 router.post(

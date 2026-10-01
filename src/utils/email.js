@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import prisma from "./prisma.js";
+import { acquireTransactionLock } from "../repositories/v1/learning/transactionLock.repository.js";
 
 /**
  * Email Utility - The "Mailroom"
@@ -41,15 +42,19 @@ function getFromAddress() {
 // against Nodemailer's throw-on-failure contract, so this throws instead —
 // keeping every existing try/catch and `.catch()` call site correct
 // unchanged, rather than requiring a matching rewrite at every call site.
-async function send(message) {
+async function send(message, { preCounted = false } = {}) {
   const { error } = await getClient().emails.send(message);
   if (error) {
-    throw new Error(`Resend email delivery failed (${error.name}): ${error.message}`);
+    const failure = new Error(`Resend email delivery failed (${error.name}): ${error.message}`);
+    // Lets a bulk sender spot rate limiting and retry (code review M09-02).
+    failure.resendName = error.name;
+    throw failure;
   }
   // Count every successful send against today's (UTC) total, so bulk sends
   // can be checked against Resend's free-plan limits first. Best-effort: a
-  // counter failure must never fail the email itself.
-  countEmailSent().catch(() => {});
+  // counter failure must never fail the email itself. Bulk sends reserve
+  // their emails up front instead (reserveEmailQuota).
+  if (!preCounted) countEmailSent().catch(() => {});
 }
 
 // Resend's free plan: 100 emails/day, 3,000/month.
@@ -66,12 +71,12 @@ async function countEmailSent() {
 }
 
 /** Emails sent today and this month (UTC), as counted by this server. */
-export async function getEmailUsage() {
+export async function getEmailUsage(db = prisma) {
   const today = utcDay();
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const [day, month] = await Promise.all([
-    prisma.emailDailyUsage.findUnique({ where: { day: today } }),
-    prisma.emailDailyUsage.aggregate({ where: { day: { gte: monthStart } }, _sum: { count: true } }),
+    db.emailDailyUsage.findUnique({ where: { day: today } }),
+    db.emailDailyUsage.aggregate({ where: { day: { gte: monthStart } }, _sum: { count: true } }),
   ]);
   return {
     sentToday: day?.count ?? 0,
@@ -81,7 +86,57 @@ export async function getEmailUsage() {
   };
 }
 
-// Admin-written text is placed into email HTML — always escaped.
+/**
+ * Reserve `count` emails for a bulk send before sending any (code review
+ * M09-01). Under one lock, it reads the usage, asks `roomFor(usage)` how many
+ * the caller may use, and adds them to today's counter, so two bulk sends can
+ * never both fit into the same room. Returns `{ ok, room, day }`; give back
+ * what wasn't sent with releaseEmailQuota.
+ */
+export async function reserveEmailQuota(count, roomFor) {
+  return prisma.$transaction(async (transaction) => {
+    await acquireTransactionLock(transaction, "email-quota");
+    const room = roomFor(await getEmailUsage(transaction));
+    if (count > room) return { ok: false, room, day: null };
+    const day = utcDay();
+    if (count > 0) {
+      await transaction.emailDailyUsage.upsert({ where: { day }, create: { day, count }, update: { count: { increment: count } } });
+    }
+    return { ok: true, room, day };
+  });
+}
+
+/** Give back reserved emails that weren't sent (failures, skipped). */
+export async function releaseEmailQuota(day, count) {
+  if (!day || count <= 0) return;
+  await prisma.emailDailyUsage.updateMany({ where: { day }, data: { count: { decrement: count } } });
+}
+
+// The last few emails of the day are kept for administrator login codes, so
+// sign-up / reset / resend traffic (which anyone can trigger) can never use
+// up the quota and lock every admin out. Notifications keep their own,
+// larger reserve on top of this (notification.service.js EMAIL_RESERVE).
+export const ADMIN_LOGIN_EMAIL_RESERVE = 10;
+
+/**
+ * Whether an auth email of this kind may be sent now without breaking the
+ * daily/monthly quota. "admin" (login codes) may use the whole quota;
+ * "public" (verification codes, reset links) stops ADMIN_LOGIN_EMAIL_RESERVE
+ * short of it. Fails open if the counter itself can't be read — the counter
+ * is best-effort, and blocking every sign-up on a counter outage is worse.
+ */
+export async function hasAuthEmailBudget(kind = "public") {
+  try {
+    const usage = await getEmailUsage();
+    const reserve = kind === "admin" ? 0 : ADMIN_LOGIN_EMAIL_RESERVE;
+    return usage.sentToday < usage.dailyLimit - reserve && usage.sentThisMonth < usage.monthlyLimit - reserve;
+  } catch {
+    return true;
+  }
+}
+
+// Anything that isn't a fixed literal (admin-written text, student names,
+// course titles, URLs) is escaped before it goes into email HTML.
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -95,7 +150,7 @@ function escapeHtml(value) {
  * A payment-reminder notification sent as email (the only notification type
  * that can be emailed). `balances` lists what this student still owes.
  */
-export const sendPaymentReminderEmail = async (to, { studentName, title, message, balances, dashboardUrl }) => {
+export const sendPaymentReminderEmail = async (to, { studentName, title, message, balances, dashboardUrl }, options = {}) => {
   const rows = balances
     .map((balance) => `<li><strong>${escapeHtml(balance.courseTitle)}</strong>: ${escapeHtml(balance.owedLabel)} remaining</li>`)
     .join("");
@@ -110,7 +165,7 @@ export const sendPaymentReminderEmail = async (to, { studentName, title, message
       <p><a href="${escapeHtml(dashboardUrl)}">Open your Foundry Academy dashboard</a></p>
       <p style="color:#71717A;font-size:12px">Questions? Reply to our WhatsApp at 072 362 2112.</p>
     `,
-  });
+  }, options);
 };
 
 /**
@@ -125,7 +180,7 @@ export const sendPasswordResetEmail = async (to, resetUrl) => {
     subject: "Reset your Foundry LMS password",
     html: `
       <p>We received a request to reset your Foundry LMS password.</p>
-      <p><a href="${resetUrl}">Click here to choose a new password</a></p>
+      <p><a href="${escapeHtml(resetUrl)}">Click here to choose a new password</a></p>
       <p>This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
     `,
   });
@@ -185,10 +240,10 @@ export const sendEnrollmentRequestNotificationEmail = async (to, { courseTitle, 
   await send({
     from: getFromAddress(),
     to,
-    subject: `New enrollment request: ${courseTitle}`,
+    subject: `New enrollment request: ${String(courseTitle ?? "").replace(/\s+/g, " ")}`,
     html: `
-      <p>${studentName} requested to enroll in <strong>${courseTitle}</strong> (intake ${intakeCode}).</p>
-      <p><a href="${requestUrl}">Open the request</a> to contact the student and record payment once they've paid.</p>
+      <p>${escapeHtml(studentName)} requested to enroll in <strong>${escapeHtml(courseTitle)}</strong> (intake ${escapeHtml(intakeCode)}).</p>
+      <p><a href="${escapeHtml(requestUrl)}">Open the request</a> to contact the student and record payment once they've paid.</p>
     `,
   });
 };

@@ -4,9 +4,12 @@ vi.mock("../../../repositories/v1/learning/classroom.repository.js", () => ({
   findEnrollmentContext: vi.fn(), findVisibleSessions: vi.fn(), findCompletion: vi.fn(), createCompletion: vi.fn(), removeCompletion: vi.fn(),
 }));
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
+vi.mock("../storage/storedObject.service.js", () => ({
+  privateStoredObjectUrl: vi.fn(async (object, options = {}) => (object ? `https://signed.example/${object.objectKey}?inline=${Boolean(options.inline)}&ttl=${options.expiresIn ?? "default"}` : null)),
+}));
 
 import * as classroomRepository from "../../../repositories/v1/learning/classroom.repository.js";
-import { completeClassroomSessionService, getClassroomService, getClassroomSessionService, uncompleteClassroomSessionService } from "./classroom.service.js";
+import { completeClassroomSessionService, getClassroomService, getClassroomSessionService, getSessionFileService, uncompleteClassroomSessionService } from "./classroom.service.js";
 
 const enrollmentId = "a0000000-0000-4000-8000-000000000001";
 const userId = "a0000000-0000-4000-8000-000000000002";
@@ -98,5 +101,82 @@ describe("course classroom service", () => {
   it("does not let an administrator alter student completion", async () => {
     await expect(completeClassroomSessionService(enrollmentId, courseSessionId, { id: "admin-id", role: "ADMIN" })).rejects.toThrow(/only students/i);
     expect(classroomRepository.findEnrollmentContext).not.toHaveBeenCalled();
+  });
+});
+
+describe("classroom access rules (M07-13)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const student = { id: userId, role: "STUDENT" };
+
+  it.each([
+    ["a cancelled enrollment", enrollment({ status: "CANCELLED" })],
+    ["an unverified student", enrollment({ user: { id: userId, emailVerified: false } })],
+    ["a draft intake", enrollment({ intake: intake(false, { status: "DRAFT" }) })],
+    ["an active learner in a cancelled intake", enrollment({ intake: intake(false, { status: "CANCELLED" }) })],
+  ])("refuses %s", async (_label, row) => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(row);
+    await expect(getClassroomService(enrollmentId, student)).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("keeps a completed learner's classroom after the intake is cancelled (M07-09)", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ status: "COMPLETED", intake: intake(false, { status: "CANCELLED" }) }));
+    classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession(true)]);
+    await expect(getClassroomService(enrollmentId, student)).resolves.toMatchObject({ enrollment: { status: "COMPLETED" } });
+  });
+
+  it("refuses another student's enrollment", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment());
+    await expect(getClassroomService(enrollmentId, { id: "someone-else", role: "STUDENT" })).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe("uploaded session files (M07-01, M07-07)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const student = { id: userId, role: "STUDENT" };
+  const withFiles = () =>
+    curriculumSession(false, {
+      session: {
+        ...curriculumSession().session,
+        recordingUrl: null,
+        recordingObject: { status: "READY", scope: "PRIVATE", objectKey: "rec.mp4" },
+        materialObject: { status: "READY", scope: "PRIVATE", objectKey: "notes.pdf" },
+      },
+    });
+
+  it("puts an API path, not a signed link, in the classroom list", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment());
+    classroomRepository.findVisibleSessions.mockResolvedValue([withFiles()]);
+    const { sessions } = await getClassroomService(enrollmentId, student);
+    expect(sessions[0].recordingUrl).toBe(`/api/v1/enrollments/${enrollmentId}/sessions/${courseSessionId}/recording`);
+    expect(sessions[0].recordingIsFile).toBe(true);
+    expect(sessions[0].materialUrl).toBe(`/api/v1/enrollments/${enrollmentId}/sessions/${courseSessionId}/material`);
+  });
+
+  it("signs a fresh, inline, long-lived link for a recording on each request", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment());
+    classroomRepository.findVisibleSessions.mockResolvedValue([withFiles()]);
+    const url = await getSessionFileService(enrollmentId, courseSessionId, "recording", student);
+    expect(url).toBe("https://signed.example/rec.mp4?inline=true&ttl=14400");
+  });
+
+  it("signs a download link for a material", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment());
+    classroomRepository.findVisibleSessions.mockResolvedValue([withFiles()]);
+    await expect(getSessionFileService(enrollmentId, courseSessionId, "material", student)).resolves.toBe("https://signed.example/notes.pdf?inline=false&ttl=default");
+  });
+
+  it("refuses a session the learner can't see", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment());
+    classroomRepository.findVisibleSessions.mockResolvedValue([]);
+    await expect(getSessionFileService(enrollmentId, courseSessionId, "recording", student)).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe("progress of a completed enrollment (M07-10)", () => {
+  it("stays at 100% after more sessions are released", async () => {
+    classroomRepository.findEnrollmentContext.mockResolvedValue(enrollment({ status: "COMPLETED" }));
+    classroomRepository.findVisibleSessions.mockResolvedValue([curriculumSession(true), curriculumSession(false, { id: "bonus" })]);
+    const { progress } = await getClassroomService(enrollmentId, { id: userId, role: "STUDENT" });
+    expect(progress).toMatchObject({ completedCount: 2, availableSessionCount: 2, progressPercent: 100 });
   });
 });

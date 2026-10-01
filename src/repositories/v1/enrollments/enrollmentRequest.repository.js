@@ -69,15 +69,33 @@ export async function create(courseId, studentUserId, contactPhone) {
       await acquireTransactionLock(transaction, `enrollment-request:${courseId}:${studentUserId}`);
       const course = await transaction.course.findUnique({
         where: { id: courseId },
-        include: { intakes: { where: { status: "OPEN_ACTIVE" }, take: 1 } },
+        include: { service: true, intakes: { where: { status: "OPEN_ACTIVE" }, take: 1 } },
       });
-      if (!course) throw new NotFoundError("Course not found.");
+      // Hidden courses answer like missing ones: a request for an
+      // unpublished or archived course must not email every admin.
+      if (!course || course.status !== "PUBLISHED" || course.archivedAt) throw new NotFoundError("Course not found.");
+      // Requests are only for the paid, admin-enrolled path — the same
+      // policy enrollFromRequestService (assertPaidOpen) needs to fulfil one.
+      // Free courses are self-enrolled instead.
+      const policy = course.service;
+      const isPaidAdminEnrolled =
+        policy?.status === "ACTIVE" &&
+        policy.accessType === "PAID" &&
+        policy.courseMode === "SEASONAL" &&
+        policy.enrollmentMode === "ADMIN" &&
+        policy.paymentRequirement === "REQUIRED";
       const intake = course.intakes[0];
-      if (!intake) throw new ConflictError("This course is not currently enrolling.", "COURSE_NOT_ENROLLING");
+      if (!intake || !isPaidAdminEnrolled) throw new ConflictError("This course is not currently enrolling.", "COURSE_NOT_ENROLLING");
       const existing = await transaction.enrollmentRequest.findFirst({
         where: { courseId, studentUserId, status: { in: ["PENDING", "CONTACTED"] } },
       });
       if (existing) throw new ConflictError("You already have an open enrollment request for this course.", "ENROLLMENT_REQUEST_ALREADY_OPEN");
+      // Already holding a seat in this intake: nothing to request (M05-04).
+      const enrolled = await transaction.enrollment.findFirst({
+        where: { userId: studentUserId, intakeId: intake.id, status: { not: "CANCELLED" } },
+        select: { id: true },
+      });
+      if (enrolled) throw new ConflictError("You're already enrolled in this course's current intake.", "ALREADY_ENROLLED");
       return transaction.enrollmentRequest.create({
         data: { courseId, intakeId: intake.id, studentUserId, contactPhone, status: "PENDING" },
         include,

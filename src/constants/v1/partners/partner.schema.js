@@ -1,11 +1,15 @@
 import { z } from "zod";
 import { PAYMENT_METHODS } from "../enrollments/enrollment.schema.js";
+import { endOfColomboDay } from "../../../utils/colomboTime.js";
 
 export const EXPENSE_CATEGORIES = Object.freeze(["ADVERTISING", "INSTRUCTOR_FEES", "SOFTWARE_HOSTING", "VENUE", "EQUIPMENT", "TRANSPORT", "OTHER"]);
 
 const dateString = z.string().trim().refine((value) => !Number.isNaN(Date.parse(value)), "Enter a valid date.");
+// "Not in the future" means not after today in Sri Lanka. Any time on
+// today's Colombo date is fine, so a date picked as "today" (which the
+// client may stamp at any hour) is never refused (code review M03-02/13).
 const notInFuture = (label) =>
-  dateString.refine((value) => new Date(value).getTime() <= Date.now() + 5 * 60_000, `${label} can't be in the future.`);
+  dateString.refine((value) => new Date(value).getTime() <= endOfColomboDay().getTime(), `${label} can't be in the future.`);
 const money = (label) =>
   z.coerce.number({ error: `Enter the ${label}.` }).positive(`Enter the ${label}.`).max(99_999_999, "That amount is too large.");
 
@@ -72,7 +76,18 @@ export const createShareSetSchema = z
     effectiveFrom: dateString,
     note: z.string().trim().max(200).nullable().optional(),
     entries: z
-      .array(z.object({ partnerId: z.string().uuid(), percent: z.coerce.number().min(0).max(100) }))
+      .array(
+        z.object({
+          partnerId: z.string().uuid(),
+          // Stored as Decimal(5,2): more decimals would be rounded away after
+          // the 100% check passed (code review M03-15).
+          percent: z.coerce
+            .number()
+            .min(0)
+            .max(100)
+            .refine((value) => Math.abs(Math.round(value * 100) - value * 100) < 1e-6, "Use at most 2 decimal places."),
+        }),
+      )
       .min(1),
   })
   .strict("Only documented share fields are accepted.")

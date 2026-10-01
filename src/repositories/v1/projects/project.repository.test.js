@@ -22,6 +22,7 @@ import {
   createForEnrollment,
   findPublicById,
   review,
+  setVisibilityOwned,
   updatePendingOwned,
 } from "./project.repository.js";
 
@@ -75,6 +76,37 @@ describe("project repository security boundaries", () => {
       expect.stringContaining("pg_advisory_xact_lock"),
       "project:project-1",
     );
+    expect(mocks.transaction.studentProject.update).not.toHaveBeenCalled();
+  });
+
+  it("resubmits a rejected project for review when the student edits it (M08-02)", async () => {
+    mocks.transaction.studentProject.findUnique.mockResolvedValue({ id: "project-1", userId: "student-1", status: "REJECTED" });
+    mocks.transaction.studentProject.update.mockResolvedValue({ id: "project-1", status: "PENDING" });
+
+    await updatePendingOwned("project-1", "student-1", { title: "Fixed" });
+
+    expect(mocks.transaction.studentProject.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: { title: "Fixed", status: "PENDING", reviewedAt: null },
+    });
+  });
+
+  it("keeps a pending project pending when edited", async () => {
+    mocks.transaction.studentProject.findUnique.mockResolvedValue({ id: "project-1", userId: "student-1", status: "PENDING" });
+    await updatePendingOwned("project-1", "student-1", { title: "Changed" });
+    expect(mocks.transaction.studentProject.update.mock.calls[0][0].data).toEqual({ title: "Changed" });
+  });
+
+  it("lets the owner hide an approved project, under the project lock (M08-01)", async () => {
+    mocks.transaction.studentProject.findUnique.mockResolvedValue({ id: "project-1", userId: "student-1" });
+    await setVisibilityOwned("project-1", "student-1", false);
+    expect(mocks.transaction.$queryRawUnsafe).toHaveBeenCalledWith(expect.any(String), "project:project-1");
+    expect(mocks.transaction.studentProject.update).toHaveBeenCalledWith({ where: { id: "project-1" }, data: { isPublic: false } });
+  });
+
+  it("refuses to change the visibility of another student's project", async () => {
+    mocks.transaction.studentProject.findUnique.mockResolvedValue({ id: "project-1", userId: "someone-else" });
+    await expect(setVisibilityOwned("project-1", "student-1", false)).rejects.toMatchObject({ statusCode: 403 });
     expect(mocks.transaction.studentProject.update).not.toHaveBeenCalled();
   });
 

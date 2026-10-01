@@ -42,6 +42,9 @@ export async function bulkEnrollStudentsInCourseService(intakeId, data, actorId)
     if (!student) { results.push({ userId: input.userId, status: "FAILED", code: "INELIGIBLE_STUDENT", error: "Student is missing, unverified, or not a Student." }); continue; }
     try {
       const enrollment = await repository.createPaid(intakeId, input.userId, actorId, payment(input));
+      // One audit row per student, like a single enrollment, so "who
+      // enrolled X, and paid how?" is answerable for bulk too (M05-07).
+      recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.STUDENT_ENROLLED, entityType: ENTITY_TYPES.ENROLLMENT, entityId: enrollment.id, description: `Student ${student.email} enrolled in ${intake.code} (bulk).`, metadata: { studentId: student.id, intakeId, paymentStatus: enrollment.paymentStatus, bulk: true } });
       results.push({ userId: input.userId, status: "CREATED", enrollment: model.toAdminEnrollmentResponse(enrollment) });
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
@@ -53,7 +56,8 @@ export async function bulkEnrollStudentsInCourseService(intakeId, data, actorId)
     }
   }
   const created = results.filter(({ status }) => status === "CREATED").length;
-  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.STUDENTS_BULK_ENROLLED, entityType: ENTITY_TYPES.INTAKE, entityId: intakeId, description: `${created} of ${students.length} students enrolled in ${intake.code}.`, metadata: { intakeId, requested: students.length, created } });
+  const failed = results.filter(({ status }) => status === "FAILED").map(({ userId, code }) => ({ userId, code }));
+  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.STUDENTS_BULK_ENROLLED, entityType: ENTITY_TYPES.INTAKE, entityId: intakeId, description: `${created} of ${students.length} students enrolled in ${intake.code}.`, metadata: { intakeId, requested: students.length, created, createdUserIds: results.filter(({ status }) => status === "CREATED").map(({ userId }) => userId), failed } });
   return { results, summary: { requested: students.length, created, failed: students.length - created } };
 }
 
@@ -133,7 +137,9 @@ export const AT_RISK_DAYS = 14;
 export async function getAtRiskStudentsService() {
   const now = Date.now();
   const since = new Date(now - AT_RISK_DAYS * 86_400_000);
-  const candidates = await repository.findAtRiskCandidates(since);
+  const found = await repository.findAtRiskCandidates(since);
+  const truncated = found.length > repository.AT_RISK_LIMIT;
+  const candidates = found.slice(0, repository.AT_RISK_LIMIT);
   const progress = await repository.findProgressForEnrollments(candidates);
 
   const rows = candidates
@@ -161,5 +167,5 @@ export async function getAtRiskStudentsService() {
     .filter((row) => row.daysInactive >= AT_RISK_DAYS && row.availableSessionCount > 0 && row.completedCount < row.availableSessionCount)
     .sort((a, b) => b.daysInactive - a.daysInactive);
 
-  return { thresholdDays: AT_RISK_DAYS, rows };
+  return { thresholdDays: AT_RISK_DAYS, rows, truncated };
 }

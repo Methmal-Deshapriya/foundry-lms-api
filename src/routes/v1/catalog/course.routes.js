@@ -4,6 +4,7 @@ import * as intakeController from "../../../controllers/v1/catalog/intake.contro
 import * as enrollmentRequestController from "../../../controllers/v1/enrollments/enrollmentRequest.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
 import { requirePermission } from "../../../middlewares/requirePermission.js";
+import { enrollmentRequestLimiter } from "../../../middlewares/rateLimiters.js";
 import { PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 
 const router = express.Router();
@@ -16,7 +17,7 @@ router.get("/:courseId/intakes/defaults", requirePermission(PERMISSIONS.CATALOG_
 router.post("/:courseId/intakes", requirePermission(PERMISSIONS.CATALOG_EDIT_DRAFTS), intakeController.create);
 
 // A visitor clicking "Enroll" on a PAID course — see the rename plan §8a.
-router.post("/:courseId/enrollment-requests", requirePermission(PERMISSIONS.COURSES_SELF_ENROLL), enrollmentRequestController.create);
+router.post("/:courseId/enrollment-requests", requirePermission(PERMISSIONS.COURSES_SELF_ENROLL), enrollmentRequestLimiter, enrollmentRequestController.create);
 
 router.get("/", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.list);
 router.get("/:id/deletion-impact", requirePermission(PERMISSIONS.CATALOG_DELETE_PERMANENTLY), controller.deletionImpact);

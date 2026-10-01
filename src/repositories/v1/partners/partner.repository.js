@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../../utils/prisma.js";
+import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 
 /**
@@ -7,6 +8,15 @@ import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/
  */
 
 export const findPartners = () => prisma.partner.findMany({ where: { active: true }, orderBy: { displayOrder: "asc" } });
+
+// For the earnings calculation: every partner who holds a share in any
+// split, active or not. A partner leaving later must not make their share
+// of past revenue vanish from the totals (code review M03-21).
+export const findPartnersForEarnings = () =>
+  prisma.partner.findMany({
+    where: { OR: [{ active: true }, { shareEntries: { some: {} } }, { payouts: { some: {} } }, { paidExpenses: { some: {} } }] },
+    orderBy: { displayOrder: "asc" },
+  });
 
 export const findShareSets = () =>
   prisma.shareSet.findMany({
@@ -71,6 +81,9 @@ export async function createExpense(data) {
 
 export async function reverseExpense(id, actorId, reason) {
   return prisma.$transaction(async (transaction) => {
+    // Serializes reversals of one expense, so a double click or two admins
+    // at once can't both pass the "already reversed?" check (M03-03).
+    await acquireTransactionLock(transaction, `expense-reversal:${id}`);
     const original = await transaction.expense.findUnique({ where: { id }, include: { corrections: { select: { id: true } } } });
     if (!original) throw new NotFoundError("Expense not found.");
     if (original.kind === "REVERSAL") throw new ConflictError("A reversal can't itself be reversed.", "EXPENSE_NOT_REVERSIBLE");
@@ -122,6 +135,7 @@ export async function createPayout(data) {
 
 export async function reversePayout(id, actorId, reason) {
   return prisma.$transaction(async (transaction) => {
+    await acquireTransactionLock(transaction, `payout-reversal:${id}`);
     const original = await transaction.payout.findUnique({ where: { id }, include: { corrections: { select: { id: true } } } });
     if (!original) throw new NotFoundError("Payout not found.");
     if (original.kind === "REVERSAL") throw new ConflictError("A reversal can't itself be reversed.", "PAYOUT_NOT_REVERSIBLE");
@@ -148,11 +162,21 @@ export async function reversePayout(id, actorId, reason) {
 
 export async function createShareSet({ effectiveFrom, note, entries, createdByUserId }) {
   try {
-    return await prisma.shareSet.create({
-      data: { effectiveFrom: new Date(effectiveFrom), note: note ?? null, createdByUserId, entries: { create: entries.map((entry) => ({ partnerId: entry.partnerId, percent: entry.percent })) } },
-      select: { id: true },
+    return await prisma.$transaction(async (transaction) => {
+      // Two splits saved at the same moment can't both pass the
+      // "starts after the latest" check (code review M03-05).
+      await acquireTransactionLock(transaction, "partner-share-sets");
+      const latest = await transaction.shareSet.findFirst({ orderBy: { effectiveFrom: "desc" }, select: { effectiveFrom: true } });
+      if (latest && new Date(effectiveFrom) <= latest.effectiveFrom) {
+        throw new ConflictError("A new split must start after the latest one.", "SHARE_SET_BACKDATED");
+      }
+      return transaction.shareSet.create({
+        data: { effectiveFrom: new Date(effectiveFrom), note: note ?? null, createdByUserId, entries: { create: entries.map((entry) => ({ partnerId: entry.partnerId, percent: entry.percent })) } },
+        select: { id: true },
+      });
     });
   } catch (error) {
+    if (error instanceof ConflictError) throw error;
     throw handlePrismaError(error);
   }
 }

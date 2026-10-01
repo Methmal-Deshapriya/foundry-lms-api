@@ -107,6 +107,31 @@ export function validateRuntimeConfig() {
   if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
     throw new Error("TRUST_PROXY_HOPS must be a non-negative integer.");
   }
+  // Every rate limit keys on the client IP. Behind a host's proxy with
+  // TRUST_PROXY_HOPS=0, every visitor shares the proxy's IP and one bucket
+  // (10 failed logins site-wide lock everyone out). So production must set
+  // it on purpose: the number of proxies in front of the app (Render = 1,
+  // +1 if Cloudflare proxies in front). 0 is allowed only when the app is
+  // reached directly, confirmed with TRUST_PROXY_DIRECT=true.
+  if (process.env.NODE_ENV === "production") {
+    if (!process.env.TRUST_PROXY_HOPS?.trim()) {
+      throw new Error(
+        "TRUST_PROXY_HOPS is required in production: the number of proxies in front of the API (Render = 1, +1 behind Cloudflare).",
+      );
+    }
+    if (trustProxyHops === 0 && process.env.TRUST_PROXY_DIRECT !== "true") {
+      throw new Error(
+        "TRUST_PROXY_HOPS=0 in production means every visitor shares one rate-limit bucket behind a proxy. Set the real hop count, or TRUST_PROXY_DIRECT=true if the API is reached directly.",
+      );
+    }
+  }
+  const sameSite = process.env.AUTH_COOKIE_SAME_SITE?.trim().toLowerCase();
+  if (sameSite && !["lax", "strict", "none"].includes(sameSite)) {
+    throw new Error("AUTH_COOKIE_SAME_SITE must be lax, strict or none.");
+  }
+  if (sameSite === "none" && process.env.NODE_ENV !== "production") {
+    throw new Error("AUTH_COOKIE_SAME_SITE=none needs HTTPS, so it only works in production.");
+  }
   const instanceCount = Number(process.env.API_INSTANCE_COUNT ?? 1);
   if (!Number.isInteger(instanceCount) || instanceCount < 1) {
     throw new Error("API_INSTANCE_COUNT must be a positive integer.");

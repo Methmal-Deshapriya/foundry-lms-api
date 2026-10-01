@@ -1,4 +1,5 @@
 import * as repository from "../../../repositories/v1/partners/partner.repository.js";
+import { endOfColomboDay, startOfColomboDay } from "../../../utils/colomboTime.js";
 import {
   createExpenseSchema,
   createPayoutSchema,
@@ -31,7 +32,7 @@ function parse(schema, value) {
 const name = (user) => (user ? `${user.firstName} ${user.lastName}`.trim() : null);
 
 async function loadBase() {
-  const [partners, shareSets] = await Promise.all([repository.findPartners(), repository.findShareSets()]);
+  const [partners, shareSets] = await Promise.all([repository.findPartnersForEarnings(), repository.findShareSets()]);
   return {
     partners: partners.map((partner) => ({ id: partner.id, name: partner.name, displayOrder: partner.displayOrder })),
     shareSets: shareSets.map((set) => ({ effectiveFrom: set.effectiveFrom, entries: set.entries.map((entry) => ({ partnerId: entry.partnerId, percent: Number(entry.percent) })) })),
@@ -88,12 +89,18 @@ export async function createShareSetService(data, actorId) {
   if (input.entries.length !== partnerIds.size || input.entries.some((entry) => !partnerIds.has(entry.partnerId))) {
     throw new ValidationError("Give every partner a share (use 0% to leave someone out).", "entries");
   }
-  // History is never rewritten: a new split can only start after the latest one.
-  const latest = sets.at(-1);
-  if (latest && new Date(input.effectiveFrom) <= new Date(latest.effectiveFrom)) {
-    throw new ConflictError("A new split must start after the current one — past figures never change.", "SHARE_SET_BACKDATED");
+  // History is never rewritten: a new split starts at 00:00 Sri Lanka time
+  // on a day after today, so nothing already recorded (or paid out against)
+  // changes split (code review M03-05).
+  const effectiveFrom = startOfColomboDay(new Date(input.effectiveFrom));
+  if (effectiveFrom <= endOfColomboDay()) {
+    throw new ConflictError("A new split must start tomorrow or later — past figures never change.", "SHARE_SET_BACKDATED");
   }
-  const { id } = await repository.createShareSet({ ...input, createdByUserId: actorId });
+  const latest = sets.at(-1);
+  if (latest && effectiveFrom <= new Date(latest.effectiveFrom)) {
+    throw new ConflictError("A new split must start after the latest one.", "SHARE_SET_BACKDATED");
+  }
+  const { id } = await repository.createShareSet({ ...input, effectiveFrom, createdByUserId: actorId });
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.SHARE_SET_CREATED,

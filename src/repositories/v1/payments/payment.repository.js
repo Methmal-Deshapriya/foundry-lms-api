@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import prisma from "../../../utils/prisma.js";
+import { BALANCE_PAYMENT_SELECT, paymentBalance } from "../../../utils/paymentBalance.js";
 import { ConflictError, NotFoundError, handlePrismaError } from "../../../utils/Errors.js";
 import { acquireTransactionLock } from "../learning/transactionLock.repository.js";
 
@@ -21,8 +22,8 @@ const ledgerInclude = {
   intake: { select: { id: true, code: true } },
   recordedBy: { select: { firstName: true, lastName: true } },
   proofObject: true,
-  corrects: { select: { id: true, type: true, amount: true, receiptSequence: true, paidAt: true } },
-  corrections: { select: { id: true, type: true, amount: true, receiptSequence: true, paidAt: true, note: true }, orderBy: { createdAt: "asc" } },
+  corrects: { select: { id: true, type: true, amount: true, receiptSequence: true, paidAt: true, createdAt: true } },
+  corrections: { select: { id: true, type: true, amount: true, receiptSequence: true, paidAt: true, createdAt: true, note: true }, orderBy: { createdAt: "asc" } },
 };
 
 export function ledgerWhere({ from, to, serviceId, courseId, intakeId, method, type, q }) {
@@ -93,8 +94,8 @@ export function findMonthlyTotals(year) {
 }
 
 // Partial payers who still owe the rest of their course: not cancelled,
-// paymentStatus PARTIAL. Owed = course price − what they've paid (net of
-// any refunds/reversals).
+// paymentStatus PARTIAL. Owed = agreed price − what they've paid (net of
+// any refunds/reversals); see utils/paymentBalance.js.
 export async function findOutstanding() {
   const enrollments = await prisma.enrollment.findMany({
     where: { paymentStatus: "PARTIAL", status: { not: "CANCELLED" } },
@@ -105,7 +106,8 @@ export async function findOutstanding() {
       user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
       course: { select: { id: true, title: true, price: true, currency: true, service: { select: { slug: true } } } },
       intake: { select: { id: true, code: true } },
-      payments: { select: { amount: true } },
+      agreedPrice: true,
+      payments: { select: BALANCE_PAYMENT_SELECT },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -209,12 +211,27 @@ export async function createReversal(paymentId, actorId, { reason }) {
           method: original.method,
           note: reason,
           recordedByUserId: actorId,
+          // A reversal says "this entry never happened", so it sits on the
+          // original's date: the month, the date filters and the partner
+          // split all net to zero (code review M03-04). Refunds keep their
+          // own date, since they are real money going out.
+          paidAt: original.paidAt,
           correctsPaymentId: original.id,
         },
         select: { id: true },
       });
-      if (original.type === "TOP_UP" && original.enrollment.paymentStatus === "COMPLETED") {
-        await transaction.enrollment.update({ where: { id: original.enrollmentId }, data: { paymentStatus: "PARTIAL", paymentCompletedAt: null } });
+      // If the ledger no longer covers the price, the enrollment isn't "paid"
+      // any more: PARTIAL means "still owes" (M03-08). A reversed TOP_UP is
+      // the common case; a reversed FULL/PARTIAL (enrollment cancelled) is
+      // the other, and only matters if the enrollment is reactivated.
+      if (original.enrollment.paymentStatus === "COMPLETED") {
+        const after = await transaction.enrollment.findUnique({
+          where: { id: original.enrollmentId },
+          select: { agreedPrice: true, course: { select: { price: true } }, payments: { select: BALANCE_PAYMENT_SELECT } },
+        });
+        if (paymentBalance(after).owed.greaterThan(0)) {
+          await transaction.enrollment.update({ where: { id: original.enrollmentId }, data: { paymentStatus: "PARTIAL", paymentCompletedAt: null } });
+        }
       }
       return created.id;
     });

@@ -13,6 +13,23 @@ export async function getClassroom(req, res, next) {
   }
 }
 
+/**
+ * GET /enrollments/:enrollmentId/sessions/:courseSessionId/recording|material
+ * Redirects to a freshly signed R2 link. The student's browser follows it
+ * straight to the file; the link is never stored in a page (M07-01).
+ */
+export function getSessionFile(kind) {
+  return async (req, res, next) => {
+    try {
+      const url = await classroomService.getSessionFileService(req.params.enrollmentId, req.params.courseSessionId, kind, req.user);
+      res.set("Cache-Control", "no-store");
+      return res.redirect(302, url);
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
 export async function getSession(req, res, next) {
   try {
     const session = await classroomService.getClassroomSessionService(

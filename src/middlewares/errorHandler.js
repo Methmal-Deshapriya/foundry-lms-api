@@ -8,15 +8,20 @@ import { CustomError } from "../utils/Errors.js";
  * 
  * NOTE: Express knows this is an error handler because it has 4 arguments.
  */
+const firstLine = (message) => String(message ?? "").split("\n").find((line) => line.trim())?.trim().slice(0, 300) ?? "";
+
 const errorHandler = (err, req, res, next) => {
   // 1. Log the error for the developer to see in the terminal. `originalError`
   // (set by handlePrismaError) carries the real, unsanitized failure detail
   // for errors whose public-facing message is deliberately generic.
   const diagnosticError = err.originalError || err;
-  Logger.error(`${req.method} ${req.url} - Error: ${diagnosticError.message}`, {
+  // Only the first line of the message: a Prisma validation error renders
+  // the whole query call, argument values included (code review M10-09).
+  Logger.error(`${req.method} ${req.path} - Error: ${firstLine(diagnosticError.message)}`, {
     requestId: req.requestId,
+    errorName: diagnosticError.name,
+    errorCode: typeof diagnosticError.code === "string" ? diagnosticError.code : null,
     stack: diagnosticError.stack, // The "map" to where the error happened in code
-    details: err.details || null,
   });
 
   // 2. Determine if this is a "Known" (Custom) error or an "Unknown" (System) error.
@@ -27,6 +32,17 @@ const errorHandler = (err, req, res, next) => {
     field: err.field || null,
     details: err.details || null,
   };
+
+  // An oversized body is the client's problem, said plainly (M10-08).
+  if (err?.type === "entity.too.large") {
+    errorResponse = {
+      message: "The request is too large.",
+      statusCode: 413,
+      code: "PAYLOAD_TOO_LARGE",
+      field: null,
+      details: null,
+    };
+  }
 
   if (err?.type === "entity.parse.failed" && err?.status === 400) {
     errorResponse = {
@@ -39,10 +55,15 @@ const errorHandler = (err, req, res, next) => {
   }
 
   // 3. Handle specific non-CustomError cases (like standard JS Errors)
-  if (!(err instanceof CustomError) && err?.type !== "entity.parse.failed") {
+  if (!(err instanceof CustomError) && !["entity.parse.failed", "entity.too.large"].includes(err?.type)) {
     // If it's a generic error (like a typo), we hide the details from the user for security.
+    // Nothing from an unknown error reaches the client: not its message,
+    // field, details or its own status code (code review M10-08).
     errorResponse.message = "Internal Server Error";
     errorResponse.code = "INTERNAL_SERVER_ERROR";
+    errorResponse.statusCode = 500;
+    errorResponse.field = null;
+    errorResponse.details = null;
     
     // In development mode, we can show more info to help the developer.
     if (process.env.NODE_ENV === "development") {

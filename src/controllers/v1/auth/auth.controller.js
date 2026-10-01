@@ -41,7 +41,7 @@ export async function registerController(req, res, next) {
  */
 export async function loginController(req, res, next) {
   try {
-    const result = await authService.loginService(req.body);
+    const result = await authService.loginService(req.body, { requestId: req.requestId, ip: req.ip });
 
     if (result.requiresMfa) {
       return ApiResponse.send(
@@ -64,9 +64,7 @@ export async function loginController(req, res, next) {
 
 export async function verifyLoginChallengeController(req, res, next) {
   try {
-    const { user, token } = await authService.verifyLoginChallengeService(
-      req.body,
-    );
+    const { user, token } = await authService.verifyLoginChallengeService(req.body, { requestId: req.requestId, ip: req.ip });
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
     return ApiResponse.send(res, user, "Administrator login successful.");
   } catch (error) {
@@ -114,7 +112,7 @@ export async function forgotPasswordController(req, res, next) {
  */
 export async function resetPasswordController(req, res, next) {
   try {
-    await authService.resetPasswordService(req.body);
+    await authService.resetPasswordService(req.body, { requestId: req.requestId, ip: req.ip });
 
     const message = "Password reset successful.";
     return ApiResponse.send(res, { message }, message);
@@ -148,8 +146,25 @@ export async function resendOtpController(req, res, next) {
   try {
     await authService.resendOtpService(req.body);
 
-    const message = "A new verification code has been sent to your email.";
+    // Worded so it's true whether or not the address is registered.
+    const message =
+      "If that email is waiting for verification, a new code has been sent.";
     return ApiResponse.send(res, { message }, message);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Controller: Change the password while signed in.
+ * POST /v1/auth/change-password
+ * Every other session ends; this browser gets a fresh cookie.
+ */
+export async function changePasswordController(req, res, next) {
+  try {
+    const { user, token } = await authService.changePasswordService(req.user.id, req.body, { requestId: req.requestId, ip: req.ip });
+    res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
+    return ApiResponse.send(res, user, "Password changed. Other devices have been signed out.");
   } catch (error) {
     next(error);
   }

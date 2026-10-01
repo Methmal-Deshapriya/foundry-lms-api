@@ -9,8 +9,16 @@ import { DISTRICTS, AL_STREAMS } from "../users/users.constants.js";
 
 const PHONE_REGEX = /^0\d{9}$/;
 const PHONE_MESSAGE = "Invalid Sri Lankan phone number format (e.g., 0757451258)";
+// Names are shown in admin emails and pages, so markup characters are
+// refused outright (escaping still happens at every output, this is the
+// second layer).
 const personNameSchema = (label) =>
-  z.string().trim().min(1, `${label} is required`).max(80, `${label} is too long`);
+  z
+    .string()
+    .trim()
+    .min(1, `${label} is required`)
+    .max(80, `${label} is too long`)
+    .refine((value) => !/[<>]/.test(value), `${label} can't contain < or >`);
 const addressSchema = z
   .string()
   .trim()
@@ -78,6 +86,17 @@ export const resetPasswordSchema = z.object({
   token: z.string().min(1, "Reset token is required"),
   newPassword: passwordSchema,
 });
+
+// Schema for changing the password while signed in
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: passwordSchema,
+  })
+  .refine((data) => data.currentPassword !== data.newPassword, {
+    message: "Choose a password different from your current one.",
+    path: ["newPassword"],
+  });
 
 // Schema for verifying a newly registered email with an OTP code
 export const verifyOtpSchema = z.object({

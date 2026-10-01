@@ -2,7 +2,7 @@ import * as classroomRepo from "../../../repositories/v1/learning/classroom.repo
 import { toPublicCourseCard } from "../../../models/v1/catalog/catalog.model.js";
 import { toCertificateSummary } from "../../../models/v1/enrollments/enrollment.model.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { PERMISSIONS, hasPermission, isLearnerRole } from "../../../constants/v1/auth/permissions.constants.js";
 import {
   ConflictError,
   EnrollmentCompletedError,
@@ -22,8 +22,17 @@ const ACCESSIBLE_INTAKE_STATUSES = [
   "ARCHIVED",
 ];
 
-function isAdmin(role) {
-  return [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(role);
+// Staff who may open any student's classroom: whoever manages enrollments.
+function canOpenAnyClassroom(role) {
+  return hasPermission(role, PERMISSIONS.ENROLLMENTS_MANAGE);
+}
+
+// Students who finished an intake keep their classroom (recordings and
+// materials) even if the intake is cancelled afterwards; everyone else loses
+// access when it is cancelled (owner decision 2026-10-01, code review M07-09).
+function intakeAllowsAccess(intakeStatus, enrollmentStatus) {
+  if (ACCESSIBLE_INTAKE_STATUSES.includes(intakeStatus)) return true;
+  return intakeStatus === "CANCELLED" && enrollmentStatus === "COMPLETED";
 }
 
 export async function requireEnrollmentAccessService(
@@ -35,7 +44,7 @@ export async function requireEnrollmentAccessService(
   if (!enrollment) throw new NotFoundError("Enrollment not found.");
   if (
     enrollment.userId !== requester.id &&
-    !(adminsAllowed && isAdmin(requester.role))
+    !(adminsAllowed && canOpenAnyClassroom(requester.role))
   ) {
     throw new ForbiddenError("You do not have access to this enrollment.");
   }
@@ -45,7 +54,7 @@ export async function requireEnrollmentAccessService(
   if (!ACCESSIBLE_ENROLLMENT_STATUSES.includes(enrollment.status)) {
     throw new ForbiddenError("This enrollment does not have classroom access.");
   }
-  if (!ACCESSIBLE_INTAKE_STATUSES.includes(enrollment.intake.status)) {
+  if (!intakeAllowsAccess(enrollment.intake.status, enrollment.status)) {
     throw new ForbiddenError("This course is not currently accessible.");
   }
 
@@ -67,12 +76,22 @@ async function visibleSessions(context) {
   );
 }
 
-async function toSessionResponse(courseSession) {
+// Uploaded recordings and materials are not signed into the session list:
+// a signed link expires minutes after the page loads (code review M07-01).
+// The list points at an API address instead, which re-checks access and
+// redirects to a freshly signed link on every click (getSessionFileService).
+const isReadyFile = (object) => object?.status === "READY" && object.scope === "PRIVATE";
+const sessionFilePath = (enrollmentId, courseSessionId, kind) =>
+  `/api/v1/enrollments/${enrollmentId}/sessions/${courseSessionId}/${kind}`;
+
+async function toSessionResponse(courseSession, enrollmentId) {
   const completion = courseSession.completions?.[0] ?? null;
-  const [recordingObjectUrl, materialObjectUrl] = await Promise.all([
-    privateStoredObjectUrl(courseSession.session.recordingObject),
-    privateStoredObjectUrl(courseSession.session.materialObject),
-  ]);
+  const recordingObjectUrl = isReadyFile(courseSession.session.recordingObject)
+    ? sessionFilePath(enrollmentId, courseSession.id, "recording")
+    : null;
+  const materialObjectUrl = isReadyFile(courseSession.session.materialObject)
+    ? sessionFilePath(enrollmentId, courseSession.id, "material")
+    : null;
   return {
     courseSessionId: courseSession.id,
     orderIndex: courseSession.orderIndex ?? courseSession.historicalOrderIndex,
@@ -87,16 +106,22 @@ async function toSessionResponse(courseSession) {
     deliveryStatus: courseSession.deliveryStatus,
     availableAt: courseSession.availableAt,
     retired: Boolean(courseSession.retiredAt),
+    // True when recordingUrl/materialUrl is an API path (prefix it with the
+    // API origin) rather than an external link.
+    recordingIsFile: Boolean(recordingObjectUrl),
+    materialIsFile: Boolean(materialObjectUrl),
     completed: Boolean(completion),
     completedAt: completion?.completedAt ?? null,
   };
 }
 
-function progressFromRows(enrollmentId, courseId, intakeId, rows) {
-  const completedCount = rows.filter(
-    ({ completions }) => completions?.length > 0,
-  ).length;
+function progressFromRows(enrollmentId, courseId, intakeId, rows, enrollmentStatus) {
   const availableSessionCount = rows.length;
+  // A completed enrollment is 100%, even if sessions are released after it
+  // was completed — its completions are frozen (code review M07-10).
+  const completedCount = enrollmentStatus === "COMPLETED"
+    ? availableSessionCount
+    : rows.filter(({ completions }) => completions?.length > 0).length;
   return {
     enrollmentId,
     courseId,
@@ -144,12 +169,13 @@ export async function getClassroomService(enrollmentId, requester) {
         timezone: intake.timezone,
       },
     },
-    sessions: await Promise.all(rows.map(toSessionResponse)),
+    sessions: await Promise.all(rows.map((row) => toSessionResponse(row, enrollment.id))),
     progress: progressFromRows(
       enrollment.id,
       enrollment.courseId,
       enrollment.intakeId,
       rows,
+      enrollment.status,
     ),
   };
 }
@@ -160,7 +186,7 @@ async function requireVisibleSession(
   requester,
   { completionMutation = false } = {},
 ) {
-  if (completionMutation && requester.role !== ROLES.STUDENT) {
+  if (completionMutation && !isLearnerRole(requester.role)) {
     throw new ForbiddenError("Only students can change session completion.");
   }
   const context = await requireEnrollmentAccessService(enrollmentId, requester, {
@@ -179,7 +205,25 @@ async function requireVisibleSession(
 
 export async function getClassroomSessionService(enrollmentId, courseSessionId, requester) {
   const { row } = await requireVisibleSession(enrollmentId, courseSessionId, requester);
-  return toSessionResponse(row);
+  return toSessionResponse(row, enrollmentId);
+}
+
+// Recordings stream for hours (seeking re-fetches byte ranges), so their
+// link lives longer than a one-off material download.
+const RECORDING_LINK_SECONDS = 4 * 60 * 60;
+
+/**
+ * A fresh signed link to a session's uploaded recording or material, after
+ * the same access and visibility checks as the classroom itself. Recordings
+ * open inline (play in the browser); materials download (M07-01/M07-07).
+ */
+export async function getSessionFileService(enrollmentId, courseSessionId, kind, requester) {
+  if (!["recording", "material"].includes(kind)) throw new NotFoundError("File not found.");
+  const { row } = await requireVisibleSession(enrollmentId, courseSessionId, requester);
+  const object = kind === "recording" ? row.session.recordingObject : row.session.materialObject;
+  const url = await privateStoredObjectUrl(object, kind === "recording" ? { inline: true, expiresIn: RECORDING_LINK_SECONDS } : {});
+  if (!url) throw new NotFoundError("This session has no uploaded file of that kind.");
+  return url;
 }
 
 export async function completeClassroomSessionService(enrollmentId, courseSessionId, requester) {
@@ -244,5 +288,5 @@ export async function uncompleteClassroomSessionService(enrollmentId, courseSess
 export async function getProgressService(enrollmentId, requester) {
   const context = await requireEnrollmentAccessService(enrollmentId, requester);
   const rows = await visibleSessions(context);
-  return progressFromRows(context.enrollment.id, context.enrollment.courseId, context.enrollment.intakeId, rows);
+  return progressFromRows(context.enrollment.id, context.enrollment.courseId, context.enrollment.intakeId, rows, context.enrollment.status);
 }

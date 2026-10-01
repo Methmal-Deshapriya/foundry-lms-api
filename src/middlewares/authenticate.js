@@ -31,6 +31,10 @@ export const authenticate = async (req, res, next) => {
     if (!user) {
       throw new UnauthorizedError("User session not found. Please log in again.");
     }
+    // A suspended account has no working session (code review M10-05).
+    if (user.disabledAt) {
+      throw new UnauthorizedError("This account is suspended. Contact Foundry Academy.", "ACCOUNT_SUSPENDED");
+    }
     if ((decoded.sv ?? 0) !== (user.securityVersion ?? 0)) {
       throw new UnauthorizedError(
         "This session was invalidated by a security change. Please log in again.",

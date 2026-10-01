@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { colomboDateString } from "./colomboTime.js";
 
 /**
  * Generate a unique certificate code.
@@ -6,7 +7,8 @@ import crypto from "crypto";
  * verification codes cannot be feasibly enumerated.
  */
 export function generateCertificateCode() {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  // The date part is the Sri Lanka calendar day, like the printed date (M08-12).
+  const date = colomboDateString().replace(/-/g, "");
   const random = crypto.randomBytes(16).toString("hex").toUpperCase();
   return `FND-${date}-${random}`;
 }

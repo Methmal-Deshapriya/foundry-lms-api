@@ -39,6 +39,7 @@ router.get("/admin/email-quota", manage, controller.emailQuota);
 router.get("/admin/interests/:courseId", requirePermission(PERMISSIONS.CATALOG_VIEW_ADMIN), controller.interestCount);
 router.post("/admin", manage, controller.create);
 router.put("/admin/:id", manage, controller.update);
+router.get("/admin/:id/email-recipients", manage, controller.emailRecipients);
 router.post("/admin/:id/publish", manage, controller.publish);
 router.post("/admin/:id/archive", manage, controller.archive);
 router.delete("/admin/:id", manage, controller.remove);

@@ -14,6 +14,12 @@ import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { sendEnrollmentRequestNotificationEmail } from "../../../utils/email.js";
 import prisma from "../../../utils/prisma.js";
+import * as enrollmentRepository from "../../../repositories/v1/enrollments/enrollment.repository.js";
+import * as enrollmentModel from "../../../models/v1/enrollments/enrollment.model.js";
+
+async function getEnrollmentForResponse(enrollmentId) {
+  return enrollmentModel.toAdminEnrollmentResponse(await enrollmentRepository.findById(enrollmentId));
+}
 
 // PENDING is reachable only from DECLINED — reopening a declined request
 // rather than forcing the student to resubmit (Q2 of the 2026-08-30 system
@@ -173,9 +179,30 @@ export async function enrollFromRequestService(id, data, actorId) {
     await repository.retarget(id, targetIntakeId);
   }
 
-  const enrollment = await enrollStudentInCourseService(targetIntakeId, { userId: current.studentUserId, ...input }, actorId);
+  // The student may already be in that intake (e.g. an admin enrolled them
+  // directly from a WhatsApp enquiry). Link that enrollment and close the
+  // request, instead of failing forever with "already enrolled" (M05-04).
+  const existingEnrollment = await prisma.enrollment.findUnique({
+    where: { userId_intakeId: { userId: current.studentUserId, intakeId: targetIntakeId } },
+    select: { id: true, status: true },
+  });
+  if (existingEnrollment && existingEnrollment.status !== "CANCELLED") {
+    const linked = await prisma.$transaction((transaction) => repository.markEnrolled(transaction, id, existingEnrollment.id));
+    recordActionService({
+      actorUserId: actorId,
+      action: AUDIT_ACTIONS.ENROLLMENT_REQUEST_ENROLLED,
+      entityType: ENTITY_TYPES.ENROLLMENT_REQUEST,
+      entityId: id,
+      description: `Enrollment request ${id} linked to the student's existing enrollment ${existingEnrollment.id}.`,
+      metadata: { courseId: current.courseId, intakeId: targetIntakeId, enrollmentId: existingEnrollment.id, retargeted, alreadyEnrolled: true },
+    });
+    return { request: toResponse(linked), enrollment: await getEnrollmentForResponse(existingEnrollment.id) };
+  }
 
-  const request = await prisma.$transaction((transaction) => repository.markEnrolled(transaction, id, enrollment.id));
+  // createPaid marks this request ENROLLED in the same transaction that
+  // creates the enrollment, so the two can't come apart (M05-04).
+  const enrollment = await enrollStudentInCourseService(targetIntakeId, { userId: current.studentUserId, ...input }, actorId);
+  const request = await repository.findById(id);
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.ENROLLMENT_REQUEST_ENROLLED,

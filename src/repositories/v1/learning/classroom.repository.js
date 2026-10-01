@@ -34,8 +34,14 @@ export function findEnrollmentContext(enrollmentId) {
   });
 }
 
-export function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
-  return prisma.courseSession.findMany({
+/**
+ * Sessions a learner can see, in curriculum order: the live curriculum first
+ * (by position), then any retired-but-still-visible sessions in their former
+ * position. PostgreSQL sorts NULL last on ASC, so ordering by retiredAt put
+ * every retired session first (code review M07-02).
+ */
+export async function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
+  const rows = await prisma.courseSession.findMany({
     where: {
       intakeId,
       deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
@@ -45,13 +51,14 @@ export function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
       ],
       session: { status: { in: ["READY", "ARCHIVED"] } },
     },
-    orderBy: [
-      { retiredAt: "asc" },
-      { orderIndex: "asc" },
-      { historicalOrderIndex: "asc" },
-    ],
     include: courseSessionInclude(enrollmentId),
   });
+  return sortCurriculum(rows);
+}
+
+export function sortCurriculum(rows) {
+  const position = (row) => row.orderIndex ?? row.historicalOrderIndex ?? Number.MAX_SAFE_INTEGER;
+  return [...rows].sort((a, b) => Number(Boolean(a.retiredAt)) - Number(Boolean(b.retiredAt)) || position(a) - position(b));
 }
 
 export function findCompletion(enrollmentId, courseSessionId) {

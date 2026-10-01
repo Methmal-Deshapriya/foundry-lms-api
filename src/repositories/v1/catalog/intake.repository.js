@@ -12,6 +12,7 @@ export const intakeInclude = {
       enrollments: true,
       studentProjects: true,
       enrollmentRequests: true,
+      expenses: true,
     },
   },
 };
@@ -56,7 +57,10 @@ export async function findAdmin(filters, limit, offset) {
       where,
       take: limit,
       skip: offset,
-      orderBy: [{ course: { sortOrder: "asc" } }, { course: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
+      orderBy:
+        filters.sort === "recent"
+          ? [{ startDate: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }]
+          : [{ course: { sortOrder: "asc" } }, { course: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
       include: intakeInclude,
     }),
   ]);
@@ -224,6 +228,15 @@ export async function transitionStatus(id, expectedStatus, targetStatus) {
           data: { status: "CLOSED_ACTIVE" },
         });
       }
+      // The "Enrollment is open" notice ends when enrollment does, so it
+      // doesn't stay pinned for a course that can't be joined (code review
+      // M09-03). Only one intake per course is open at a time.
+      if (intake.status === "OPEN_ACTIVE" && targetStatus !== "OPEN_ACTIVE") {
+        await transaction.notification.updateMany({
+          where: { audience: "COURSE_INTEREST", courseId: intake.courseId, status: "PUBLISHED" },
+          data: { status: "ARCHIVED" },
+        });
+      }
       if (targetStatus === "COMPLETED") await assertCompletionReady(transaction, intake);
       if (targetStatus === "CANCELLED") {
         await transaction.enrollment.updateMany({ where: { intakeId: id, status: "ACTIVE" }, data: { status: "CANCELLED" } });
@@ -316,7 +329,7 @@ export async function removePermanently(id) {
       await acquireTransactionLock(transaction, `intake:${id}`);
       const intake = await transaction.intake.findUnique({
         where: { id },
-        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true, enrollmentRequests: true } } },
+        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true, enrollmentRequests: true, expenses: true } } },
       });
       if (!intake) return null;
       if (intake.status !== "ARCHIVED") throw new ConflictError("Archive the intake first.");
@@ -329,6 +342,9 @@ export async function removePermanently(id) {
       // 2026-08-30 system guide/audit.
       if (intake._count.enrollmentRequests) {
         throw new ConflictError("An intake with enrollment request history cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
+      }
+      if (intake._count.expenses) {
+        throw new ConflictError("An intake with recorded expenses cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
       }
       await transaction.intake.delete({ where: { id } });
       await recomputeCourseEnrollmentStatus(transaction, intake.courseId);

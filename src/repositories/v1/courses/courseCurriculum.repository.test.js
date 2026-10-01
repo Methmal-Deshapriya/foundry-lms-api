@@ -4,7 +4,10 @@ const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
     intake: { findUnique: vi.fn() },
+    session: { findUnique: vi.fn() },
     courseSession: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
@@ -23,7 +26,7 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("../../../utils/prisma.js", () => ({ default: mocks.prisma }));
 
-import { findCurriculum, reorder, updateDelivery } from "./courseCurriculum.repository.js";
+import { attach, findCurriculum, reorder, updateDelivery } from "./courseCurriculum.repository.js";
 
 const intakeId = "30000000-0000-4000-8000-000000000001";
 const courseSessionId = "30000000-0000-4000-8000-000000000002";
@@ -150,5 +153,45 @@ describe("course curriculum repository reads", () => {
       { id: "first", orderIndex: 1 },
     ], false)).rejects.toMatchObject({ code: "SEQUENCE_RISK_CONFIRMATION_REQUIRED" });
     expect(mocks.transaction.courseSession.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("scheduled releases leave a history (M07-04)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function scheduledThatReachedLearners() {
+    mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    prepareDelivery([{ id: courseSessionId, orderIndex: 1, deliveryStatus: "SCHEDULED", availableAt: new Date(Date.now() - 86_400_000), session: { title: "Second" } }]);
+    mocks.transaction.courseSession.findFirst.mockResolvedValue({
+      id: courseSessionId, intakeId, orderIndex: 1, firstReleasedAt: null,
+      deliveryStatus: "SCHEDULED", availableAt: new Date(Date.now() - 86_400_000), session: { status: "READY" },
+    });
+  }
+
+  it("records firstReleasedAt when a past-due scheduled session is withdrawn", async () => {
+    scheduledThatReachedLearners();
+    await updateDelivery(intakeId, courseSessionId, { status: "WITHDRAWN", availableAt: null, acknowledgeSequenceRisk: true });
+    const { data } = mocks.transaction.courseSession.update.mock.calls[0][0];
+    expect(data.firstReleasedAt).toBeInstanceOf(Date);
+  });
+
+  it("refuses to reset a session learners have seen to UNRELEASED", async () => {
+    scheduledThatReachedLearners();
+    await expect(updateDelivery(intakeId, courseSessionId, { status: "UNRELEASED", availableAt: null, acknowledgeSequenceRisk: true })).rejects.toMatchObject({ code: "SESSION_ALREADY_RELEASED" });
+  });
+});
+
+describe("attaching a session (M07-11)", () => {
+  it("locks the session before checking it is Ready", async () => {
+    vi.clearAllMocks();
+    mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    mocks.transaction.intake.findUnique
+      .mockResolvedValueOnce({ serviceId: "service-1", courseId: "c-1" })
+      .mockResolvedValueOnce({ id: intakeId, status: "OPEN_ACTIVE", course: { archivedAt: null, status: "PUBLISHED" }, service: { status: "ACTIVE" } });
+    mocks.transaction.session.findUnique.mockResolvedValue({ id: "s-1", status: "DRAFT" });
+    await expect(attach(intakeId, "s-1")).rejects.toThrow(/Only Ready sessions/);
+    const keys = mocks.transaction.$queryRawUnsafe.mock.calls.map(([, key]) => key);
+    expect(keys).toContain("session:s-1");
+    expect(keys.indexOf("session:s-1")).toBeGreaterThan(keys.indexOf(`intake:${intakeId}`));
   });
 });

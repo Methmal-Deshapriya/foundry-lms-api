@@ -93,6 +93,10 @@ export async function attach(intakeId, sessionId, requestedIndex) {
   try {
     return await prisma.$transaction(async (transaction) => {
       await lockIntake(transaction, intakeId);
+      // Same order as the library's own edits (intake, then session), so a
+      // concurrent "back to draft" / archive can't slip in between this
+      // read and the attach (code review M07-11).
+      await acquireTransactionLock(transaction, `session:${sessionId}`);
       const session = await transaction.session.findUnique({ where: { id: sessionId } });
       if (!session) throw new NotFoundError("Session not found.");
       if (session.status !== "READY") throw new ConflictError("Only Ready sessions can be attached.");
@@ -218,9 +222,18 @@ export async function updateDelivery(intakeId, courseSessionId, input) {
           ? all.filter((row) => row.orderIndex > item.orderIndex && ["RELEASED", "SCHEDULED"].includes(row.deliveryStatus))
           : [];
       if (blockers.length > 0 && !input.acknowledgeSequenceRisk) throw new SequenceRiskError("This delivery change breaks curriculum sequence.", { blockingSessions: blockers.map(({ id, session, orderIndex }) => ({ id, title: session.title, orderIndex })) });
+      // A scheduled session whose time has passed WAS released to learners,
+      // even though nobody pressed "Release": record that, so a later
+      // withdraw-and-remove keeps its history instead of deleting it, and a
+      // released session can't be quietly reset to UNRELEASED
+      // (code review M07-04).
+      const reachedLearners = item.deliveryStatus === "SCHEDULED" && item.availableAt && item.availableAt <= now;
       const firstReleasedAt = input.status === "RELEASED"
-        ? item.firstReleasedAt ?? new Date()
-        : item.firstReleasedAt;
+        ? item.firstReleasedAt ?? now
+        : item.firstReleasedAt ?? (reachedLearners ? item.availableAt : null);
+      if (input.status === "UNRELEASED" && firstReleasedAt) {
+        throw new ConflictError("This session has already been shown to learners. Withdraw it instead.", "SESSION_ALREADY_RELEASED");
+      }
       return transaction.courseSession.update({
         where: { id: item.id },
         data: { deliveryStatus: input.status, availableAt: input.status === "SCHEDULED" ? input.availableAt : null, firstReleasedAt },

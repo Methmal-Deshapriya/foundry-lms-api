@@ -84,6 +84,15 @@ export function hasPermission(role, permission) {
   return Boolean(role && ROLE_PERMISSIONS[role]?.includes(permission));
 }
 
+/**
+ * A learner account: one that enrolls in courses itself. Used where a rule
+ * is about "the student's own experience" (their notifications, their
+ * session progress) rather than an admin capability.
+ */
+export function isLearnerRole(role) {
+  return hasPermission(role, PERMISSIONS.COURSES_SELF_ENROLL);
+}
+
 export function permissionsForRole(role) {
   return [...(ROLE_PERMISSIONS[role] ?? [])];
 }

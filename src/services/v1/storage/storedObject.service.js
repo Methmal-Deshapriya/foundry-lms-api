@@ -16,9 +16,10 @@ import {
   storedObjectIdSchema,
 } from "../../../constants/v1/storage/storage.schema.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
+import { ConflictError, ForbiddenError, NotFoundError, TooManyRequestsError, ValidationError } from "../../../utils/Errors.js";
 import * as repository from "../../../repositories/v1/storage/storedObject.repository.js";
 import { recordActionService } from "../audit/audit.service.js";
+import Logger from "../../../utils/logger.js";
 import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
 
 const PURPOSE_POLICIES = Object.freeze({
@@ -187,6 +188,21 @@ function toResponse(object) {
   };
 }
 
+const MAX_STUDENT_PENDING_UPLOADS = 5;
+
+// A completed upload that failed a check is removed straight away — bytes
+// and all — so a mismatched or oversized file is never left sitting in the
+// (possibly public) bucket until the nightly cleanup (code review M04-01).
+async function rejectUpload(object, error) {
+  try {
+    await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+  } catch (deleteError) {
+    Logger.error(`[STORAGE_REJECT]: Could not delete rejected upload ${object.objectKey}`, deleteError);
+  }
+  await repository.markFailed(object.id);
+  throw error;
+}
+
 export async function createUploadIntentService(data, actorId, actorRole) {
   const config = requireR2();
   const input = parse(createUploadIntentSchema, data);
@@ -205,6 +221,16 @@ export async function createUploadIntentService(data, actorId, actorRole) {
       `File exceeds the ${Math.floor(maxBytes(policy) / 1_048_576)} MB limit.`,
       "sizeBytes",
     );
+  }
+
+  // A student can't stockpile signed upload URLs: at most a few uploads in
+  // flight per hour. Staff are exempt (code review M04-02; the per-hour
+  // request limit is in rateLimiters.js).
+  if (!hasPermission(actorRole, PERMISSIONS.STORAGE_MANAGE)) {
+    const inFlight = await repository.countRecentPending(actorId, new Date(Date.now() - 3_600_000));
+    if (inFlight >= MAX_STUDENT_PENDING_UPLOADS) {
+      throw new TooManyRequestsError("You have several uploads that haven't finished. Wait a little, then try again.", "TOO_MANY_PENDING_UPLOADS");
+    }
   }
 
   const id = randomUUID();
@@ -227,6 +253,7 @@ export async function createUploadIntentService(data, actorId, actorRole) {
       scope: object.scope,
       objectKey: object.objectKey,
       contentType: object.contentType,
+      contentLength: input.sizeBytes,
     });
   } catch (error) {
     await repository.markFailed(object.id);
@@ -278,27 +305,35 @@ export async function completeUploadService(idValue, actorId, actorRole) {
   const actualSize = Number(head.ContentLength ?? -1);
   const declaredSize = Number(object.declaredSizeBytes);
   if (actualSize !== declaredSize) {
-    throw new ConflictError(
+    await rejectUpload(object, new ConflictError(
       "Uploaded file size does not match the declared size. Upload the file again.",
       "UPLOAD_SIZE_MISMATCH",
-    );
+    ));
   }
   const actualType = String(head.ContentType ?? "").toLowerCase();
   if (actualType !== object.contentType) {
-    throw new ConflictError(
+    await rejectUpload(object, new ConflictError(
       "Uploaded file type does not match the declared type. Upload the file again.",
       "UPLOAD_TYPE_MISMATCH",
-    );
+    ));
   }
   const expectedDimensions = PURPOSE_POLICIES[object.purpose]?.expectedDimensions;
   if (expectedDimensions) {
     const buffer = await fetchObjectBuffer({ scope: object.scope, objectKey: object.objectKey });
-    const { width, height } = imageSize(buffer);
+    let dimensions;
+    try {
+      dimensions = imageSize(buffer);
+    } catch {
+      // Not a decodable image at all (corrupt or mislabeled) — a clear 400,
+      // not a 500 (code review M04-08).
+      await rejectUpload(object, new ValidationError("The file is not a valid image.", "dimensions"));
+    }
+    const { width, height } = dimensions;
     if (width !== expectedDimensions.width || height !== expectedDimensions.height) {
-      throw new ValidationError(
+      await rejectUpload(object, new ValidationError(
         `Image must be exactly ${expectedDimensions.width}×${expectedDimensions.height}px (uploaded file is ${width}×${height}px).`,
         "dimensions",
-      );
+      ));
     }
   }
   const ready = await repository.markReady(id, {
@@ -316,11 +351,18 @@ export async function completeUploadService(idValue, actorId, actorRole) {
   return toResponse(ready);
 }
 
-export async function getStoredObjectAccessService(idValue) {
+// Money documents belong to the super-admin-only payment ledger and partner
+// earnings; the general admin download route must not hand them out.
+const PAYMENTS_ONLY_PURPOSES = new Set(["PAYMENT_PROOF", "EXPENSE_RECEIPT"]);
+
+export async function getStoredObjectAccessService(idValue, actor) {
   requireR2();
   const id = parse(storedObjectIdSchema, idValue);
   const object = await repository.findById(id);
   if (!object || object.status !== "READY") throw new NotFoundError("Stored object not found.");
+  if (PAYMENTS_ONLY_PURPOSES.has(object.purpose) && !hasPermission(actor?.role, PERMISSIONS.PAYMENTS_VIEW)) {
+    throw new ForbiddenError("Only a super admin can open payment and expense documents.");
+  }
   return {
     object: toResponse(object),
     url: await createDownloadUrl({
@@ -331,7 +373,13 @@ export async function getStoredObjectAccessService(idValue) {
   };
 }
 
-export async function assertAttachableStoredObject(id, purpose) {
+/**
+ * Checks that a stored object can be attached to a record: uploaded,
+ * finished, and uploaded for this purpose. With `ownerUserId`, it must also
+ * have been uploaded by that user — for student-owned records (avatars,
+ * project thumbnails), so nobody can attach someone else's file.
+ */
+export async function assertAttachableStoredObject(id, purpose, { ownerUserId } = {}) {
   if (id == null) return null;
   requireR2();
   const field = {
@@ -355,6 +403,9 @@ export async function assertAttachableStoredObject(id, purpose) {
   if (object.purpose !== purpose) {
     throw new ValidationError("The uploaded file has the wrong purpose.", field);
   }
+  if (ownerUserId && object.uploadedByUserId !== ownerUserId) {
+    throw new ForbiddenError("You can only use a file you uploaded.");
+  }
   return object;
 }
 
@@ -362,13 +413,15 @@ export function toStoredObjectResponse(object) {
   return object ? toResponse(object) : null;
 }
 
-export async function privateStoredObjectUrl(object) {
+export async function privateStoredObjectUrl(object, { inline = false, expiresIn } = {}) {
   if (!object) return null;
   if (object.status !== "READY" || object.scope !== "PRIVATE") return null;
   return createDownloadUrl({
     scope: object.scope,
     objectKey: object.objectKey,
     fileName: object.originalFileName,
+    inline,
+    expiresIn,
   });
 }
 
@@ -381,8 +434,16 @@ export async function privateStoredObjectUrl(object) {
 export async function deleteStoredObjectService(object, actorId) {
   if (!object) return;
   requireR2();
-  await deleteObject({ scope: object.scope, objectKey: object.objectKey });
-  await repository.deleteById(object.id);
+  // Row first, and only if nothing references it any more (e.g. another
+  // promotion still uses the same image): then the bytes. An R2 failure
+  // after that leaves a harmless orphan file, never a dangling reference
+  // (code review M04-04/M04-07).
+  if (!(await repository.deleteIfUnreferenced(object.id))) return;
+  try {
+    await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+  } catch (error) {
+    Logger.error(`[STORAGE_ORPHAN]: Row deleted but R2 object ${object.objectKey} could not be removed`, error);
+  }
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.STORED_OBJECT_DELETED,
@@ -420,9 +481,15 @@ export async function cleanupStorageService({ dryRun = true, actorId = null } = 
   let failed = 0;
   for (const object of candidates) {
     try {
-      await deleteObject({ scope: object.scope, objectKey: object.objectKey });
-      await repository.deleteById(object.id);
+      // Re-checked at delete time: an object attached since the candidate
+      // query is skipped, and its bytes are kept (code review M04-04).
+      if (!(await repository.deleteIfUnreferenced(object.id))) continue;
       deleted += 1;
+      try {
+        await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+      } catch (error) {
+        Logger.error(`[STORAGE_ORPHAN]: Row deleted but R2 object ${object.objectKey} could not be removed`, error);
+      }
     } catch {
       failed += 1;
     }

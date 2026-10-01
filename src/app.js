@@ -33,6 +33,7 @@ import dashboardRoutes from "./routes/v1/dashboard/dashboard.routes.js";
 import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
 import storedObjectRoutes from "./routes/v1/storage/storedObject.routes.js";
 import { requestContext } from "./middlewares/requestContext.js";
+import { rejectForeignOrigins } from "./middlewares/originCheck.js";
 import { checkR2Readiness, isR2Enabled } from "./config/r2.js";
 
 const app = express();
@@ -42,6 +43,23 @@ const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
 if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
   app.set("trust proxy", trustProxyHops);
 }
+
+// Logs how the first request's client IP was resolved, once per process, so
+// a wrong TRUST_PROXY_HOPS shows up in the deploy logs (every rate limit
+// keys on req.ip). Compare `ip` with your own public IP after a deploy.
+let clientIpLogged = false;
+app.use((req, res, next) => {
+  if (!clientIpLogged && process.env.NODE_ENV === "production") {
+    clientIpLogged = true;
+    const forwarded = req.get("x-forwarded-for");
+    Logger.info("Client IP resolution check", {
+      ip: req.ip,
+      trustProxyHops,
+      forwardedHops: forwarded ? forwarded.split(",").length : 0,
+    });
+  }
+  next();
+});
 
 // 3. Base Middlewares. Security and CORS run before body parsing so malformed
 // requests receive the same protective headers as successful requests.
@@ -60,6 +78,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use(rejectForeignOrigins);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
@@ -86,7 +105,11 @@ app.use("/api/v1/partner-earnings", partnerRoutes);
 app.use("/api/v1/audit", auditRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/v1/storage", storedObjectRoutes);
-app.use("/api/postman", apiArtifactRoutes);
+// The Postman collection maps every endpoint and payload. It's a local
+// development aid, so production doesn't serve it at all.
+if (process.env.NODE_ENV !== "production") {
+  app.use("/api/postman", apiArtifactRoutes);
+}
 
 // 5. Health Check
 app.get("/api/health", (req, res) => {

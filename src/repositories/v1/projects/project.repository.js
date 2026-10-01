@@ -81,6 +81,8 @@ function projectSharedWhere({ q = "", intakeId }) {
             { user: { firstName: { contains: q, mode: "insensitive" } } },
             { user: { lastName: { contains: q, mode: "insensitive" } } },
             { user: { email: { contains: q, mode: "insensitive" } } },
+            // The admin search box says "title, student, or course" (M08-05).
+            { intake: { course: { title: { contains: q, mode: "insensitive" } } } },
           ],
         }
       : {}),
@@ -149,13 +151,36 @@ export async function updatePendingOwned(id, userId, data) {
       if (current.userId !== userId) {
         throw new ForbiddenError("You can only edit your own projects.");
       }
-      if (current.status !== "PENDING") {
+      // Pending projects can be edited; a rejected one can be edited and is
+      // then resubmitted for review (code review M08-02). Approved projects
+      // are final apart from their public visibility (setVisibilityOwned).
+      if (!["PENDING", "REJECTED"].includes(current.status)) {
         throw new ConflictError(
-          "This project was reviewed while you were editing it. Only pending projects can be changed.",
+          "This project was approved while you were editing it, so it can't be changed.",
           "PROJECT_REVIEW_STATE_CHANGED",
         );
       }
-      return transaction.studentProject.update({ where: { id }, data });
+      const resubmit = current.status === "REJECTED" ? { status: "PENDING", reviewedAt: null } : {};
+      return transaction.studentProject.update({ where: { id }, data: { ...data, ...resubmit } });
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+/**
+ * Show or hide one of the student's own projects on the public showcase and
+ * their profile — allowed in any status, so an approved project can be taken
+ * down (code review M08-01).
+ */
+export async function setVisibilityOwned(id, userId, isPublic) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `project:${id}`);
+      const current = await transaction.studentProject.findUnique({ where: { id }, select: { id: true, userId: true } });
+      if (!current) throw new NotFoundError("Project not found.");
+      if (current.userId !== userId) throw new ForbiddenError("You can only change your own projects.");
+      return transaction.studentProject.update({ where: { id }, data: { isPublic } });
     });
   } catch (error) {
     throw handlePrismaError(error);

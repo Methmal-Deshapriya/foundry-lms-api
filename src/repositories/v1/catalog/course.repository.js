@@ -198,6 +198,13 @@ export async function setPublication(id, publish) {
       if (publish && current.service.status !== "ACTIVE") {
         throw new ConflictError("Activate the parent learning service before publishing this course.");
       }
+      // Unpublishing hides the course but would leave its open intake taking
+      // sign-ups — close it deliberately first, as archiving already
+      // requires (owner decision 2026-10-01, code review M06-03).
+      if (!publish && current.status === "PUBLISHED") {
+        const openIntakes = await transaction.intake.count({ where: { courseId: id, status: "OPEN_ACTIVE" } });
+        if (openIntakes > 0) throw new ConflictError("Close this course's open intake before unpublishing it.", "COURSE_HAS_OPEN_INTAKE");
+      }
       return transaction.course.update({
         where: { id },
         data: { status: publish ? "PUBLISHED" : "DRAFT" },

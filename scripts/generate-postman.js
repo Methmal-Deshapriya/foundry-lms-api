@@ -40,6 +40,10 @@ const captureScripts = new Map([
   ["createEnrollmentRequest", [["enrollmentRequestId", "id"]]],
   ["issueCertificate", [["certificateId", "id"], ["certificateCode", "certificateCode"]]],
   ["submitProject", [["projectId", "id"]]],
+  ["createNotification", [["notificationId", "id"]]],
+  ["createPromotion", [["promotionId", "id"]]],
+  ["createExpense", [["expenseId", "id"]]],
+  ["createPayout", [["payoutId", "id"]]],
 ]);
 
 const environmentVariables = [
@@ -67,6 +71,14 @@ const environmentVariables = [
   ["certificateId", ""],
   ["certificateCode", ""],
   ["projectId", ""],
+  ["newPassword", ""],
+  ["paymentId", ""],
+  ["notificationId", ""],
+  ["promotionId", ""],
+  ["partnerId", ""],
+  ["expenseId", ""],
+  ["payoutId", ""],
+  ["profileSlug", ""],
   ["allowDestructiveRequests", "false"],
 ];
 

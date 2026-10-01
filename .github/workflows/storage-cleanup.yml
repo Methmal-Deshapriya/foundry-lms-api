@@ -31,7 +31,13 @@ jobs:
         run: |
           test -n "$API_BASE_URL" || { echo "API_BASE_URL secret is not set."; exit 1; }
           test -n "$STORAGE_CLEANUP_SECRET" || { echo "STORAGE_CLEANUP_SECRET secret is not set."; exit 1; }
-          curl --fail-with-body --silent --show-error --max-time 120 --retry 3 --retry-delay 20 --retry-all-errors \
-            -X POST "${API_BASE_URL%/}/api/v1/storage/cleanup/scheduled" \
-            -H "x-cleanup-secret: ${STORAGE_CLEANUP_SECRET}"
-          echo
+          # Each call removes up to 200 files; keep going while the API says
+          # there are more (at most 10 rounds), so a backlog clears in one
+          # night instead of 200 a day (code review M04-03).
+          for round in $(seq 1 10); do
+            response=$(curl --fail-with-body --silent --show-error --max-time 120 --retry 3 --retry-delay 20 --retry-all-errors \
+              -X POST "${API_BASE_URL%/}/api/v1/storage/cleanup/scheduled" \
+              -H "x-cleanup-secret: ${STORAGE_CLEANUP_SECRET}")
+            echo "Round ${round}: ${response}"
+            echo "${response}" | jq -e '.data.hasMore == true' > /dev/null || break
+          done

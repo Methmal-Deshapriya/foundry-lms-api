@@ -51,6 +51,9 @@ export const intakeAdminFiltersSchema = z.object({
   courseId: z.string().uuid().optional(),
   status: z.enum(INTAKE_STATUSES).optional(),
   q: z.string().trim().max(100).optional(),
+  // "recent": newest intakes first, for pickers that show one page (e.g.
+  // the expense dialog) so the current intakes are always in it (M03-18).
+  sort: z.enum(["catalog", "recent"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

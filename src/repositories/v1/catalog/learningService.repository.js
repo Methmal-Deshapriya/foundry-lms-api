@@ -238,6 +238,10 @@ export async function transitionStatus(id, expectedStatus, status) {
       const current = await transaction.learningService.findUnique({ where: { id }, include });
       if (!current) throw new NotFoundError("Learning service not found.");
       if (current.status !== expectedStatus) throw new ConflictError("Learning service status changed. Refresh and try again.", "STALE_LEARNING_SERVICE_STATUS");
+      if (status === "DRAFT") {
+        const openIntakes = await transaction.intake.count({ where: { serviceId: id, status: "OPEN_ACTIVE" } });
+        if (openIntakes > 0) throw new ConflictError("Close every open intake in this service before moving it back to draft.", "LEARNING_SERVICE_HAS_OPEN_INTAKE");
+      }
       if (status === "ARCHIVED") {
         const activeIntakes = await transaction.intake.count({ where: { serviceId: id, status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] } } });
         if (activeIntakes > 0) throw new ConflictError("Complete or cancel every active intake before archiving this learning service.", "LEARNING_SERVICE_ARCHIVE_BLOCKED");

@@ -28,6 +28,7 @@ import { recordActionService } from "../audit/audit.service.js";
 import {
   issueCertificateService,
   revokeCertificateService,
+  verifyCertificateService,
 } from "./certificate.service.js";
 
 const enrollmentId = "90000000-0000-4000-8000-000000000001";
@@ -176,5 +177,29 @@ describe("certificate service reliability", () => {
         }),
       }),
     );
+  });
+});
+
+describe("verifying a certificate (M08-11)", () => {
+  const stored = (status, code) => ({ ...certificateFixture(code), status, studentName: "Test Student", courseName: "Machine Learning", certificateData: { skills: ["Python"] } });
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("points a replaced certificate at its replacement", async () => {
+    certificateRepo.findByCode.mockResolvedValue(stored("REVOKED", "FND-OLD"));
+    certificateRepo.findCurrentByEnrollmentId.mockResolvedValue(stored("ISSUED", "FND-NEW"));
+    await expect(verifyCertificateService("FND-OLD")).resolves.toMatchObject({ status: "REVOKED", supersededByCode: "FND-NEW" });
+  });
+
+  it("shows no replacement for a revoked certificate that wasn't reissued", async () => {
+    certificateRepo.findByCode.mockResolvedValue(stored("REVOKED", "FND-OLD"));
+    certificateRepo.findCurrentByEnrollmentId.mockResolvedValue(null);
+    await expect(verifyCertificateService("FND-OLD")).resolves.toMatchObject({ supersededByCode: null });
+  });
+
+  it("doesn't look up a replacement for a valid certificate", async () => {
+    certificateRepo.findByCode.mockResolvedValue(stored("ISSUED", "FND-NEW"));
+    await expect(verifyCertificateService("FND-NEW")).resolves.toMatchObject({ status: "ISSUED", supersededByCode: null });
+    expect(certificateRepo.findCurrentByEnrollmentId).not.toHaveBeenCalled();
   });
 });

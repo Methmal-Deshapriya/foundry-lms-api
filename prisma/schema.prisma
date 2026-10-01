@@ -180,6 +180,9 @@ model User {
   role            Role      @default(STUDENT)
   emailVerified   Boolean   @default(false) @map("email_verified")
   securityVersion Int       @default(0) @map("security_version")
+  // Set while a super admin has suspended the account: no sign-in, and
+  // every session is refused (code review M10-05).
+  disabledAt      DateTime? @map("disabled_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -405,11 +408,18 @@ model Enrollment {
   paymentCompletedAt       DateTime?        @map("payment_completed_at")
   externalPaymentReference String?          @map("external_payment_reference")
   paymentNote              String?          @map("payment_note")
+  // The course price this student agreed to when the paid enrollment was
+  // created. Remaining payments and "still owed" are always computed from
+  // it, never from the course's current price (which may change later).
+  // Null for free (NOT_REQUIRED) enrollments.
+  agreedPrice              Decimal?         @map("agreed_price") @db.Decimal(12, 2)
   completedAt              DateTime?        @map("completed_at")
   createdAt                DateTime         @default(now()) @map("created_at")
   updatedAt                DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Cascade)
+  // Restrict: deleting a student must never take their payments and
+  // certificates with it (code review M10-10).
+  user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Restrict)
   enrolledBy         User?               @relation("EnrollmentManager", fields: [enrolledByUserId], references: [id], onDelete: SetNull)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
   intake             Intake              @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
@@ -559,7 +569,9 @@ model Payment {
   correctsPaymentId String?     @map("corrects_payment_id")
   createdAt         DateTime    @default(now()) @map("created_at")
 
-  enrollment  Enrollment    @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  // Restrict: the ledger is append-only, so deleting an enrollment (or the
+  // user behind it) must never take its payment rows with it.
+  enrollment  Enrollment    @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
   recordedBy  User?         @relation(fields: [recordedByUserId], references: [id], onDelete: SetNull)
   proofObject StoredObject? @relation("PaymentProofObject", fields: [proofObjectId], references: [id], onDelete: SetNull)
   corrects    Payment?      @relation("PaymentCorrections", fields: [correctsPaymentId], references: [id], onDelete: Restrict)
@@ -622,7 +634,7 @@ model Certificate {
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at")
 
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
 
   @@index([enrollmentId, status, issuedDate(sort: Desc)])
   @@index([status, issuedDate])
@@ -707,6 +719,10 @@ model StudentProfile {
   // One picture per student: replacing it deletes the old file from R2.
   avatarObjectId   String?   @unique @map("avatar_object_id")
   publishConsentAt DateTime? @map("publish_consent_at")
+  // Profile links this student used before. Kept so an old link someone
+  // shared still reaches this student (it redirects), and so nobody else
+  // can claim it (code review M08-09).
+  previousSlugs    String[]  @default([]) @map("previous_slugs")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
 
@@ -763,6 +779,9 @@ model Notification {
   // Email is offered only for payment reminders (PARTIAL_PAYERS).
   emailSentCount  Int                  @default(0) @map("email_sent_count")
   emailSentAt     DateTime?            @map("email_sent_at")
+  // Set while an email send is running, so two sends can't overlap (code
+  // review M09-01). A claim older than 15 minutes counts as abandoned.
+  emailSendingAt  DateTime?            @map("email_sending_at")
   createdByUserId String               @map("created_by_user_id")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at")
@@ -784,6 +803,9 @@ model NotificationReceipt {
   userId         String    @map("user_id")
   readAt         DateTime? @map("read_at")
   dismissedAt    DateTime? @map("dismissed_at")
+  // When this student was emailed this reminder, so a re-send only reaches
+  // the ones who were missed (code review M09-02).
+  emailedAt      DateTime? @map("emailed_at")
 
   notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)

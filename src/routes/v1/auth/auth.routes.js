@@ -2,13 +2,19 @@ import express from "express";
 import * as authController from "../../../controllers/v1/auth/auth.controller.js";
 import { authenticate } from "../../../middlewares/authenticate.js";
 import {
+  changePasswordLimiter,
+  forgotPasswordDailyLimiter,
+  forgotPasswordIpLimiter,
   forgotPasswordLimiter,
   loginIpLimiter,
   loginLimiter,
   loginMfaVerificationLimiter,
+  otpVerificationIpLimiter,
   otpVerificationLimiter,
   passwordResetLimiter,
   registrationLimiter,
+  resendOtpDailyLimiter,
+  resendOtpIpLimiter,
   resendOtpLimiter,
 } from "../../../middlewares/rateLimiters.js";
 
@@ -19,10 +25,9 @@ import {
 
 const router = express.Router();
 
-// Scoped to /forgot-password only — this endpoint sends real email to
-// arbitrary addresses, so it needs its own abuse guard.
-
-// Scoped to /resend-otp only — same reasoning as forgotPasswordLimiter.
+// /forgot-password and /resend-otp send real email to arbitrary addresses,
+// so each has a loose per-IP ceiling plus hourly and daily per-address
+// limits (see rateLimiters.js).
 
 /**
  * @route   POST /v1/auth/register
@@ -64,13 +69,27 @@ router.post("/logout", authenticate, authController.logoutController);
 router.get("/me", authenticate, authController.getMeController);
 
 /**
+ * @route   POST /v1/auth/change-password
+ * @desc    Change the password while signed in (needs the current password)
+ * @access  Private (Authenticated)
+ */
+router.post(
+  "/change-password",
+  authenticate,
+  changePasswordLimiter,
+  authController.changePasswordController,
+);
+
+/**
  * @route   POST /v1/auth/forgot-password
  * @desc    Request a password reset email
  * @access  Public
  */
 router.post(
   "/forgot-password",
+  forgotPasswordIpLimiter,
   forgotPasswordLimiter,
+  forgotPasswordDailyLimiter,
   authController.forgotPasswordController
 );
 
@@ -92,6 +111,7 @@ router.post(
  */
 router.post(
   "/verify-otp",
+  otpVerificationIpLimiter,
   otpVerificationLimiter,
   authController.verifyOtpController,
 );
@@ -101,6 +121,12 @@ router.post(
  * @desc    Resend a fresh OTP code to a not-yet-verified user
  * @access  Public
  */
-router.post("/resend-otp", resendOtpLimiter, authController.resendOtpController);
+router.post(
+  "/resend-otp",
+  resendOtpIpLimiter,
+  resendOtpLimiter,
+  resendOtpDailyLimiter,
+  authController.resendOtpController,
+);
 
 export default router;

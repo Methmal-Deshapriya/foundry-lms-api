@@ -5,7 +5,7 @@ import {
   COURSE_ENROLLMENT_STATUSES,
   DURATION_UNITS,
 } from "./catalog.constants.js";
-import { nullableSecureHttpUrlSchema, secureHttpUrlSchema } from "../shared/url.schema.js";
+import { approvedImageUrlSchema, hostnameOf, secureHttpUrlSchema } from "../shared/url.schema.js";
 import { LEARNING_ACCESS_TYPES } from "./learningService.schema.js";
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -14,7 +14,9 @@ const optionalStringArray = z.array(z.string().trim().min(1).max(160)).max(30).o
 
 const YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"]);
 const nullableYoutubeUrlSchema = secureHttpUrlSchema
-  .refine((value) => YOUTUBE_HOSTS.has(new URL(value).hostname.toLowerCase()), "Must be a youtube.com or youtu.be URL.")
+  // hostnameOf never throws: zod 4 runs this refine even after the URL
+  // check fails, and new URL() on a typo was a 500 (code review M06-07).
+  .refine((value) => YOUTUBE_HOSTS.has(hostnameOf(value)), "Must be a youtube.com or youtu.be URL.")
   .nullable()
   .optional();
 
@@ -41,7 +43,7 @@ const courseObject = z.object({
   highlights: optionalStringArray,
   skills: optionalStringArray,
   prerequisites: optionalStringArray,
-  thumbnailUrl: nullableSecureHttpUrlSchema,
+  thumbnailUrl: approvedImageUrlSchema,
   thumbnailObjectId: z.string().uuid().nullable().optional(),
   targetAudience: z.string().trim().min(10).max(300).nullable().optional(),
   whyPursueSteps: optionalWhyPursueSteps,
@@ -84,7 +86,13 @@ function validateDurationConsistency(data, context) {
 
 export const createCourseSchema = courseObject
   .strict("Only documented course fields are accepted.")
-  .superRefine(validateDurationConsistency);
+  .superRefine(validateDurationConsistency)
+  // The full-payment discount can't be changed after creation, so it must be
+  // right now: smaller than the price (code review M06-02).
+  .refine((data) => data.discountAmount === 0 || data.discountAmount < data.price, {
+    message: "The full-payment discount must be less than the price.",
+    path: ["discountAmount"],
+  });
 
 export const updateCourseSchema = courseObject
   .omit({ serviceId: true, intakeCodePrefix: true, certificateEnabled: true, discountAmount: true })
@@ -98,7 +106,9 @@ export const courseAdminFiltersSchema = z.object({
   status: z.enum(Object.values(CATALOG_STATUSES)).optional(),
   level: z.enum(COURSE_LEVELS).optional(),
   enrollmentStatus: z.enum(COURSE_ENROLLMENT_STATUSES).optional(),
-  includeArchived: z.coerce.boolean().default(false),
+  // "false" must mean false (z.coerce.boolean reads any non-empty string as
+  // true) — code review M06-12.
+  includeArchived: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   q: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),

@@ -91,8 +91,34 @@ export async function listLearningServicesService(query = {}) {
   return { services: result.services.map((service) => withSummary(service, byId.get(service.id))), pagination: { total: result.total, limit, offset } };
 }
 
+// The public shape: exactly the fields the public site renders, nothing
+// else. Unlike the admin response, a column added to LearningService later
+// never becomes public by accident (code review M06-05).
+function toPublicLearningService(service) {
+  return {
+    id: service.id,
+    key: service.key,
+    slug: service.slug,
+    title: service.title,
+    description: service.description,
+    accessType: service.accessType,
+    courseMode: service.courseMode,
+    enrollmentMode: service.enrollmentMode,
+    paymentRequirement: service.paymentRequirement,
+    sortOrder: service.sortOrder,
+    courseCount: service._count?.courses ?? service.courseCount ?? 0,
+    summary: service.summary ?? null,
+    heroHeadline: service.heroHeadline ?? null,
+    heroTags: service.heroTags ?? [],
+    cardImageUrl: resolveObjectUrl(service.cardImageObject),
+    heroImageUrl: resolveObjectUrl(service.heroImageObject),
+    processSteps: service.processSteps ?? [],
+    faqItems: service.faqItems ?? [],
+  };
+}
+
 export async function listPublicLearningServicesService() {
-  return { services: (await repository.findPublic()).map(response) };
+  return { services: (await repository.findPublic()).map(toPublicLearningService) };
 }
 
 export async function getLearningServiceService(id) {

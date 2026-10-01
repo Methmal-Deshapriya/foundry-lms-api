@@ -125,9 +125,16 @@ describe("course enrollment service", () => {
     enrollmentRepository.findById.mockResolvedValue(enrollmentFixture({ paymentStatus: "PARTIAL" }));
     enrollmentRepository.completePayment.mockResolvedValue(enrollmentFixture({ paymentStatus: "COMPLETED" }));
     const result = await completePaymentService("90000000-0000-4000-8000-000000000006", actorId);
-    expect(enrollmentRepository.completePayment).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000006", actorId);
+    expect(enrollmentRepository.completePayment).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000006", actorId, { method: null, externalReference: null });
     expect(result.paymentStatus).toBe("COMPLETED");
     expect(recordActionService).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: actorId, entityId: "90000000-0000-4000-8000-000000000006" }));
+  });
+
+  it("records how the remaining payment was made on the ledger entry", async () => {
+    enrollmentRepository.findById.mockResolvedValue(enrollmentFixture({ paymentStatus: "PARTIAL" }));
+    enrollmentRepository.completePayment.mockResolvedValue(enrollmentFixture({ paymentStatus: "COMPLETED" }));
+    await completePaymentService("90000000-0000-4000-8000-000000000006", actorId, { paymentMethod: "BANK_TRANSFER", externalReference: "BOC-778812" });
+    expect(enrollmentRepository.completePayment).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000006", actorId, { method: "BANK_TRANSFER", externalReference: "BOC-778812" });
   });
 
   it("refuses to complete payment for an enrollment that isn't PARTIAL", async () => {

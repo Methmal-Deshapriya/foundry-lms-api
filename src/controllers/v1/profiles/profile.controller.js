@@ -5,6 +5,22 @@ import { ApiResponse } from "../../../utils/responseHandler.js";
  * Public Student Profile Controller
  */
 
+export async function publishMyProfile(req, res, next) {
+  try {
+    return ApiResponse.send(res, await profileService.setProfilePublishedService(req.user, true), "Your public profile is visible again.");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function unpublishMyProfile(req, res, next) {
+  try {
+    return ApiResponse.send(res, await profileService.setProfilePublishedService(req.user, false), "Your public profile is now hidden.");
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getMyProfile(req, res, next) {
   try {
     const result = await profileService.getMyProfileService(req.user.id);

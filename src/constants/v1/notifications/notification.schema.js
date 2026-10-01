@@ -13,6 +13,8 @@ const optionalText = (max, label) =>
     .nullable()
     .optional();
 
+export const IN_APP_PATH = /^\/(?![/\\])[^\\]*$/;
+
 // A button/link target: an in-app path ("/explore") or a full https:// URL.
 export const linkUrlField = z
   .string()
@@ -23,7 +25,10 @@ export const linkUrlField = z
   .optional()
   .refine((value) => {
     if (!value) return true;
-    if (/^\/(?!\/)/.test(value)) return true;
+    // An in-app path. No second slash or backslash after the first one, and
+    // no backslash anywhere: browsers read "/\\evil.com" as "//evil.com",
+    // another site (code review M09-07).
+    if (IN_APP_PATH.test(value)) return true;
     try {
       return new URL(value).protocol === "https:";
     } catch {

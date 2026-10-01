@@ -1,7 +1,7 @@
 import * as repository from "../../../repositories/v1/profiles/profile.repository.js";
 import { saveStudentProfileSchema, profileSlugParamSchema } from "../../../constants/v1/profiles/profile.schema.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
-import { ForbiddenError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
+import { NotFoundError, ValidationError } from "../../../utils/Errors.js";
 import { publicObjectUrl } from "../../../config/r2.js";
 import { resolveThumbnailUrl } from "../../../utils/thumbnails.js";
 import Logger from "../../../utils/logger.js";
@@ -62,24 +62,31 @@ export async function saveMyProfileService(user, data) {
   const input = parse(saveStudentProfileSchema, data);
   const existing = await repository.findByUserId(user.id);
 
-  const slugOwner = await repository.findBySlug(input.slug);
-  if (slugOwner && slugOwner.userId !== user.id) {
+  const [slugOwner, formerOwner] = await Promise.all([repository.findBySlug(input.slug), repository.findByPreviousSlug(input.slug)]);
+  // A link another student uses now — or used before, and may have shared —
+  // can't be taken (code review M08-09).
+  if ((slugOwner && slugOwner.userId !== user.id) || (formerOwner && formerOwner.userId !== user.id)) {
     throw new ValidationError("That profile link is already taken — try another.", "slug");
   }
+  const slugChanged = Boolean(existing && existing.slug !== input.slug);
+  const previousSlugs = slugChanged
+    ? [...new Set([...(existing.previousSlugs ?? []), existing.slug])].filter((slug) => slug !== input.slug)
+    : (existing?.previousSlugs ?? []).filter((slug) => slug !== input.slug);
 
   const avatarChanged = input.avatarObjectId !== undefined && input.avatarObjectId !== (existing?.avatarObjectId ?? null);
   if (avatarChanged && input.avatarObjectId) {
-    const avatar = await assertAttachableStoredObject(input.avatarObjectId, "STUDENT_AVATAR");
     // A student can only ever use a picture they uploaded themselves.
-    if (avatar.uploadedByUserId !== user.id) {
-      throw new ForbiddenError("You can only use a picture you uploaded.");
-    }
+    await assertAttachableStoredObject(input.avatarObjectId, "STUDENT_AVATAR", { ownerUserId: user.id });
   }
 
   const { publishConsent: _consent, ...fields } = input;
+  // The first save publishes the profile. Later edits keep whatever the
+  // student chose with the Hide/Show control, so editing a hidden profile
+  // doesn't quietly put it back online (M08-01).
   const saved = await repository.upsertForUser(user.id, {
     ...fields,
-    publishConsentAt: existing?.publishConsentAt ?? new Date(),
+    previousSlugs,
+    publishConsentAt: existing ? existing.publishConsentAt : new Date(),
   });
 
   // One picture per student: once the new one is saved (or the picture was
@@ -103,6 +110,27 @@ export async function saveMyProfileService(user, data) {
   return toOwnerResponse(saved, await repository.countApprovedPublicProjects(user.id));
 }
 
+/**
+ * Hide or show the student's public page. Hiding withdraws their consent to
+ * publish (Sri Lanka PDPA right to withdraw); the page then answers 404 like
+ * any missing profile. Showing it again re-records consent now
+ * (code review M08-01).
+ */
+export async function setProfilePublishedService(user, published) {
+  const existing = await repository.findByUserId(user.id);
+  if (!existing) throw new NotFoundError("Set up your public profile first.");
+  const saved = await repository.setPublishConsent(user.id, published ? existing.publishConsentAt ?? new Date() : null);
+  recordActionService({
+    actorUserId: user.id,
+    action: AUDIT_ACTIONS.STUDENT_PROFILE_SAVED,
+    entityType: ENTITY_TYPES.STUDENT_PROFILE,
+    entityId: saved.id,
+    description: `${published ? "Published" : "Unpublished"} public profile /students/${saved.slug}.`,
+    metadata: { published },
+  });
+  return toOwnerResponse(saved, await repository.countApprovedPublicProjects(user.id));
+}
+
 /** Used by project submission: a student must set up a profile first. */
 export async function hasProfile(userId) {
   return Boolean(await repository.findByUserId(userId));
@@ -114,7 +142,17 @@ export async function getPublicProfileService(slugValue) {
   const projects = profile?.user.studentProjects ?? [];
   // Not published (no consent, or no approved public project yet) reads
   // exactly like "doesn't exist" — never reveal that a draft profile exists.
-  if (!profile || !profile.publishConsentAt || projects.length === 0) {
+  if (!profile) {
+    // An old link this student changed away from: send the visitor to their
+    // current page, when it's published (M08-09).
+    const moved = await repository.findByPreviousSlug(slug);
+    if (moved) {
+      const current = await repository.findPublicBySlug(moved.slug);
+      if (current?.publishConsentAt && current.user.studentProjects.length > 0) return { redirectToSlug: moved.slug };
+    }
+    throw new NotFoundError("Student profile not found.");
+  }
+  if (!profile.publishConsentAt || projects.length === 0) {
     throw new NotFoundError("Student profile not found.");
   }
 

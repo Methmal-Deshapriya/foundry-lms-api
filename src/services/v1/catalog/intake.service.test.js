@@ -8,7 +8,7 @@ vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
 vi.mock("./publicCatalogCache.service.js", () => ({ revalidatePublicCatalogCache: vi.fn() }));
 
 import * as intakeRepository from "../../../repositories/v1/catalog/intake.repository.js";
-import { getIntakeAnalyticsService, updateIntakeStatusService } from "./intake.service.js";
+import { getIntakeAnalyticsService, getIntakeDeletionImpactService, updateIntakeStatusService } from "./intake.service.js";
 
 const actorId = "90000000-0000-4000-8000-000000000001";
 const intakeId = "90000000-0000-4000-8000-000000000004";
@@ -22,6 +22,19 @@ function intakeFixture(overrides = {}) {
 
 describe("intake lifecycle service", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("lets only super admins cancel an intake, since it cancels every enrollment (M06-01)", async () => {
+    await expect(updateIntakeStatusService(intakeId, { expectedStatus: "CLOSED_ACTIVE", status: "CANCELLED" }, { id: actorId, role: "ADMIN" })).rejects.toMatchObject({ statusCode: 403 });
+    expect(intakeRepository.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  it("reports an intake with recorded expenses as not deletable (M06-08)", async () => {
+    intakeRepository.findById.mockResolvedValue(intakeFixture({
+      status: "ARCHIVED",
+      _count: { courseSessions: 0, enrollments: 0, studentProjects: 0, enrollmentRequests: 0, expenses: 1 },
+    }));
+    await expect(getIntakeDeletionImpactService(intakeId)).resolves.toMatchObject({ expenses: 1, deletable: false });
+  });
 
   it("lets only super admins open an intake", async () => {
     await expect(updateIntakeStatusService(intakeId, { expectedStatus: "DRAFT", status: "OPEN_ACTIVE" }, { id: actorId, role: "ADMIN" })).rejects.toMatchObject({ statusCode: 403 });

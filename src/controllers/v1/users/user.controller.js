@@ -40,7 +40,7 @@ export async function getAllUsersController(req, res, next) {
 export async function getOneUserController(req, res, next) {
   try {
     const { id } = req.params;
-    const user = await userService.getUserDetailService(id);
+    const user = await userService.getUserDetailService(id, req.user);
     return ApiResponse.send(res, user, "User detail fetched successfully");
   } catch (error) {
     next(error);
@@ -86,3 +86,17 @@ export async function demoteUserController(req, res, next) {
     next(error);
   }
 }
+
+const accessController = (serviceFn, message) => async (req, res, next) => {
+  try {
+    const user = await serviceFn(req.params.id, req.user.id);
+    return ApiResponse.send(res, user, message);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /v1/users/:id/revoke-sessions, /suspend, /reactivate (code review M10-05). */
+export const revokeSessionsController = accessController(userService.revokeUserSessionsService, "Signed out of every session");
+export const suspendUserController = accessController(userService.suspendUserService, "Account suspended");
+export const reactivateUserController = accessController(userService.reactivateUserService, "Account reactivated");

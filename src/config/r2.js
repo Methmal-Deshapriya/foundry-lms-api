@@ -81,14 +81,26 @@ export function publicObjectUrl(objectKey) {
   return `${config.publicBaseUrl}/${objectKey.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-export async function createUploadUrl({ scope, objectKey, contentType }) {
+/**
+ * A presigned PUT that only accepts exactly the declared type and size. The
+ * S3 presigner leaves content-type unsigned by default, and without
+ * ContentLength any body size passes, so both are forced into the signature:
+ * a PUT with another type or size fails at R2 with 403 and nothing is stored
+ * (code review M04-01). The browser sets Content-Length from the body, so
+ * the declared size must be the file's exact byte size.
+ */
+export async function createUploadUrl({ scope, objectKey, contentType, contentLength }) {
   const config = getR2Config();
   const command = new PutObjectCommand({
     Bucket: bucketForScope(scope),
     Key: objectKey,
     ContentType: contentType,
+    ContentLength: contentLength,
   });
-  return getSignedUrl(getR2Client(), command, { expiresIn: config.uploadTtlSeconds });
+  return getSignedUrl(getR2Client(), command, {
+    expiresIn: config.uploadTtlSeconds,
+    signableHeaders: new Set(["content-type", "content-length"]),
+  });
 }
 
 export async function inspectObject({ scope, objectKey }) {
@@ -118,16 +130,23 @@ export async function deleteObject({ scope, objectKey }) {
   await getR2Client().send(new DeleteObjectCommand({ Bucket: bucketForScope(scope), Key: objectKey }));
 }
 
-export async function createDownloadUrl({ scope, objectKey, fileName }) {
+/**
+ * A short-lived signed GET for a private object. `inline` lets the browser
+ * play or show it in place (recordings) instead of forcing a download, and
+ * `expiresIn` overrides the default lifetime — a video keeps fetching byte
+ * ranges while it plays and seeks, so it needs longer than a one-shot file
+ * download (code review M07-01/M07-07).
+ */
+export async function createDownloadUrl({ scope, objectKey, fileName, inline = false, expiresIn }) {
   if (scope === "PUBLIC") return publicObjectUrl(objectKey);
   const config = getR2Config();
   const safeName = String(fileName ?? "download").replace(/[\r\n"\\]/g, "_");
   const command = new GetObjectCommand({
     Bucket: bucketForScope(scope),
     Key: objectKey,
-    ResponseContentDisposition: `attachment; filename="${safeName}"`,
+    ResponseContentDisposition: `${inline ? "inline" : "attachment"}; filename="${safeName}"`,
   });
-  return getSignedUrl(getR2Client(), command, { expiresIn: config.downloadTtlSeconds });
+  return getSignedUrl(getR2Client(), command, { expiresIn: expiresIn ?? config.downloadTtlSeconds });
 }
 
 export async function checkR2Readiness() {

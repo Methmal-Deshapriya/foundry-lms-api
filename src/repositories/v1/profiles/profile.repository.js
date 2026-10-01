@@ -13,6 +13,19 @@ export function findBySlug(slug) {
   return prisma.studentProfile.findUnique({ where: { slug }, select: { userId: true } });
 }
 
+/** The profile that used to have this link, if any (M08-09). */
+export function findByPreviousSlug(slug) {
+  return prisma.studentProfile.findFirst({ where: { previousSlugs: { has: slug } }, select: { userId: true, slug: true } });
+}
+
+export async function setPublishConsent(userId, publishConsentAt) {
+  try {
+    return await prisma.studentProfile.update({ where: { userId }, data: { publishConsentAt }, include: { avatarObject: true } });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
 export async function upsertForUser(userId, data) {
   try {
     return await prisma.studentProfile.upsert({

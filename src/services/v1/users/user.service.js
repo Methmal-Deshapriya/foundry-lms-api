@@ -11,6 +11,7 @@ import { transformUser } from "../../../utils/transformers.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 import { ConflictError, NotFoundError, ForbiddenError, ValidationError } from "../../../utils/Errors.js";
+import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
 
 /**
  * User Service - The "Brain"
@@ -83,7 +84,7 @@ export async function getAllUsersService(query = {}) {
  * activity across the system, for the admin user detail view.
  * @param {string} id - The UUID of the user to fetch.
  */
-export async function getUserDetailService(id) {
+export async function getUserDetailService(id, viewer = null) {
   const parsedId = userIdSchema.safeParse(id);
   if (!parsedId.success) {
     throw new ValidationError(parsedId.error.issues[0].message, "id");
@@ -111,7 +112,10 @@ export async function getUserDetailService(id) {
     userActivityRepo.findCertificatesForUser(id),
     userActivityRepo.findStudentProjectsForUser(id),
     userActivityRepo.findEnrollmentRequestsForUser(id),
-    userActivityRepo.findAuditLogsForActor(id),
+    // The audit trail is super-admin only (AUDIT_VIEW): a super admin's
+    // rows describe partner payouts, share splits and refunds, so an admin
+    // viewing their profile must not see them (code review M10-02).
+    viewer && hasPermission(viewer.role, PERMISSIONS.AUDIT_VIEW) ? userActivityRepo.findAuditLogsForActor(id) : null,
   ]);
 
   return userModel.toAdminUserDetailResponse(user, {
@@ -147,19 +151,17 @@ export async function promoteUserService(targetId, actorId) {
     throw new ConflictError(`User is already an ${user.role}.`);
   }
 
-  // 3. Update the role in DB
-  const updatedUser = await userRepo.updateUserRole(targetId, ROLES.ADMIN);
-
-  // 4. --- Audit Log (Fire and Forget) ---
-  // Note: We do NOT 'await' this.
-  recordActionService({
+  // 3. Change the role only if it is still what we checked, with the audit
+  // row in the same transaction (code review M10-06).
+  const updatedUser = await userRepo.changeRoleAudited(targetId, user.role, ROLES.ADMIN, {
     actorUserId: actorId,
     action: AUDIT_ACTIONS.USER_PROMOTED,
     entityType: ENTITY_TYPES.USER,
     entityId: targetId,
     description: `User ${user.email} promoted to ADMIN by Admin ${actorId}`,
-    metadata: { oldRole: user.role, newRole: ROLES.ADMIN }
+    metadata: { oldRole: user.role, newRole: ROLES.ADMIN },
   });
+  if (!updatedUser) throw new ConflictError("This user's role just changed. Refresh and try again.", "STALE_USER_ROLE");
 
   return userModel.toAdminUserResponse(updatedUser);
 }
@@ -189,18 +191,77 @@ export async function demoteUserService(targetId, actorId) {
     throw new ConflictError("User is already a Student.");
   }
 
-  // 3. Update the role in DB
-  const updatedUser = await userRepo.updateUserRole(targetId, ROLES.STUDENT);
-
-  // 4. --- Audit Log (Fire and Forget) ---
-  recordActionService({
+  // 3. Change the role only if it is still what we checked, with the audit
+  // row in the same transaction (code review M10-06).
+  const updatedUser = await userRepo.changeRoleAudited(targetId, user.role, ROLES.STUDENT, {
     actorUserId: actorId,
     action: AUDIT_ACTIONS.USER_DEMOTED,
     entityType: ENTITY_TYPES.USER,
     entityId: targetId,
     description: `User ${user.email} demoted to STUDENT by Admin ${actorId}`,
-    metadata: { oldRole: user.role, newRole: ROLES.STUDENT }
+    metadata: { oldRole: user.role, newRole: ROLES.STUDENT },
   });
+  if (!updatedUser) throw new ConflictError("This user's role just changed. Refresh and try again.", "STALE_USER_ROLE");
 
   return userModel.toAdminUserResponse(updatedUser);
+}
+
+// ============================================================ Account access
+// Super admins can end someone's sessions, or suspend the account, without
+// touching the database (code review M10-05). Each is audited in the same
+// transaction as the change.
+
+async function findAccessTarget(targetId, actorId) {
+  const parsedId = userIdSchema.safeParse(targetId);
+  if (!parsedId.success) throw new ValidationError(parsedId.error.issues[0].message, "id");
+  if (targetId === actorId) throw new ConflictError("You can't do this to your own account.", "SELF_ACCESS_CHANGE");
+  const user = await userRepo.findUserById(targetId);
+  if (!user) throw new NotFoundError("Target user not found.");
+  return user;
+}
+
+/** End every session the user has (stolen laptop, shared device). */
+export async function revokeUserSessionsService(targetId, actorId) {
+  const user = await findAccessTarget(targetId, actorId);
+  const updated = await userRepo.updateAccessAudited(targetId, { revokeOnly: true }, {
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.USER_SESSIONS_REVOKED,
+    entityType: ENTITY_TYPES.USER,
+    entityId: targetId,
+    description: `Signed ${user.email} out of every session.`,
+  });
+  return userModel.toAdminUserResponse(updated);
+}
+
+/** Suspend: no sign-in and no session until reactivated. */
+export async function suspendUserService(targetId, actorId) {
+  const user = await findAccessTarget(targetId, actorId);
+  if (user.disabledAt) throw new ConflictError("This account is already suspended.", "USER_ALREADY_SUSPENDED");
+  // Never leave the academy without a super admin who can sign in.
+  if (user.role === ROLES.SUPER_ADMIN && (await userRepo.countActiveSuperAdmins()) <= 1) {
+    throw new ConflictError("This is the last super admin who can sign in, so it can't be suspended.", "LAST_SUPER_ADMIN");
+  }
+  const updated = await userRepo.updateAccessAudited(targetId, { disabledAt: new Date() }, {
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.USER_SUSPENDED,
+    entityType: ENTITY_TYPES.USER,
+    entityId: targetId,
+    description: `Suspended ${user.email} (${user.role}).`,
+    metadata: { role: user.role },
+  });
+  return userModel.toAdminUserResponse(updated);
+}
+
+export async function reactivateUserService(targetId, actorId) {
+  const user = await findAccessTarget(targetId, actorId);
+  if (!user.disabledAt) throw new ConflictError("This account isn't suspended.", "USER_NOT_SUSPENDED");
+  const updated = await userRepo.updateAccessAudited(targetId, { disabledAt: null }, {
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.USER_REACTIVATED,
+    entityType: ENTITY_TYPES.USER,
+    entityId: targetId,
+    description: `Reactivated ${user.email} (${user.role}).`,
+    metadata: { role: user.role },
+  });
+  return userModel.toAdminUserResponse(updated);
 }

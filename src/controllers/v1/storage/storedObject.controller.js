@@ -31,7 +31,7 @@ export async function getObjectAccess(req, res, next) {
   try {
     return ApiResponse.send(
       res,
-      await service.getStoredObjectAccessService(req.params.id),
+      await service.getStoredObjectAccessService(req.params.id, req.user),
       "Object access granted",
     );
   } catch (error) {

@@ -23,6 +23,7 @@ export const dismiss = handle((req) => service.dismissService(req.user, req.para
 export const list = handle((req) => service.listNotificationsService(req.query), "Notifications fetched successfully");
 export const reach = handle((req) => service.getAudienceReachService(req.query), "Reach calculated");
 export const emailQuota = handle(() => service.getEmailQuotaService(), "Email quota fetched");
+export const emailRecipients = handle((req) => service.getEmailRecipientsService(req.params.id), "Email recipients counted");
 export const create = handle((req) => service.createNotificationService(req.body, req.user.id), "Notification saved", 201);
 export const update = handle((req) => service.updateNotificationService(req.params.id, req.body), "Notification saved");
 export const publish = handle((req) => service.publishNotificationService(req.params.id, req.body, req.user.id), "Notification published");

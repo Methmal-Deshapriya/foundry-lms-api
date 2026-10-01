@@ -5,7 +5,14 @@ export async function cleanupAuthArtifactsOnce() {
   const retentionDays = Number(process.env.AUTH_ARTIFACT_RETENTION_DAYS ?? 7);
   const batchSize = Number(process.env.AUTH_ARTIFACT_CLEANUP_BATCH_SIZE ?? 500);
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1_000);
-  return authRepo.cleanupExpiredAuthArtifacts(cutoff, batchSize);
+  const artifacts = await authRepo.cleanupExpiredAuthArtifacts(cutoff, batchSize);
+  // Sign-ups never verified within this many days are removed, so a
+  // mistyped or squatted address doesn't keep someone's personal details
+  // (or block the real owner) forever.
+  const unverifiedRetentionDays = Number(process.env.UNVERIFIED_ACCOUNT_RETENTION_DAYS ?? 30);
+  const unverifiedCutoff = new Date(Date.now() - unverifiedRetentionDays * 24 * 60 * 60 * 1_000);
+  const unverifiedUsers = await authRepo.deleteStaleUnverifiedUsers(unverifiedCutoff, batchSize);
+  return { ...artifacts, unverifiedUsers, total: artifacts.total + unverifiedUsers };
 }
 
 // Held off a few seconds past process start — running immediately races the
