@@ -1,0 +1,37 @@
+name: Storage cleanup
+
+# Daily: asks the API to delete stored files nothing uses any more (uploads
+# never finished, replaced images, abandoned forms — all older than 24h), so
+# R2 stays inside the free tier. Free: one HTTP call a day.
+# See foundry_lms_docs/2026-10-01_next_features_implementation_plan.md §6 (4d).
+#
+# Required repository secrets:
+#   API_BASE_URL            the deployed API origin, e.g. https://foundry-lms-api.onrender.com
+#   STORAGE_CLEANUP_SECRET  same value as the server's STORAGE_CLEANUP_SECRET env var
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 21:00 UTC = 02:30 in Sri Lanka, after the database backup
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The free Render plan sleeps when idle, so the first request can take
+      # up to a minute while it wakes — hence the long timeout and retries.
+      - name: Run storage cleanup
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          STORAGE_CLEANUP_SECRET: ${{ secrets.STORAGE_CLEANUP_SECRET }}
+        run: |
+          test -n "$API_BASE_URL" || { echo "API_BASE_URL secret is not set."; exit 1; }
+          test -n "$STORAGE_CLEANUP_SECRET" || { echo "STORAGE_CLEANUP_SECRET secret is not set."; exit 1; }
+          curl --fail-with-body --silent --show-error --max-time 120 --retry 3 --retry-delay 20 --retry-all-errors \
+            -X POST "${API_BASE_URL%/}/api/v1/storage/cleanup/scheduled" \
+            -H "x-cleanup-secret: ${STORAGE_CLEANUP_SECRET}"
+          echo

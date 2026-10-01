@@ -9,6 +9,9 @@ export const STORED_OBJECT_PURPOSES = Object.freeze([
   "SERVICE_CARD",
   "COURSE_EXPLAINER_VIDEO_THUMBNAIL",
   "STUDENT_AVATAR",
+  "PAYMENT_PROOF",
+  "PROMOTION_IMAGE",
+  "EXPENSE_RECEIPT",
 ]);
 
 export const createUploadIntentSchema = z.object({

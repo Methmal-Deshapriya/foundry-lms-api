@@ -12,6 +12,8 @@ import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { hasPermission, PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
+import { announceCourseOpenService } from "../notifications/notification.service.js";
+import Logger from "../../../utils/logger.js";
 
 const ALLOWED_TRANSITIONS = Object.freeze({
   DRAFT: ["OPEN_ACTIVE", "CANCELLED"],
@@ -110,6 +112,12 @@ export async function updateIntakeStatusService(id, data, actor) {
   if (!intake) throw new NotFoundError("Intake not found.");
   recordActionService({ actorUserId: actor.id, action: AUDIT_ACTIONS.INTAKE_STATUS_CHANGED, entityType: ENTITY_TYPES.INTAKE, entityId: id, description: `Intake ${intake.code} moved from ${expectedStatus} to ${status}.`, metadata: { from: expectedStatus, to: status, courseId: intake.courseId } });
   if ([expectedStatus, status].includes("OPEN_ACTIVE")) await revalidatePublicCatalogCache();
+  // "Notify me" — tell interested students the course is open. Best-effort.
+  if (status === "OPEN_ACTIVE") {
+    announceCourseOpenService({ courseId: intake.courseId, intakeCode: intake.code }, actor.id).catch((error) =>
+      Logger.error(`[COURSE_OPEN_ANNOUNCE_FAILED]: intake ${id}`, error),
+    );
+  }
   return toAdminIntake(intake);
 }
 

@@ -75,9 +75,10 @@ export async function createPaid(intakeId, userId, actorId, payment) {
         const occupied = await transaction.enrollment.count({ where: { intakeId, status: { not: "CANCELLED" } } });
         if (occupied >= intake.capacity) throw new CourseCapacityReachedError();
       }
-      const enrollment = await transaction.enrollment.create({ data: { userId, courseId: intake.courseId, intakeId, source: "ADMIN", enrolledByUserId: actorId, status: "ACTIVE", ...payment }, select: { id: true } });
+      const { paymentMethod, ...enrollmentPayment } = payment;
+      const enrollment = await transaction.enrollment.create({ data: { userId, courseId: intake.courseId, intakeId, source: "ADMIN", enrolledByUserId: actorId, status: "ACTIVE", ...enrollmentPayment }, select: { id: true } });
       const entry = buildInitialPaymentEntry(intake.course, payment.paymentStatus);
-      if (entry) await transaction.payment.create({ data: { enrollmentId: enrollment.id, courseId: intake.courseId, intakeId, recordedByUserId: actorId, ...entry } });
+      if (entry) await transaction.payment.create({ data: { enrollmentId: enrollment.id, courseId: intake.courseId, intakeId, recordedByUserId: actorId, method: paymentMethod ?? null, externalReference: enrollmentPayment.externalPaymentReference ?? null, ...entry } });
       return enrollment.id;
     });
     return findById(id);
@@ -87,7 +88,7 @@ export async function createPaid(intakeId, userId, actorId, payment) {
 // Records the remaining half of a PARTIAL enrollment's price — the only
 // state a PARTIAL enrollment can move to. Never discounted: the discount
 // is only ever earned by paying everything in one go at enrollment time.
-export async function completePayment(id, actorId) {
+export async function completePayment(id, actorId, { method = null, externalReference = null } = {}) {
   try {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.enrollment.findUnique({ where: { id }, select: { intakeId: true, intake: { select: { serviceId: true } } } });
@@ -99,7 +100,7 @@ export async function completePayment(id, actorId) {
       if (!current) throw new NotFoundError("Enrollment not found.");
       if (current.paymentStatus !== "PARTIAL") throw new ConflictError("Only a partially paid enrollment can have its remaining payment recorded.", "PAYMENT_NOT_PARTIAL");
       const amount = new Prisma.Decimal(current.course.price).dividedBy(2);
-      await transaction.payment.create({ data: { enrollmentId: id, courseId: current.courseId, intakeId: current.intakeId, recordedByUserId: actorId, type: "TOP_UP", amount, discountAmount: new Prisma.Decimal(0), currency: current.course.currency } });
+      await transaction.payment.create({ data: { enrollmentId: id, courseId: current.courseId, intakeId: current.intakeId, recordedByUserId: actorId, type: "TOP_UP", amount, discountAmount: new Prisma.Decimal(0), currency: current.course.currency, method, externalReference } });
       await transaction.enrollment.update({ where: { id }, data: { paymentStatus: "COMPLETED", paymentCompletedAt: new Date() } });
       return transaction.enrollment.findUnique({ where: { id }, include: enrollmentInclude });
     });
@@ -305,4 +306,31 @@ export function searchEligibleStudents(intakeId, q, limit, cursor) {
     take: limit + 1,
     select: { id: true, firstName: true, lastName: true, email: true },
   });
+}
+
+/**
+ * Candidates for the at-risk list: ACTIVE enrollments in a running intake
+ * (OPEN_ACTIVE or CLOSED_ACTIVE) that started before `since`, with each one's
+ * most recent session completion. Students only.
+ */
+export async function findAtRiskCandidates(since) {
+  const enrollments = await prisma.enrollment.findMany({
+    where: {
+      status: "ACTIVE",
+      createdAt: { lt: since },
+      user: { role: "STUDENT" },
+      intake: { status: { in: ["OPEN_ACTIVE", "CLOSED_ACTIVE"] } },
+    },
+    select: {
+      id: true,
+      intakeId: true,
+      createdAt: true,
+      user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+      course: { select: { id: true, title: true, service: { select: { slug: true } } } },
+      intake: { select: { id: true, code: true } },
+      sessionCompletions: { select: { completedAt: true }, orderBy: { completedAt: "desc" }, take: 1 },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  return enrollments;
 }

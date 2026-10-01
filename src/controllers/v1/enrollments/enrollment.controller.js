@@ -66,6 +66,7 @@ export async function completePaymentController(req, res, next) {
     const enrollment = await enrollmentService.completePaymentService(
       req.params.id,
       req.user.id,
+      req.body,
     );
     return ApiResponse.send(res, enrollment, "Remaining payment recorded");
   } catch (error) {
@@ -116,6 +117,15 @@ export async function getEligibleStudentsForCourseController(req, res, next) {
       req.query,
     );
     return ApiResponse.send(res, students, "Eligible students fetched successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAtRiskStudentsController(req, res, next) {
+  try {
+    const result = await enrollmentService.getAtRiskStudentsService();
+    return ApiResponse.send(res, result, "At-risk students fetched");
   } catch (error) {
     next(error);
   }

@@ -105,6 +105,33 @@ const PURPOSE_POLICIES = Object.freeze({
     // deleteStoredObjectService below.
     defaultMaxBytes: 1_048_576,
   },
+  PAYMENT_PROOF: {
+    // Bank slips and receipts: financial records, so PRIVATE (presigned
+    // download URLs only, super admins only). Photos are compressed in the
+    // browser before upload; PDFs are accepted as-is.
+    scope: "PRIVATE",
+    prefix: "payment-proofs",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+    maxBytesEnv: "R2_MAX_PAYMENT_PROOF_BYTES",
+    defaultMaxBytes: 5_242_880,
+  },
+  PROMOTION_IMAGE: {
+    // The landing-page banner's optional image — compressed in the browser
+    // before upload; one per promotion, deleted from R2 when replaced.
+    scope: "PUBLIC",
+    prefix: "promotion-images",
+    contentTypes: ["image/jpeg", "image/png", "image/webp"],
+    maxBytesEnv: "R2_MAX_PROMOTION_IMAGE_BYTES",
+    defaultMaxBytes: 2_097_152,
+  },
+  EXPENSE_RECEIPT: {
+    // Partner earnings: a photo of a bill or receipt — private, like payment proofs.
+    scope: "PRIVATE",
+    prefix: "expense-receipts",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+    maxBytesEnv: "R2_MAX_EXPENSE_RECEIPT_BYTES",
+    defaultMaxBytes: 5_242_880,
+  },
 });
 
 // Every other purpose is admin-only (gated by STORAGE_MANAGE at the route
@@ -316,6 +343,9 @@ export async function assertAttachableStoredObject(id, purpose) {
     SERVICE_CARD: "cardImageObjectId",
     COURSE_EXPLAINER_VIDEO_THUMBNAIL: "explainerVideoThumbnailObjectId",
     STUDENT_AVATAR: "avatarObjectId",
+    PAYMENT_PROOF: "proofObjectId",
+    PROMOTION_IMAGE: "imageObjectId",
+    EXPENSE_RECEIPT: "receiptObjectId",
   }[purpose];
   const parsedId = parse(storedObjectIdSchema, id);
   const object = await repository.findById(parsedId);
@@ -361,4 +391,49 @@ export async function deleteStoredObjectService(object, actorId) {
     description: `Deleted superseded ${object.purpose.toLowerCase().replaceAll("_", " ")} "${object.originalFileName}".`,
     metadata: { purpose: object.purpose, scope: object.scope },
   });
+}
+
+const CLEANUP_GRACE_HOURS = 24;
+const CLEANUP_BATCH = 200;
+
+/**
+ * Deletes files nothing uses any more (Phase 4d of the 2026-10-01 plan), so
+ * R2 stays inside the free tier as the system grows. `dryRun` only lists
+ * them. Runs daily from GitHub Actions and on demand by a super admin.
+ */
+export async function cleanupStorageService({ dryRun = true, actorId = null } = {}) {
+  requireR2();
+  const olderThan = new Date(Date.now() - CLEANUP_GRACE_HOURS * 3_600_000);
+  const candidates = await repository.findCleanupCandidates(olderThan, CLEANUP_BATCH);
+  const summary = candidates.map((object) => ({
+    id: object.id,
+    purpose: object.purpose,
+    status: object.status,
+    fileName: object.originalFileName,
+    sizeBytes: Number(object.actualSizeBytes ?? object.declaredSizeBytes),
+    createdAt: object.createdAt,
+  }));
+  const totalBytes = summary.reduce((sum, object) => sum + object.sizeBytes, 0);
+  if (dryRun) return { dryRun: true, count: summary.length, totalBytes, objects: summary, hasMore: candidates.length === CLEANUP_BATCH };
+
+  let deleted = 0;
+  let failed = 0;
+  for (const object of candidates) {
+    try {
+      await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+      await repository.deleteById(object.id);
+      deleted += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.STORED_OBJECT_DELETED,
+    entityType: ENTITY_TYPES.STORED_OBJECT,
+    entityId: null,
+    description: `Storage cleanup removed ${deleted} unused file(s)${failed ? `; ${failed} failed and will be retried next run` : ""}.`,
+    metadata: { deleted, failed, totalBytes, scheduled: !actorId },
+  });
+  return { dryRun: false, count: summary.length, deleted, failed, totalBytes, hasMore: candidates.length === CLEANUP_BATCH };
 }

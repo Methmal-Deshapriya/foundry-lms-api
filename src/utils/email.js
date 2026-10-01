@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import prisma from "./prisma.js";
 
 /**
  * Email Utility - The "Mailroom"
@@ -45,7 +46,72 @@ async function send(message) {
   if (error) {
     throw new Error(`Resend email delivery failed (${error.name}): ${error.message}`);
   }
+  // Count every successful send against today's (UTC) total, so bulk sends
+  // can be checked against Resend's free-plan limits first. Best-effort: a
+  // counter failure must never fail the email itself.
+  countEmailSent().catch(() => {});
 }
+
+// Resend's free plan: 100 emails/day, 3,000/month.
+export const EMAIL_DAILY_LIMIT = Number(process.env.EMAIL_DAILY_LIMIT ?? 100);
+export const EMAIL_MONTHLY_LIMIT = Number(process.env.EMAIL_MONTHLY_LIMIT ?? 3000);
+
+function utcDay(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+async function countEmailSent() {
+  const day = utcDay();
+  await prisma.emailDailyUsage.upsert({ where: { day }, create: { day, count: 1 }, update: { count: { increment: 1 } } });
+}
+
+/** Emails sent today and this month (UTC), as counted by this server. */
+export async function getEmailUsage() {
+  const today = utcDay();
+  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const [day, month] = await Promise.all([
+    prisma.emailDailyUsage.findUnique({ where: { day: today } }),
+    prisma.emailDailyUsage.aggregate({ where: { day: { gte: monthStart } }, _sum: { count: true } }),
+  ]);
+  return {
+    sentToday: day?.count ?? 0,
+    sentThisMonth: month._sum.count ?? 0,
+    dailyLimit: EMAIL_DAILY_LIMIT,
+    monthlyLimit: EMAIL_MONTHLY_LIMIT,
+  };
+}
+
+// Admin-written text is placed into email HTML — always escaped.
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * A payment-reminder notification sent as email (the only notification type
+ * that can be emailed). `balances` lists what this student still owes.
+ */
+export const sendPaymentReminderEmail = async (to, { studentName, title, message, balances, dashboardUrl }) => {
+  const rows = balances
+    .map((balance) => `<li><strong>${escapeHtml(balance.courseTitle)}</strong>: ${escapeHtml(balance.owedLabel)} remaining</li>`)
+    .join("");
+  await send({
+    from: getFromAddress(),
+    to,
+    subject: title,
+    html: `
+      <p>Hi ${escapeHtml(studentName)},</p>
+      <p>${escapeHtml(message).replaceAll(String.fromCharCode(10), "<br>")}</p>
+      ${rows ? `<ul>${rows}</ul>` : ""}
+      <p><a href="${escapeHtml(dashboardUrl)}">Open your Foundry Academy dashboard</a></p>
+      <p style="color:#71717A;font-size:12px">Questions? Reply to our WhatsApp at 072 362 2112.</p>
+    `,
+  });
+};
 
 /**
  * Send a password reset email containing the reset link.

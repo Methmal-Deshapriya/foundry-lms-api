@@ -47,3 +47,36 @@ export async function markFailed(id) {
     throw handlePrismaError(error);
   }
 }
+
+// Every relation that can point at a stored object. A READY object with none
+// of these is unused — e.g. a replaced thumbnail, or an upload whose form was
+// never saved. Keep this list in sync with the StoredObject model.
+const UNREFERENCED = {
+  courseThumbnails: { none: {} },
+  courseExplainerVideoThumbnails: { none: {} },
+  sessionRecordings: { none: {} },
+  sessionMaterials: { none: {} },
+  projectThumbnails: { none: {} },
+  serviceHeroImages: { none: {} },
+  serviceCardImages: { none: {} },
+  promotionImages: { none: {} },
+  studentProfileAvatar: { is: null },
+  paymentProof: { is: null },
+  expenseReceipt: { is: null },
+};
+
+/**
+ * Files safe to delete: uploads never completed (PENDING/FAILED), and
+ * completed uploads nothing references — both older than `olderThan`, so a
+ * form someone is still filling in is never touched.
+ */
+export function findCleanupCandidates(olderThan, limit) {
+  return prisma.storedObject.findMany({
+    where: {
+      createdAt: { lt: olderThan },
+      OR: [{ status: { in: ["PENDING", "FAILED"] } }, { status: "READY", ...UNREFERENCED }],
+    },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
+}

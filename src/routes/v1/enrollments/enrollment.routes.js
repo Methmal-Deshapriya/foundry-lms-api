@@ -22,6 +22,7 @@ router.use(authenticate);
  * @access  Private (STUDENT, ADMIN, SUPER_ADMIN)
  */
 router.get("/my", enrollmentController.getMyEnrollmentsController);
+router.get("/at-risk", requirePermission(PERMISSIONS.ENROLLMENTS_MANAGE), enrollmentController.getAtRiskStudentsController);
 
 router.get("/:enrollmentId/classroom", classroomController.getClassroom);
 router.get("/:enrollmentId/progress", classroomController.getProgress);
