@@ -945,10 +945,6 @@
       ]
     },
     {
-      "name": "04 Categories",
-      "item": []
-    },
-    {
       "name": "05 Courses",
       "item": [
         {
@@ -972,12 +968,6 @@
                 "courses"
               ],
               "query": [
-                {
-                  "key": "categoryId",
-                  "value": "{{categoryId}}",
-                  "description": "",
-                  "disabled": true
-                },
                 {
                   "key": "serviceId",
                   "value": "{{learningServiceId}}",
@@ -1041,7 +1031,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"slug\": \"ai-ml-ignition\",\n  \"title\": \"AI/ML Ignition Program\",\n  \"summary\": \"Learn practical AI and machine-learning foundations.\",\n  \"description\": \"A practical guided program for engineers beginning applied AI and machine learning.\",\n  \"level\": \"BEGINNER\",\n  \"durationValue\": 4,\n  \"durationUnit\": \"WEEK\",\n  \"price\": 0,\n  \"highlights\": [\n    \"Requests\",\n    \"Environments\",\n    \"Tests\"\n  ],\n  \"skills\": [\n    \"Postman\",\n    \"HTTP\",\n    \"API Testing\"\n  ],\n  \"prerequisites\": [\n    \"Basic web knowledge\"\n  ],\n  \"thumbnailUrl\": null,\n  \"sortOrder\": 0,\n  \"intakeCodePrefix\": \"AI-ML-IGNITION\",\n  \"certificateEnabled\": true,\n  \"discountAmount\": 0\n}",
+              "raw": "{\n  \"serviceId\": \"{{learningServiceId}}\",\n  \"slug\": \"ai-ml-ignition\",\n  \"title\": \"AI/ML Ignition Program\",\n  \"summary\": \"Learn practical AI and machine-learning foundations.\",\n  \"description\": \"A practical guided program for engineers beginning applied AI and machine learning.\",\n  \"level\": \"BEGINNER\",\n  \"durationValue\": 4,\n  \"durationUnit\": \"WEEK\",\n  \"price\": 0,\n  \"highlights\": [\n    \"Requests\",\n    \"Environments\",\n    \"Tests\"\n  ],\n  \"skills\": [\n    \"Postman\",\n    \"HTTP\",\n    \"API Testing\"\n  ],\n  \"prerequisites\": [\n    \"Basic web knowledge\"\n  ],\n  \"thumbnailUrl\": null,\n  \"sortOrder\": 0,\n  \"intakeCodePrefix\": \"AI-ML-IGNITION\",\n  \"certificateEnabled\": true,\n  \"discountAmount\": 0\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1137,7 +1127,7 @@
                 "{{courseId}}"
               ]
             },
-            "description": "Access: ADMIN + SUPER ADMIN\n\nCertificate policy, discount amount, intake code prefix, and parent category cannot be changed after creation.\n\nOperation ID: updateCourse"
+            "description": "Access: ADMIN + SUPER ADMIN\n\nCertificate policy, discount amount, intake code prefix, and parent learning service cannot be changed after creation.\n\nOperation ID: updateCourse"
           }
         },
         {
@@ -1331,7 +1321,7 @@
                 "unarchive"
               ]
             },
-            "description": "Access: SUPER ADMIN ONLY\n\nBlocked while the parent category or learning service is itself archived.\n\nOperation ID: unarchiveCourse"
+            "description": "Access: SUPER ADMIN ONLY\n\nBlocked while the parent learning service is archived.\n\nOperation ID: unarchiveCourse"
           }
         }
       ]
@@ -1489,12 +1479,6 @@
                 {
                   "key": "serviceId",
                   "value": "{{learningServiceId}}",
-                  "description": "",
-                  "disabled": true
-                },
-                {
-                  "key": "categoryId",
-                  "value": "{{categoryId}}",
                   "description": "",
                   "disabled": true
                 },
@@ -2568,7 +2552,7 @@
                 "enroll"
               ]
             },
-            "description": "Access: STUDENT\n\nStudent-only. The intake and its parent category must be published, enrollment must be Open, and the Free Learning intake must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.\n\nOperation ID: selfEnrollFreeCourse"
+            "description": "Access: STUDENT\n\nStudent-only. The intake must be Open Active, its parent course must be published, its learning service must be active and follow the free/self-enrollment policy, and the intake must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.\n\nOperation ID: selfEnrollFreeCourse"
           },
           "event": [
             {
@@ -3813,7 +3797,22 @@
               ]
             },
             "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. The initial release supports either paid seasonal/admin-enrolled services or free evergreen/self-enrolled services.\n\nOperation ID: createLearningService"
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json()?.data;",
+                  "  if (data?.id) pm.environment.set(\"learningServiceId\", data.id);",
+                  "  if (data?.slug) pm.environment.set(\"serviceSlug\", data.slug);",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "[ADMIN + SUPER ADMIN] Get a learning service and administration summary",
@@ -3875,7 +3874,7 @@
                 "{{learningServiceId}}"
               ]
             },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Identity and policy are protected after categories or courses depend on the service; the stable key is never mutable.\n\nOperation ID: updateLearningService"
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Identity and policy are protected after courses depend on the service; the stable key is never mutable.\n\nOperation ID: updateLearningService"
           }
         },
         {
@@ -3900,7 +3899,7 @@
                 "{{learningServiceId}}"
               ]
             },
-            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Permanent deletion requires Archived status and no categories or protected descendant history.\n\nOperation ID: deleteLearningServicePermanently"
+            "description": "Access: SUPER ADMIN ONLY\n\nSuper-admin only. Permanent deletion requires Archived status and no courses.\n\nOperation ID: deleteLearningServicePermanently"
           },
           "event": [
             {

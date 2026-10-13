@@ -1,81 +1,122 @@
 name: Database backup
 
-# Daily off-site backup of the production database into the PRIVATE R2
-# bucket, keeping the newest 14. Free: a couple of GitHub Actions minutes a
-# day, a few MB of R2. Restore steps: foundry_lms_docs/
-# 2026-10-01_database_backup_and_restore_guide.md
+# Daily off-site backup of the production database into a backup-only private
+# R2 bucket. PostgreSQL publishes no port: this job uses pinned SSH host
+# verification and streams pg_dump from the private db container. Database
+# credentials never leave the VPS.
 #
-# Required repository secrets (Settings → Secrets and variables → Actions):
-#   BACKUP_DATABASE_URL   direct postgres:// connection string (not the
-#                         prisma+postgres:// Accelerate URL)
-#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PRIVATE_BUCKET
+# Required repository secrets (scheduled jobs cannot wait for a production
+# environment approval):
+#   DEPLOY_SSH_HOST, DEPLOY_SSH_USER, DEPLOY_SSH_PRIVATE_KEY,
+#   DEPLOY_SSH_KNOWN_HOSTS
+#   R2_ACCOUNT_ID, BACKUP_R2_BUCKET,
+#   BACKUP_R2_ACCESS_KEY_ID, BACKUP_R2_SECRET_ACCESS_KEY
+# Optional repository variable: DEPLOY_SSH_PORT (defaults to 22)
+# Required activation variable: PRODUCTION_BACKUP_ENABLED=true
 
 on:
   schedule:
     - cron: "30 20 * * *" # 20:30 UTC = 02:00 in Sri Lanka
-  workflow_dispatch: # "Run workflow" button for an on-demand backup
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: database-backup
+  group: foundry-lms-production-operations
   cancel-in-progress: false
 
 jobs:
   backup:
+    if: ${{ vars.PRODUCTION_BACKUP_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT || '22' }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
       # Only the AWS SDK is needed for the upload script; skipping install
-      # scripts avoids an unnecessary `prisma generate`.
+      # scripts avoids an unnecessary Prisma generation.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      # pg_dump must be at least as new as the database server (Postgres 17).
-      - name: Install PostgreSQL 17 client
-        run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
-          /usr/lib/postgresql/17/bin/pg_dump --version
-
-      # Custom format (-Fc) is compressed and restores with pg_restore.
-      # No owner/privilege statements, so it restores into any fresh database.
-      - name: Dump database
+      - name: Validate backup configuration
+        shell: bash
         env:
-          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          BACKUP_R2_BUCKET: ${{ secrets.BACKUP_R2_BUCKET }}
+          BACKUP_R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          BACKUP_R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
         run: |
-          test -n "$BACKUP_DATABASE_URL" || { echo "BACKUP_DATABASE_URL secret is not set."; exit 1; }
-          /usr/lib/postgresql/17/bin/pg_dump --format=custom --no-owner --no-privileges --file=backup.dump "$BACKUP_DATABASE_URL"
+          set -euo pipefail
+          required=(
+            DEPLOY_SSH_HOST DEPLOY_SSH_PORT DEPLOY_SSH_USER
+            DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS
+            BACKUP_R2_ACCOUNT_ID BACKUP_R2_BUCKET
+            BACKUP_R2_ACCESS_KEY_ID BACKUP_R2_SECRET_ACCESS_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required backup secret or variable is missing: ${name}" >&2
+              exit 1
+            fi
+          done
+          [[ "$DEPLOY_SSH_PORT" =~ ^[0-9]+$ ]] || { echo "DEPLOY_SSH_PORT must be numeric." >&2; exit 1; }
+
+      - name: Configure pinned SSH access
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/foundry_backup"
+          chmod 600 "$HOME/.ssh/foundry_backup"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/foundry_backup" -p "$DEPLOY_SSH_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" 'test -d /opt/foundry-lms/env'
+
+      # The reusable script emits only the custom-format dump on stdout.
+      - name: Stream dump from private PostgreSQL container
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/foundry_backup" -p "$DEPLOY_SSH_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" 'bash -s' \
+            < deploy/scripts/stream-database-backup.sh > backup.dump
+          test -s backup.dump
           ls -lh backup.dump
 
-      # A dump nobody can restore is no backup: pg_restore must be able to
-      # read its table of contents, and it must contain table data
-      # (code review M10-11).
+      # A dump nobody can restore is no backup. Use the exact PostgreSQL major
+      # version in a disposable client container to inspect its contents.
       - name: Check the dump is restorable
+        shell: bash
         run: |
-          /usr/lib/postgresql/17/bin/pg_restore --list backup.dump > backup.toc
+          set -euo pipefail
+          docker run --rm -v "$PWD:/backup:ro" postgres:17.11-alpine \
+            pg_restore --list /backup/backup.dump > backup.toc
           entries=$(grep -c "TABLE DATA" backup.toc || true)
           echo "Table data entries: $entries"
-          test "$entries" -gt 0 || { echo "The dump has no table data."; exit 1; }
+          test "$entries" -gt 0 || { echo "The dump has no table data." >&2; exit 1; }
 
       - name: Upload to R2 and prune old backups
         env:
-          # A token and bucket of their own, so the app's R2 key (which the
-          # API server holds) can never delete the backups (code review M10-11).
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
@@ -84,3 +125,8 @@ jobs:
           BACKUP_RETENTION_COUNT: "14"
           BACKUP_MONTHLY_RETENTION_COUNT: "12"
         run: node scripts/upload-database-backup.js backup.dump
+
+      - name: Remove SSH material from the runner
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f "$HOME/.ssh/foundry_backup" "$HOME/.ssh/known_hosts"

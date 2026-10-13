@@ -9,7 +9,6 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "studio": "prisma studio",
-    "seed": "prisma db seed",
     "bootstrap:super-admin": "node prisma/bootstrap-super-admin.js",
     "auth:cleanup": "node scripts/cleanup-auth-artifacts.js",
     "db:configure-timeouts": "node scripts/configure-database-timeouts.js",

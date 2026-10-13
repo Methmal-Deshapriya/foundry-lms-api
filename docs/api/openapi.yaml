@@ -20,7 +20,6 @@ tags:
   - name: 01 Authentication
   - name: 02 Users
   - name: 03 Public Catalog
-  - name: 04 Categories
   - name: 05 Courses
   - name: 06 Course Intakes
   - name: 07 Session Library
@@ -117,7 +116,7 @@ paths:
       operationId: updateLearningService
       summary: Update a Draft learning service
       x-access: SUPER_ADMIN
-      description: Super-admin only. Identity and policy are protected after categories or courses depend on the service; the stable key is never mutable.
+      description: Super-admin only. Identity and policy are protected after courses depend on the service; the stable key is never mutable.
       parameters:
         - $ref: "#/components/parameters/LearningServiceId"
       requestBody:
@@ -130,7 +129,7 @@ paths:
       operationId: deleteLearningServicePermanently
       summary: "[DESTRUCTIVE] Permanently delete an archived empty learning service"
       x-access: SUPER_ADMIN
-      description: Super-admin only. Permanent deletion requires Archived status and no categories or protected descendant history.
+      description: Super-admin only. Permanent deletion requires Archived status and no courses.
       parameters:
         - $ref: "#/components/parameters/LearningServiceId"
       responses:
@@ -538,7 +537,6 @@ paths:
         shared by every Intake underneath it. See the 2026-08-30
         course-to-program-intake rename plan.
       parameters:
-        - $ref: "#/components/parameters/CategoryIdFilter"
         - $ref: "#/components/parameters/ServiceIdFilter"
         - $ref: "#/components/parameters/CourseLevelFilter"
         - $ref: "#/components/parameters/CourseEnrollmentStatusFilter"
@@ -577,7 +575,7 @@ paths:
       operationId: updateCourse
       summary: Update course content and pricing
       x-access: ADMIN
-      description: Certificate policy, discount amount, intake code prefix, and parent category cannot be changed after creation.
+      description: Certificate policy, discount amount, intake code prefix, and parent learning service cannot be changed after creation.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       requestBody:
@@ -673,7 +671,7 @@ paths:
       operationId: unarchiveCourse
       summary: Restore an archived course
       x-access: SUPER_ADMIN
-      description: Blocked while the parent category or learning service is itself archived.
+      description: Blocked while the parent learning service is archived.
       parameters:
         - $ref: "#/components/parameters/CourseId"
       responses:
@@ -751,7 +749,6 @@ paths:
       description: One Intake is a single scheduled, enrollable run of a Course — dates, capacity, code, and lifecycle status live here.
       parameters:
         - $ref: "#/components/parameters/ServiceIdFilter"
-        - $ref: "#/components/parameters/CategoryIdFilter"
         - $ref: "#/components/parameters/CourseIdFilter"
         - $ref: "#/components/parameters/IntakeStatusFilter"
         - $ref: "#/components/parameters/SearchQuery"
@@ -1193,7 +1190,7 @@ paths:
       operationId: selfEnrollFreeCourse
       summary: Self-enroll in a free intake
       x-access: STUDENT
-      description: Student-only. The intake and its parent category must be published, enrollment must be Open, and the Free Learning intake must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.
+      description: Student-only. The intake must be Open Active, its parent course must be published, its learning service must be active and follow the free/self-enrollment policy, and the intake must contain at least one active curriculum session. Repeating the request for a live enrollment is idempotent. If the student's direct enrollment was cancelled, the same enrollment is reactivated so its progress and history remain attached; reactivation is intentionally not an admin operation.
       parameters:
         - $ref: "#/components/parameters/IntakeId"
       responses:
@@ -2742,24 +2739,12 @@ components:
       required: true
       schema: { type: string, format: uuid }
       example: "{{learningServiceId}}"
-    CategorySlug:
-      name: categorySlug
-      in: path
-      required: true
-      schema: { type: string }
-      example: "{{categorySlug}}"
     CourseSlug:
       name: courseSlug
       in: path
       required: true
       schema: { type: string }
       example: "{{courseSlug}}"
-    CategoryId:
-      name: categoryId
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-      example: "{{categoryId}}"
     CourseId:
       name: courseId
       in: path
@@ -2841,11 +2826,6 @@ components:
       name: includeArchived
       in: query
       schema: { type: boolean, default: true }
-    CategoryIdFilter:
-      name: categoryId
-      in: query
-      schema: { type: string, format: uuid }
-      example: "{{categoryId}}"
     CatalogStatusFilter:
       name: status
       in: query
@@ -3114,31 +3094,6 @@ components:
             $ref: "#/components/schemas/TransitionLearningServiceStatusInput"
           example:
             expectedStatus: DRAFT
-    CreateCategory:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/CreateCategoryInput"
-          example:
-            serviceId: "{{learningServiceId}}"
-            slug: api-testing
-            title: API Testing
-            description: Practical API testing courses for software engineers.
-            audienceLabel: Beginner friendly
-            visualKey: code2
-            badgeLabel: New
-            sortOrder: 0
-    UpdateCategory:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/UpdateCategoryInput"
-          example:
-            title: API Testing and Quality
-            description: Practical API testing and quality courses for software engineers.
-            sortOrder: 1
     CreateCourse:
       required: true
       content:
@@ -3146,7 +3101,7 @@ components:
           schema:
             $ref: "#/components/schemas/CreateCourseInput"
           example:
-            categoryId: "{{categoryId}}"
+            serviceId: "{{learningServiceId}}"
             slug: ai-ml-ignition
             title: AI/ML Ignition Program
             summary: Learn practical AI and machine-learning foundations.
@@ -3483,12 +3438,12 @@ components:
       type: object
       required: [resourceType, resourceId, resourceStatus, deletable]
       properties:
-        resourceType: { type: string, enum: [LEARNING_SERVICE, CATEGORY, COURSE_GROUP, COURSE] }
+        resourceType: { type: string, enum: [LEARNING_SERVICE, COURSE, INTAKE] }
         resourceId: { type: string, format: uuid }
         resourceStatus: { type: string }
         deletable: { type: boolean }
         courses: { type: integer, minimum: 0 }
-        courseGroups: { type: integer, minimum: 0 }
+        intakes: { type: integer, minimum: 0 }
         history: { type: integer, minimum: 0 }
         curriculumLinks: { type: integer, minimum: 0 }
         enrollments: { type: integer, minimum: 0 }
@@ -3623,38 +3578,11 @@ components:
         district: { type: string }
         dateOfBirth: { type: string, format: date-time }
         alStream: { type: string, enum: [Science, Mathematics, Commerce, Arts, Technology] }
-    CreateCategoryInput:
-      type: object
-      required: [serviceId, slug, title, description, visualKey]
-      properties:
-        serviceId: { type: string, format: uuid }
-        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
-        title: { type: string, minLength: 2, maxLength: 120 }
-        description: { type: string, minLength: 10, maxLength: 600 }
-        audienceLabel: { type: string, nullable: true }
-        visualKey:
-          type: string
-          enum: [sparkles, cpu, code2, workflow, calculator, atom, bar-chart3, terminal, git-branch, globe, languages]
-        badgeLabel: { type: string, nullable: true }
-        sortOrder: { type: integer, minimum: 0 }
-    UpdateCategoryInput:
-      type: object
-      minProperties: 1
-      properties:
-        slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
-        title: { type: string, minLength: 2, maxLength: 120 }
-        description: { type: string, minLength: 10, maxLength: 600 }
-        audienceLabel: { type: string, nullable: true }
-        visualKey:
-          type: string
-          enum: [sparkles, cpu, code2, workflow, calculator, atom, bar-chart3, terminal, git-branch, globe, languages]
-        badgeLabel: { type: string, nullable: true }
-        sortOrder: { type: integer, minimum: 0 }
     CreateCourseInput:
       type: object
-      required: [categoryId, slug, title, summary, description, level, price, intakeCodePrefix, certificateEnabled]
+      required: [serviceId, slug, title, summary, description, level, price, intakeCodePrefix, certificateEnabled]
       properties:
-        categoryId: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid, description: "Immutable parent learning service." }
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         title: { type: string, minLength: 3, maxLength: 160 }
         summary: { type: string, minLength: 10, maxLength: 300 }
@@ -3700,7 +3628,7 @@ components:
     UpdateCourseInput:
       type: object
       minProperties: 1
-      description: Certificate policy, discount amount, intake code prefix, and category cannot be changed after creation.
+      description: Certificate policy, discount amount, intake code prefix, and parent learning service cannot be changed after creation.
       properties:
         slug: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
         title: { type: string, minLength: 3, maxLength: 160 }
