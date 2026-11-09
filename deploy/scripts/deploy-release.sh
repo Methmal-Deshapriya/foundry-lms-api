@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 if [[ "$#" -ne 4 ]]; then
-  echo "Usage: deploy-release.sh <release-tag> <image-archive.gz> <compose-candidate> <rollback-script-candidate>" >&2
+  echo "Usage: deploy-release.sh <release-tag> <image-archive.gz|--images-present> <compose-candidate> <rollback-script-candidate>" >&2
   exit 2
 fi
 
@@ -10,6 +10,12 @@ release_tag="$1"
 image_archive="$2"
 compose_candidate="$3"
 rollback_candidate="$4"
+# "--images-present": the images were built on this server
+# (build-release-on-server.sh), so there is no archive to load.
+images_present=0
+if [[ "${image_archive}" == "--images-present" ]]; then
+  images_present=1
+fi
 
 APP_DIR="${FOUNDRY_APP_DIR:-/opt/foundry-lms}"
 ENV_DIR="${APP_DIR}/env"
@@ -26,7 +32,9 @@ if [[ ! "${release_tag}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
   exit 2
 fi
 
-for required in "${DEPLOY_ENV_FILE}" "${image_archive}" "${compose_candidate}" "${rollback_candidate}"; do
+required_files=("${DEPLOY_ENV_FILE}" "${compose_candidate}" "${rollback_candidate}")
+[[ "${images_present}" -eq 1 ]] || required_files+=("${image_archive}")
+for required in "${required_files[@]}"; do
   if [[ ! -f "${required}" ]]; then
     echo "Required deployment file not found: ${required}" >&2
     exit 1
@@ -34,7 +42,9 @@ for required in "${DEPLOY_ENV_FILE}" "${image_archive}" "${compose_candidate}" "
 done
 
 incoming_root="$(realpath "${INCOMING_DIR}")"
-for candidate in "${image_archive}" "${compose_candidate}" "${rollback_candidate}"; do
+incoming_inputs=("${compose_candidate}" "${rollback_candidate}")
+[[ "${images_present}" -eq 1 ]] || incoming_inputs+=("${image_archive}")
+for candidate in "${incoming_inputs[@]}"; do
   resolved="$(realpath "${candidate}")"
   case "${resolved}" in
     "${incoming_root}"/*) ;;
@@ -127,8 +137,10 @@ trap rollback_after_error ERR
 APP_TAG="${release_tag}" FOUNDRY_ENV_DIR="${ENV_DIR}" \
   docker compose --env-file "${DEPLOY_ENV_FILE}" -f "${compose_candidate}" config --quiet
 
-echo "Loading release images for ${release_tag}."
-gzip -dc "${image_archive}" | docker load
+if [[ "${images_present}" -eq 0 ]]; then
+  echo "Loading release images for ${release_tag}."
+  gzip -dc "${image_archive}" | docker load
+fi
 for image in \
   "foundry-lms-api:${release_tag}" \
   "foundry-lms-api-migrate:${release_tag}" \
@@ -172,7 +184,8 @@ wait_for_node_url web http://127.0.0.1:3000/sign-in Website
 
 trap - ERR
 
-rm -f "$(realpath "${image_archive}")" "$(realpath "${compose_candidate}")" "$(realpath "${rollback_candidate}")"
+rm -f "$(realpath "${compose_candidate}")" "$(realpath "${rollback_candidate}")"
+[[ "${images_present}" -eq 1 ]] || rm -f "$(realpath "${image_archive}")"
 
 # Keep the current and immediately previous application releases. Removal is
 # best-effort because Docker correctly refuses to delete an image still used

@@ -142,7 +142,9 @@ jobs:
     needs: release_gate
     if: ${{ needs.release_gate.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Images are built on the ARM64 Oracle server itself (2 OCPU), which
+    # takes longer than the old x86 runner build.
+    timeout-minutes: 75
     environment:
       name: production
       url: https://foundryacademy.lk
@@ -154,8 +156,6 @@ jobs:
       DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
       DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
       DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-      NEXT_PUBLIC_R2_ACCOUNT_ID: ${{ vars.PRODUCTION_R2_ACCOUNT_ID }}
-      NEXT_PUBLIC_IMAGE_ORIGINS: ${{ vars.PRODUCTION_IMAGE_ORIGINS || 'https://assets.foundryacademy.lk' }}
 
     steps:
       - name: Check out tested API revision
@@ -183,7 +183,6 @@ jobs:
           required=(
             DEPLOY_SSH_HOST DEPLOY_SSH_PORT DEPLOY_SSH_USER
             DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS
-            NEXT_PUBLIC_R2_ACCOUNT_ID NEXT_PUBLIC_IMAGE_ORIGINS
             BACKUP_R2_ACCOUNT_ID BACKUP_R2_BUCKET
             BACKUP_R2_ACCESS_KEY_ID BACKUP_R2_SECRET_ACCESS_KEY
           )
@@ -196,57 +195,16 @@ jobs:
           [[ "$DEPLOY_SSH_PORT" =~ ^[0-9]+$ ]] || { echo "DEPLOY_SSH_PORT must be numeric." >&2; exit 1; }
           [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || { echo "Invalid release tag." >&2; exit 1; }
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Build API runtime image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: server
-          target: runner
-          platforms: linux/amd64
-          load: true
-          tags: foundry-lms-api:${{ env.RELEASE_TAG }}
-          cache-from: type=gha,scope=foundry-api-runtime
-          cache-to: type=gha,mode=max,scope=foundry-api-runtime
-
-      - name: Build API migration image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: server
-          target: migrate
-          platforms: linux/amd64
-          load: true
-          tags: foundry-lms-api-migrate:${{ env.RELEASE_TAG }}
-          cache-from: type=gha,scope=foundry-api-migrate
-          cache-to: type=gha,mode=max,scope=foundry-api-migrate
-
-      - name: Build website image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: client
-          platforms: linux/amd64
-          load: true
-          tags: foundry-lms-web:${{ env.RELEASE_TAG }}
-          build-args: |
-            NEXT_PUBLIC_API_BASE_URL=https://api.foundryacademy.lk/api/v1
-            NEXT_PUBLIC_IMAGE_ORIGINS=${{ env.NEXT_PUBLIC_IMAGE_ORIGINS }}
-            NEXT_PUBLIC_R2_ACCOUNT_ID=${{ env.NEXT_PUBLIC_R2_ACCOUNT_ID }}
-          cache-from: type=gha,scope=foundry-web
-          cache-to: type=gha,mode=max,scope=foundry-web
-
-      - name: Package the three release images
+      # The production server is ARM64 (Oracle Ampere A1). Instead of
+      # building x86 images here, ship the exact tested source and build the
+      # images natively on the server (deploy/scripts/build-release-on-server.sh).
+      - name: Package the tested source for the server
         shell: bash
         run: |
           set -euo pipefail
-          archive="foundry-lms-${RELEASE_TAG}.tar.gz"
-          docker save \
-            "foundry-lms-api:${RELEASE_TAG}" \
-            "foundry-lms-api-migrate:${RELEASE_TAG}" \
-            "foundry-lms-web:${RELEASE_TAG}" \
-            | gzip -1 > "$archive"
-          test -s "$archive"
-          ls -lh "$archive"
+          git -C server archive --format=tar.gz -o "$PWD/server-src-${RELEASE_TAG}.tar.gz" HEAD
+          git -C client archive --format=tar.gz -o "$PWD/client-src-${RELEASE_TAG}.tar.gz" HEAD
+          ls -lh ./*-src-"${RELEASE_TAG}".tar.gz
 
       - name: Configure pinned SSH access
         shell: bash
@@ -260,7 +218,7 @@ jobs:
           ssh -i "$HOME/.ssh/foundry_deploy" -p "$DEPLOY_SSH_PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" 'test -d /opt/foundry-lms/env && test -d /opt/foundry-lms/incoming'
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" 'test -d /opt/foundry-lms/env && test -d /opt/foundry-lms/incoming && test -f /opt/foundry-lms/env/web-build.env'
 
       - name: Create private-database pre-deploy backup
         shell: bash
@@ -300,23 +258,22 @@ jobs:
           BACKUP_MONTHLY_RETENTION_COUNT: "12"
         run: node scripts/upload-database-backup.js ../backup.dump
 
-      - name: Transfer and deploy release
+      - name: Transfer source, build on the server, and deploy
         shell: bash
         run: |
           set -euo pipefail
           remote="$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST"
           common=(-i "$HOME/.ssh/foundry_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
-          archive="foundry-lms-${RELEASE_TAG}.tar.gz"
+          server_src="server-src-${RELEASE_TAG}.tar.gz"
+          client_src="client-src-${RELEASE_TAG}.tar.gz"
 
           scp "${common[@]}" -P "$DEPLOY_SSH_PORT" \
-            "$archive" \
-            server/deploy/compose.production.yml \
-            server/deploy/scripts/rollback-release.sh \
+            "$server_src" "$client_src" \
             "$remote:/opt/foundry-lms/incoming/"
 
           ssh "${common[@]}" -p "$DEPLOY_SSH_PORT" "$remote" \
-            "bash -s -- '$RELEASE_TAG' '/opt/foundry-lms/incoming/$archive' '/opt/foundry-lms/incoming/compose.production.yml' '/opt/foundry-lms/incoming/rollback-release.sh'" \
-            < server/deploy/scripts/deploy-release.sh
+            "bash -s -- '$RELEASE_TAG' '/opt/foundry-lms/incoming/$server_src' '/opt/foundry-lms/incoming/$client_src'" \
+            < server/deploy/scripts/build-release-on-server.sh
 
       - name: Verify public production routes or roll back
         shell: bash
