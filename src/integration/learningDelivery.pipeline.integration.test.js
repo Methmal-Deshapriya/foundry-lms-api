@@ -44,6 +44,11 @@ async function cleanupFixture() {
   await prisma.certificate.deleteMany({ where: { enrollment: { intakeId: { in: intakeIds } } } });
   await prisma.sessionCompletion.deleteMany({ where: { intakeId: { in: intakeIds } } });
   await prisma.studentProject.deleteMany({ where: { intakeId: { in: intakeIds } } });
+  // The payment ledger blocks deleting an enrollment that still has payments,
+  // and a correction blocks deleting the payment it corrects: corrections first.
+  const fixturePayments = { enrollment: { intakeId: { in: intakeIds } } };
+  await prisma.payment.deleteMany({ where: { ...fixturePayments, correctsPaymentId: { not: null } } });
+  await prisma.payment.deleteMany({ where: fixturePayments });
   await prisma.enrollment.deleteMany({ where: { intakeId: { in: intakeIds } } });
   await prisma.courseSession.deleteMany({ where: { intakeId: { in: intakeIds } } });
   await prisma.intake.deleteMany({ where: { id: { in: intakeIds } } });
