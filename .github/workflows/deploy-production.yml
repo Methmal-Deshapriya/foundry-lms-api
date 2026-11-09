@@ -87,7 +87,9 @@ jobs:
       - name: Verify API
         working-directory: server
         env:
-          DATABASE_URL: prisma+postgres://accelerate.prisma-data.net/?api_key=ci-placeholder
+          # Unit tests mock the database; a plain address is never contacted
+          # (an Accelerate placeholder fails the run; see verify.yml).
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_unused
         run: |
           npx prisma validate
           npm test
@@ -100,6 +102,8 @@ jobs:
           DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_release_gate
           DIRECT_DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_release_gate
           JWT_SECRET: foundry-release-gate-secret-with-at-least-32-bytes
+          # Certificates embed a public verification link built from this.
+          CLIENT_URL: https://foundryacademy.lk
           RUN_DATABASE_INTEGRATION: "1"
         run: |
           npx prisma generate
