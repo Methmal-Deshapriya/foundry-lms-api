@@ -10,6 +10,7 @@ vi.mock("../../../repositories/v1/catalog/learningService.repository.js", () => 
 }));
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
 vi.mock("./publicCatalogCache.service.js", () => ({ revalidatePublicCatalogCache: vi.fn() }));
+vi.mock("../storage/storedObject.service.js", () => ({ assertAttachableStoredObject: vi.fn().mockResolvedValue({ id: "stored-object", status: "READY" }) }));
 
 import * as repository from "../../../repositories/v1/catalog/learningService.repository.js";
 import {
@@ -18,6 +19,20 @@ import {
   transitionLearningServiceStatusService,
   updateLearningServiceService,
 } from "./learningService.service.js";
+
+const heroImageObjectId = "30000000-0000-4000-8000-000000000001";
+const cardImageObjectId = "30000000-0000-4000-8000-000000000002";
+const processSteps = [
+  { title: "Step one", description: "Description for step one." },
+  { title: "Step two", description: "Description for step two." },
+  { title: "Step three", description: "Description for step three." },
+  { title: "Step four", description: "Description for step four." },
+];
+const faqItems = [
+  { question: "Question one?", answer: "Answer to question one." },
+  { question: "Question two?", answer: "Answer to question two." },
+  { question: "Question three?", answer: "Answer to question three." },
+];
 
 const paidService = {
   id: "20000000-0000-4000-8000-000000000010",
@@ -31,7 +46,14 @@ const paidService = {
   paymentRequirement: "REQUIRED",
   status: "DRAFT",
   sortOrder: 4,
-  _count: { categories: 0 },
+  summary: "Paid seasonal career labs.",
+  heroHeadline: "Build your career with hands-on labs",
+  heroTags: ["Practical learning", "Beginner-friendly pathways"],
+  heroImageObjectId,
+  cardImageObjectId,
+  processSteps,
+  faqItems,
+  _count: { courses: 0 },
 };
 
 describe("learning-service domain", () => {
@@ -46,7 +68,7 @@ describe("learning-service domain", () => {
       _count: undefined,
     }, "actor-1");
     expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({ status: "DRAFT" }));
-    expect(result).toMatchObject({ key: "CAREER_LABS", categoryCount: 0 });
+    expect(result).toMatchObject({ key: "CAREER_LABS", courseCount: 0 });
   });
 
   it("rejects a policy combination without an implemented workflow", async () => {
@@ -79,9 +101,9 @@ describe("learning-service domain", () => {
 
   it("joins operational summaries without one request per service", async () => {
     repository.findAdmin.mockResolvedValue({ total: 1, services: [paidService] });
-    repository.findAdminSummaries.mockResolvedValue([{ serviceId: paidService.id, categoryTotal: 2 }]);
+    repository.findAdminSummaries.mockResolvedValue([{ serviceId: paidService.id, courseTotal: 2 }]);
     const result = await listLearningServicesService({ includeArchived: "true" });
-    expect(result.services[0]).toMatchObject({ id: paidService.id, categories: { total: 2 } });
+    expect(result.services[0]).toMatchObject({ id: paidService.id, courses: { total: 2 } });
     expect(repository.findAdminSummaries).toHaveBeenCalledWith([paidService.id]);
   });
 });

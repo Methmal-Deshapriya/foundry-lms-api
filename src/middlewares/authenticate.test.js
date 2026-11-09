@@ -36,6 +36,15 @@ describe("authenticate security claims", () => {
     );
   });
 
+  it("refuses every session of a suspended account (M10-05)", async () => {
+    const { next, res } = await run(
+      { id: "student-1", role: "STUDENT", sv: 0, mfa: false },
+      { id: "student-1", role: "STUDENT", securityVersion: 0, disabledAt: new Date() },
+    );
+    expect(next.mock.calls[0][0]).toMatchObject({ statusCode: 401, code: "ACCOUNT_SUSPENDED" });
+    expect(res.clearCookie).toHaveBeenCalled();
+  });
+
   it("clears an expired authentication cookie", async () => {
     process.env.JWT_EXPIRES_IN = "-1s";
     const { next, res } = await run(

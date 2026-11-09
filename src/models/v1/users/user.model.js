@@ -18,6 +18,7 @@ export function toAdminUserResponse(user) {
     email: user.email,
     role: user.role,
     emailVerified: user.emailVerified,
+    disabledAt: user.disabledAt ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -46,6 +47,7 @@ export function toAdminUserDetailResponse(user, sections) {
     dateOfBirth: user.dateOfBirth,
     alStream: user.alStream,
     emailVerified: user.emailVerified,
+    disabledAt: user.disabledAt ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     enrollments: sections.enrollments,
@@ -55,7 +57,8 @@ export function toAdminUserDetailResponse(user, sections) {
     certificates: sections.certificates,
     studentProjects: sections.studentProjects,
     enrollmentRequests: sections.enrollmentRequests,
-    auditActions: sections.auditActions,
+    // Null when the viewer may not read the audit log (code review M10-02).
+    auditActions: sections.auditActions ?? null,
   };
 }
 

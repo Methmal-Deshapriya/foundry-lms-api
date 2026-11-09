@@ -43,7 +43,7 @@ describe("auth repository transactional security", () => {
 
     expect(mocks.transaction.user.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      data: { password: "new-hash", securityVersion: { increment: 1 } },
+      data: { password: "new-hash", securityVersion: { increment: 1 }, emailVerified: true },
       select: { id: true, email: true, securityVersion: true },
     });
     expect(mocks.transaction.passwordResetToken.updateMany).toHaveBeenLastCalledWith({

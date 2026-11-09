@@ -67,6 +67,31 @@ enum SessionStatus {
   ARCHIVED
 }
 
+enum StoredObjectScope {
+  PUBLIC
+  PRIVATE
+}
+
+enum StoredObjectPurpose {
+  COURSE_THUMBNAIL
+  SESSION_RECORDING
+  SESSION_MATERIAL
+  PROJECT_THUMBNAIL
+  SERVICE_HERO
+  SERVICE_CARD
+  COURSE_EXPLAINER_VIDEO_THUMBNAIL
+  STUDENT_AVATAR
+  PAYMENT_PROOF
+  PROMOTION_IMAGE
+  EXPENSE_RECEIPT
+}
+
+enum StoredObjectStatus {
+  PENDING
+  READY
+  FAILED
+}
+
 enum CourseEnrollmentStatus {
   COMING_SOON // no intake exists yet
   OPEN // has an OPEN_ACTIVE intake right now
@@ -110,6 +135,17 @@ enum PaymentType {
   FULL // paid the full (discounted) price in one go at enrollment time
   PARTIAL // paid half the full price at enrollment time
   TOP_UP // paid the remaining half after being enrolled as PARTIAL
+  REFUND // money given back — stored as a NEGATIVE amount, points at the payment it refunds
+  REVERSAL // cancels an entry recorded by mistake — NEGATIVE, equal and opposite to that entry
+}
+
+// How the money actually moved (recorded by an admin; the system never
+// takes payments itself). Null on entries recorded before this existed.
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  ONLINE
+  OTHER
 }
 
 enum EnrollmentRequestStatus {
@@ -144,19 +180,31 @@ model User {
   role            Role      @default(STUDENT)
   emailVerified   Boolean   @default(false) @map("email_verified")
   securityVersion Int       @default(0) @map("security_version")
+  // Set while a super admin has suspended the account: no sign-in, and
+  // every session is refused (code review M10-05).
+  disabledAt      DateTime? @map("disabled_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  enrollments               Enrollment[]        @relation("StudentEnrollments")
-  managedEnrollments        Enrollment[]        @relation("EnrollmentManager")
-  recordedPayments          Payment[]
-  studentProjects           StudentProject[]
-  actorAuditLogs            AuditLog[]          @relation("ActorRelation")
-  passwordResetTokens       PasswordResetToken[]
-  emailOtps                 EmailOtp[]
-  loginChallenges           LoginChallenge[]
-  enrollmentRequests        EnrollmentRequest[] @relation("EnrollmentRequestStudent")
-  contactedEnrollmentRequests EnrollmentRequest[] @relation("EnrollmentRequestContactedBy")
+  enrollments                 Enrollment[]         @relation("StudentEnrollments")
+  managedEnrollments          Enrollment[]         @relation("EnrollmentManager")
+  recordedPayments            Payment[]
+  studentProjects             StudentProject[]
+  studentProfile              StudentProfile?
+  createdNotifications        Notification[]       @relation("NotificationCreator")
+  notificationReceipts        NotificationReceipt[]
+  createdPromotions           Promotion[]          @relation("PromotionCreator")
+  courseInterests             CourseInterest[]
+  recordedExpenses            Expense[]            @relation("ExpenseRecorder")
+  recordedPayouts             Payout[]             @relation("PayoutRecorder")
+  createdShareSets            ShareSet[]           @relation("ShareSetCreator")
+  actorAuditLogs              AuditLog[]           @relation("ActorRelation")
+  passwordResetTokens         PasswordResetToken[]
+  emailOtps                   EmailOtp[]
+  loginChallenges             LoginChallenge[]
+  enrollmentRequests          EnrollmentRequest[]  @relation("EnrollmentRequestStudent")
+  contactedEnrollmentRequests EnrollmentRequest[]  @relation("EnrollmentRequestContactedBy")
+  uploadedObjects             StoredObject[]       @relation("StoredObjectUploader")
 
   @@index([role, emailVerified, email, id])
   @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_first_name_trgm_idx")
@@ -223,36 +271,36 @@ model LearningService {
   paymentRequirement LearningPaymentRequirement @map("payment_requirement")
   status             LearningServiceStatus      @default(DRAFT)
   sortOrder          Int                        @default(0) @map("sort_order")
+  // Everything below is the public Level-2 page's own content — the hook
+  // headline, the short card blurb, the two bespoke marketing tags shown on
+  // the hero (course count is derived, not stored), the card/hero images,
+  // and the "how it works" steps + FAQ — all of which used to live only in a
+  // hardcoded frontend config keyed by slug, so a service created through
+  // the admin UI rendered with nothing. See the 2026-09-24 dynamic service
+  // content plan. `summary` is nullable and falls back to `description` (the
+  // fuller admin/hero text) so existing rows keep rendering; every other
+  // field here is required at creation time going forward.
+  summary            String?
+  heroHeadline       String?                    @map("hero_headline")
+  heroTags           String[]                   @default([]) @map("hero_tags")
+  cardImageObjectId  String?                    @map("card_image_object_id")
+  heroImageObjectId  String?                    @map("hero_image_object_id")
+  /// Array of { title, description }, rendered in order — see ServiceProcess.tsx.
+  processSteps       Json                       @default("[]") @map("process_steps")
+  /// Array of { question, answer }, rendered in order — see ServiceFaq.tsx.
+  faqItems           Json                       @default("[]") @map("faq_items")
   createdAt          DateTime                   @default(now()) @map("created_at")
   updatedAt          DateTime                   @default(now()) @updatedAt @map("updated_at")
 
-  categories Category[]
+  courses         Course[]
+  intakes         Intake[]
+  cardImageObject StoredObject? @relation("ServiceCardImageObject", fields: [cardImageObjectId], references: [id], onDelete: Restrict)
+  heroImageObject StoredObject? @relation("ServiceHeroImageObject", fields: [heroImageObjectId], references: [id], onDelete: Restrict)
 
   @@index([status, sortOrder, title])
+  @@index([cardImageObjectId])
+  @@index([heroImageObjectId])
   @@map("learning_services")
-}
-
-model Category {
-  id            String        @id @default(uuid())
-  serviceId     String        @map("service_id")
-  slug          String
-  title         String
-  description   String
-  audienceLabel String?       @map("audience_label")
-  visualKey     String        @map("visual_key")
-  badgeLabel    String?       @map("badge_label")
-  status        CatalogStatus @default(DRAFT)
-  sortOrder     Int           @default(0) @map("sort_order")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
-
-  courses Course[]
-  intakes Intake[]
-  service LearningService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-
-  @@unique([serviceId, slug])
-  @@index([serviceId, status, sortOrder])
-  @@map("categories")
 }
 
 /// The real-world program a student browses and enrolls in. Holds every piece of
@@ -260,40 +308,57 @@ model Category {
 /// here, not on Intake, because it never varies between intakes (see the
 /// 2026-08-30 course-to-program-intake rename plan for the full reasoning).
 model Course {
-  id                 String                 @id @default(uuid())
-  categoryId         String                 @map("category_id")
-  slug               String
-  title              String
-  summary            String
-  description        String
-  level              CourseLevel
-  durationValue      Int?                   @map("duration_value")
-  durationUnit       DurationUnit?          @map("duration_unit")
-  highlights         String[]               @default([])
-  skills             String[]               @default([])
-  prerequisites      String[]               @default([])
-  thumbnailUrl       String?                @map("thumbnail_url")
-  sortOrder          Int                    @default(0) @map("sort_order")
-  price              Decimal                @default(0) @db.Decimal(12, 2)
-  currency           String                 @default("LKR")
-  intakeCodePrefix   String                 @unique @map("intake_code_prefix")
-  certificateEnabled Boolean                @map("certificate_enabled")
-  discountAmount     Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
-  enrollmentStatus   CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
-  archivedAt         DateTime?              @map("archived_at")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at")
+  id                              String                 @id @default(uuid())
+  serviceId                       String                 @map("service_id")
+  slug                            String
+  title                           String
+  summary                         String
+  description                     String
+  level                           CourseLevel
+  durationValue                   Int?                   @map("duration_value")
+  durationUnit                    DurationUnit?          @map("duration_unit")
+  highlights                      String[]               @default([])
+  skills                          String[]               @default([])
+  prerequisites                   String[]               @default([])
+  thumbnailUrl                    String?                @map("thumbnail_url")
+  thumbnailObjectId               String?                @map("thumbnail_object_id")
+  sortOrder                       Int                    @default(0) @map("sort_order")
+  price                           Decimal                @default(0) @db.Decimal(12, 2)
+  currency                        String                 @default("LKR")
+  intakeCodePrefix                String                 @unique @map("intake_code_prefix")
+  certificateEnabled              Boolean                @map("certificate_enabled")
+  discountAmount                  Decimal                @default(0) @map("discount_amount") @db.Decimal(12, 2) // flat discount applied when a student pays an intake's full price in one go; set once at creation, immutable, applies to every intake under this course
+  enrollmentStatus                CourseEnrollmentStatus @default(COMING_SOON) @map("enrollment_status") // derived from this course's intakes; written by recomputeCourseEnrollmentStatus, never set directly by a client
+  status                          CatalogStatus          @default(DRAFT) // publish lifecycle — formerly gated by the (now-removed) Category's status
+  // Public course-detail-page marketing content, all optional and editable
+  // after creation like highlights/skills/prerequisites above — see the
+  // 2026-09-25 course explainer content plan.
+  targetAudience                  String?                @map("target_audience") // "Who this course is for" — a short descriptive sentence
+  /// Array of { title, description }, rendered as numbered "why pursue this course" steps — see ApiCourseDetail.tsx.
+  whyPursueSteps                  Json                   @default("[]") @map("why_pursue_steps")
+  explainerVideoUrl               String?                @map("explainer_video_url") // YouTube URL, played the same way as the landing page's AboutVideo
+  explainerVideoThumbnailObjectId String?                @map("explainer_video_thumbnail_object_id")
+  archivedAt                      DateTime?              @map("archived_at")
+  createdAt                       DateTime               @default(now()) @map("created_at")
+  updatedAt                       DateTime               @default(now()) @updatedAt @map("updated_at")
 
-  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  intakes            Intake[]
-  payments           Payment[]
-  enrollments        Enrollment[]
-  enrollmentRequests EnrollmentRequest[]
+  service                       LearningService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  thumbnailObject               StoredObject?       @relation("CourseThumbnailObject", fields: [thumbnailObjectId], references: [id], onDelete: Restrict)
+  explainerVideoThumbnailObject StoredObject?       @relation("CourseExplainerVideoThumbnailObject", fields: [explainerVideoThumbnailObjectId], references: [id], onDelete: Restrict)
+  intakes                       Intake[]
+  payments                      Payment[]
+  notifications                 Notification[]
+  interests                     CourseInterest[]
+  enrollments                   Enrollment[]
+  enrollmentRequests            EnrollmentRequest[]
 
-  @@unique([id, categoryId])
-  @@unique([categoryId, slug])
-  @@index([categoryId, archivedAt, title])
-  @@index([categoryId, enrollmentStatus, sortOrder])
+  @@unique([id, serviceId])
+  @@unique([serviceId, slug])
+  @@index([serviceId, archivedAt, title])
+  @@index([serviceId, enrollmentStatus, sortOrder])
+  @@index([serviceId, status, sortOrder])
+  @@index([thumbnailObjectId])
+  @@index([explainerVideoThumbnailObjectId])
   @@map("courses")
 }
 
@@ -303,7 +368,7 @@ model Course {
 model Intake {
   id              String       @id @default(uuid())
   courseId        String       @map("course_id")
-  categoryId      String       @map("category_id") // denormalized off Course, same reasoning as Course.categoryId off Category
+  serviceId       String       @map("service_id") // denormalized off Course, same reasoning as Course.serviceId off LearningService
   intakeKey       String       @map("intake_key")
   code            String       @unique
   startDate       DateTime?    @map("start_date") @db.Date
@@ -314,18 +379,20 @@ model Intake {
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at")
 
-  course             Course              @relation(fields: [courseId, categoryId], references: [id, categoryId], onDelete: Restrict)
-  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  course             Course              @relation(fields: [courseId, serviceId], references: [id, serviceId], onDelete: Restrict)
+  service            LearningService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   enrollments        Enrollment[]
   courseSessions     CourseSession[]
   studentProjects    StudentProject[]
   payments           Payment[]
+  notifications      Notification[]
+  expenses           Expense[]
   enrollmentRequests EnrollmentRequest[]
 
   @@unique([courseId, intakeKey])
   @@unique([id, courseId]) // lets Enrollment/Payment/EnrollmentRequest FK against (intakeId, courseId), guaranteeing the intake actually belongs to the course claimed
   @@index([courseId, status, startDate])
-  @@index([categoryId, status])
+  @@index([serviceId, status])
   @@map("intakes")
 }
 
@@ -341,11 +408,18 @@ model Enrollment {
   paymentCompletedAt       DateTime?        @map("payment_completed_at")
   externalPaymentReference String?          @map("external_payment_reference")
   paymentNote              String?          @map("payment_note")
+  // The course price this student agreed to when the paid enrollment was
+  // created. Remaining payments and "still owed" are always computed from
+  // it, never from the course's current price (which may change later).
+  // Null for free (NOT_REQUIRED) enrollments.
+  agreedPrice              Decimal?         @map("agreed_price") @db.Decimal(12, 2)
   completedAt              DateTime?        @map("completed_at")
   createdAt                DateTime         @default(now()) @map("created_at")
   updatedAt                DateTime         @default(now()) @updatedAt @map("updated_at")
 
-  user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Cascade)
+  // Restrict: deleting a student must never take their payments and
+  // certificates with it (code review M10-10).
+  user               User                @relation("StudentEnrollments", fields: [userId], references: [id], onDelete: Restrict)
   enrolledBy         User?               @relation("EnrollmentManager", fields: [enrolledByUserId], references: [id], onDelete: SetNull)
   course             Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
   intake             Intake              @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
@@ -365,24 +439,65 @@ model Enrollment {
 }
 
 model Session {
-  id              String        @id @default(uuid())
-  title           String
-  description     String?
-  recordingUrl    String?       @map("recording_url")
-  materialUrl     String?       @map("material_url")
-  quizUrl         String?       @map("quiz_url")
-  feedbackUrl     String?       @map("feedback_url")
-  durationMinutes Int?          @map("duration_minutes")
-  status          SessionStatus @default(DRAFT)
-  tags            String[]      @default([])
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
+  id                String        @id @default(uuid())
+  title             String
+  description       String?
+  recordingUrl      String?       @map("recording_url")
+  materialUrl       String?       @map("material_url")
+  recordingObjectId String?       @map("recording_object_id")
+  materialObjectId  String?       @map("material_object_id")
+  quizUrl           String?       @map("quiz_url")
+  feedbackUrl       String?       @map("feedback_url")
+  durationMinutes   Int?          @map("duration_minutes")
+  status            SessionStatus @default(DRAFT)
+  tags              String[]      @default([])
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  courseSessions CourseSession[]
+  courseSessions  CourseSession[]
+  recordingObject StoredObject?   @relation("SessionRecordingObject", fields: [recordingObjectId], references: [id], onDelete: Restrict)
+  materialObject  StoredObject?   @relation("SessionMaterialObject", fields: [materialObjectId], references: [id], onDelete: Restrict)
 
   @@index([status, updatedAt(sort: Desc)])
   @@index([tags], type: Gin)
+  @@index([recordingObjectId])
+  @@index([materialObjectId])
   @@map("sessions")
+}
+
+model StoredObject {
+  id                String              @id @default(uuid())
+  objectKey         String              @unique @map("object_key")
+  scope             StoredObjectScope
+  purpose           StoredObjectPurpose
+  status            StoredObjectStatus  @default(PENDING)
+  originalFileName  String              @map("original_file_name")
+  contentType       String              @map("content_type")
+  declaredSizeBytes BigInt              @map("declared_size_bytes")
+  actualSizeBytes   BigInt?             @map("actual_size_bytes")
+  etag              String?
+  uploadedByUserId  String              @map("uploaded_by_user_id")
+  readyAt           DateTime?           @map("ready_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @default(now()) @updatedAt @map("updated_at")
+
+  uploadedBy                     User              @relation("StoredObjectUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  courseThumbnails               Course[]          @relation("CourseThumbnailObject")
+  courseExplainerVideoThumbnails Course[]          @relation("CourseExplainerVideoThumbnailObject")
+  sessionRecordings              Session[]         @relation("SessionRecordingObject")
+  sessionMaterials               Session[]         @relation("SessionMaterialObject")
+  projectThumbnails              StudentProject[]  @relation("ProjectThumbnailObject")
+  serviceHeroImages              LearningService[] @relation("ServiceHeroImageObject")
+  serviceCardImages              LearningService[] @relation("ServiceCardImageObject")
+  studentProfileAvatar           StudentProfile?   @relation("StudentProfileAvatarObject")
+  paymentProof                   Payment?          @relation("PaymentProofObject")
+  promotionImages                Promotion[]       @relation("PromotionImageObject")
+  expenseReceipt                 Expense?          @relation("ExpenseReceiptObject")
+
+  @@index([status, createdAt])
+  @@index([uploadedByUserId, createdAt(sort: Desc)])
+  @@index([purpose, status])
+  @@map("stored_objects")
 }
 
 model CourseSession {
@@ -438,19 +553,37 @@ model Payment {
   discountAmount    Decimal     @default(0) @map("discount_amount") @db.Decimal(12, 2) // recorded explicitly rather than re-derived, so a later change to a course's discount policy never rewrites what old rows say happened
   currency          String      @default("LKR")
   type              PaymentType
+  method            PaymentMethod?
   externalReference String?     @map("external_reference")
   note              String?
   recordedByUserId  String?     @map("recorded_by_user_id")
+  // When the money was actually received/returned — admins often record a
+  // payment days later, so this is separate from createdAt.
+  paidAt            DateTime    @default(now()) @map("paid_at")
+  // Sequential and never reused; shown as FA-<year>-<000123> on receipts.
+  receiptSequence   Int         @unique @default(autoincrement()) @map("receipt_sequence")
+  // Optional bank-slip photo (PRIVATE R2, super admins only).
+  proofObjectId     String?     @unique @map("proof_object_id")
+  // Set on REFUND/REVERSAL entries: the entry they correct. Entries are
+  // never edited or deleted — corrections are always new rows.
+  correctsPaymentId String?     @map("corrects_payment_id")
   createdAt         DateTime    @default(now()) @map("created_at")
 
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  recordedBy User?      @relation(fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  // Restrict: the ledger is append-only, so deleting an enrollment (or the
+  // user behind it) must never take its payment rows with it.
+  enrollment  Enrollment    @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  recordedBy  User?         @relation(fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  proofObject StoredObject? @relation("PaymentProofObject", fields: [proofObjectId], references: [id], onDelete: SetNull)
+  corrects    Payment?      @relation("PaymentCorrections", fields: [correctsPaymentId], references: [id], onDelete: Restrict)
+  corrections Payment[]     @relation("PaymentCorrections")
   course     Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
   intake     Intake     @relation(fields: [intakeId, courseId], references: [id, courseId], onDelete: Restrict)
 
   @@index([courseId, createdAt])
   @@index([intakeId, createdAt])
   @@index([enrollmentId, createdAt])
+  @@index([paidAt])
+  @@index([correctsPaymentId])
   @@map("payments")
 }
 
@@ -501,7 +634,7 @@ model Certificate {
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at")
 
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
 
   @@index([enrollmentId, status, issuedDate(sort: Desc)])
   @@index([status, issuedDate])
@@ -513,35 +646,38 @@ model Certificate {
 }
 
 model StudentProject {
-  id            String        @id @default(uuid())
-  userId        String        @map("user_id")
-  intakeId      String        @map("intake_id")
-  enrollmentId  String        @map("enrollment_id")
-  title         String
-  description   String?
-  thumbnailUrl  String?       @map("thumbnail_url")
-  projectUrl    String?       @map("project_url")
-  githubUrl     String?       @map("github_url")
-  demoUrl       String?       @map("demo_url")
-  technologies  Json          @default("[]")
-  status        ProjectStatus @default(PENDING)
-  reviewedBy    String?       @map("reviewed_by")
-  reviewedAt    DateTime?     @map("reviewed_at")
-  adminFeedback String?       @map("admin_feedback")
-  isPublic      Boolean       @default(false) @map("is_public")
-  displayOrder  Int           @default(0) @map("display_order")
-  likeCount     Int           @default(0) @map("like_count")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
+  id                String        @id @default(uuid())
+  userId            String        @map("user_id")
+  intakeId          String        @map("intake_id")
+  enrollmentId      String        @map("enrollment_id")
+  title             String
+  description       String?
+  thumbnailUrl      String?       @map("thumbnail_url")
+  thumbnailObjectId String?       @map("thumbnail_object_id")
+  projectUrl        String?       @map("project_url")
+  githubUrl         String?       @map("github_url")
+  demoUrl           String?       @map("demo_url")
+  technologies      Json          @default("[]")
+  status            ProjectStatus @default(PENDING)
+  reviewedBy        String?       @map("reviewed_by")
+  reviewedAt        DateTime?     @map("reviewed_at")
+  adminFeedback     String?       @map("admin_feedback")
+  isPublic          Boolean       @default(false) @map("is_public")
+  displayOrder      Int           @default(0) @map("display_order")
+  likeCount         Int           @default(0) @map("like_count")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
 
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  intake     Intake     @relation(fields: [intakeId], references: [id], onDelete: Restrict)
-  enrollment Enrollment @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  intake          Intake        @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  enrollment      Enrollment    @relation(fields: [enrollmentId, intakeId], references: [id, intakeId], onDelete: Cascade)
+  thumbnailObject StoredObject? @relation("ProjectThumbnailObject", fields: [thumbnailObjectId], references: [id], onDelete: Restrict)
 
   @@index([intakeId, status, isPublic])
   @@index([userId, createdAt(sort: Desc)])
   @@index([enrollmentId])
   @@index([likeCount(sort: Desc), createdAt(sort: Desc)])
+  @@index([thumbnailObjectId])
   @@map("student_projects")
 }
 
@@ -561,4 +697,302 @@ model AuditLog {
   @@index([actorUserId])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+// A student's public portfolio page (/students/<slug>). Created only through
+// the project-submission flow, and publicly visible only once the student has
+// consented AND has at least one approved public project — see the
+// 2026-10-01 public student profile plan. Holds only what the student chose
+// to publish; everything else on the page (projects, certificates) is read
+// from their own records. Never exposes contact or personal details.
+model StudentProfile {
+  id               String    @id @default(uuid())
+  userId           String    @unique @map("user_id")
+  slug             String    @unique
+  headline         String?
+  bio              String?
+  interests        String[]  @default([])
+  careerGoals      String[]  @default([]) @map("career_goals")
+  linkedinUrl      String?   @map("linkedin_url")
+  githubUrl        String?   @map("github_url")
+  portfolioUrl     String?   @map("portfolio_url")
+  // One picture per student: replacing it deletes the old file from R2.
+  avatarObjectId   String?   @unique @map("avatar_object_id")
+  publishConsentAt DateTime? @map("publish_consent_at")
+  // Profile links this student used before. Kept so an old link someone
+  // shared still reaches this student (it redirects), and so nobody else
+  // can claim it (code review M08-09).
+  previousSlugs    String[]  @default([]) @map("previous_slugs")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatarObject StoredObject? @relation("StudentProfileAvatarObject", fields: [avatarObjectId], references: [id], onDelete: SetNull)
+
+  @@map("student_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (in-app) and Promotions (public) — Phase 3 of the
+// 2026-10-01 next-features plan. A notification is ONE row however many
+// students it reaches: who sees it is worked out when each student loads a
+// page, from `audience` (+ course/intake). Only read/dismiss markers are per
+// student. Start/end windows are checked at read time, so no background
+// scheduler is needed (the server may be asleep).
+// ---------------------------------------------------------------------------
+
+enum NotificationAudience {
+  ALL_STUDENTS
+  COURSE // students enrolled (not cancelled) in courseId
+  INTAKE // students enrolled (not cancelled) in intakeId
+  PARTIAL_PAYERS // students still owing money — optionally scoped to courseId/intakeId
+  COURSE_INTEREST // students who asked to be told when courseId opens ("Notify me")
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PromotionTheme {
+  DARK
+  LIGHT
+  RED
+}
+
+model Notification {
+  id              String               @id @default(uuid())
+  title           String
+  message         String
+  audience        NotificationAudience
+  courseId        String?              @map("course_id")
+  intakeId        String?              @map("intake_id")
+  linkLabel       String?              @map("link_label")
+  linkUrl         String?              @map("link_url")
+  // Pinned notifications also show as a card on the student dashboard.
+  pinned          Boolean              @default(false)
+  startsAt        DateTime?            @map("starts_at")
+  endsAt          DateTime?            @map("ends_at")
+  status          PublishStatus        @default(DRAFT)
+  publishedAt     DateTime?            @map("published_at")
+  // Email is offered only for payment reminders (PARTIAL_PAYERS).
+  emailSentCount  Int                  @default(0) @map("email_sent_count")
+  emailSentAt     DateTime?            @map("email_sent_at")
+  // Set while an email send is running, so two sends can't overlap (code
+  // review M09-01). A claim older than 15 minutes counts as abandoned.
+  emailSendingAt  DateTime?            @map("email_sending_at")
+  createdByUserId String               @map("created_by_user_id")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at")
+
+  createdBy User                  @relation("NotificationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  course    Course?               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  intake    Intake?               @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  receipts  NotificationReceipt[]
+
+  @@index([status, audience])
+  @@index([courseId])
+  @@index([intakeId])
+  @@map("notifications")
+}
+
+model NotificationReceipt {
+  id             String    @id @default(uuid())
+  notificationId String    @map("notification_id")
+  userId         String    @map("user_id")
+  readAt         DateTime? @map("read_at")
+  dismissedAt    DateTime? @map("dismissed_at")
+  // When this student was emailed this reminder, so a re-send only reaches
+  // the ones who were missed (code review M09-02).
+  emailedAt      DateTime? @map("emailed_at")
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+  @@map("notification_receipts")
+}
+
+// The floating banner at the top of the landing page, designed by an admin
+// from presets (theme, badge, image, button, countdown) — never raw HTML.
+// At most one shows at a time: the most recently published live one.
+model Promotion {
+  id              String         @id @default(uuid())
+  internalName    String         @map("internal_name")
+  headline        String
+  message         String?
+  badge           String?
+  theme           PromotionTheme @default(DARK)
+  imageObjectId   String?        @map("image_object_id")
+  ctaLabel        String?        @map("cta_label")
+  ctaUrl          String?        @map("cta_url")
+  showCountdown   Boolean        @default(false) @map("show_countdown")
+  startsAt        DateTime?      @map("starts_at")
+  endsAt          DateTime?      @map("ends_at")
+  status          PublishStatus  @default(DRAFT)
+  publishedAt     DateTime?      @map("published_at")
+  createdByUserId String         @map("created_by_user_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at")
+
+  createdBy   User          @relation("PromotionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  imageObject StoredObject? @relation("PromotionImageObject", fields: [imageObjectId], references: [id], onDelete: SetNull)
+
+  @@index([status, publishedAt])
+  @@map("promotions")
+}
+
+// Emails sent per day (UTC), counted in utils/email.js for every send, so
+// the admin UI can warn before a bulk send eats Resend's free daily quota.
+model EmailDailyUsage {
+  day   DateTime @id @db.Date
+  count Int      @default(0)
+
+  @@map("email_daily_usage")
+}
+
+// "Notify me when it opens" — a signed-in student's interest in a course
+// that isn't enrolling yet. When an intake of the course opens, a
+// COURSE_INTEREST notification reaches everyone here (in-app, no email).
+model CourseInterest {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  courseId   String    @map("course_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  // Set when the "enrollment is open" notification went out for them.
+  notifiedAt DateTime? @map("notified_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([courseId])
+  @@map("course_interests")
+}
+
+// ---------------------------------------------------------------------------
+// Partner earnings — the owners' share of profit (super admins only, see
+// foundry_lms_docs/2026-10-01_partner_earnings_implementation_plan.md).
+// Revenue is read from `payments`; these tables hold only the partners,
+// their share history, expenses and payouts. Expenses and payouts are
+// append-only: a mistake gets a REVERSAL row (negative amount) pointing at
+// the entry it cancels.
+// ---------------------------------------------------------------------------
+
+enum ExpenseCategory {
+  ADVERTISING
+  INSTRUCTOR_FEES
+  SOFTWARE_HOSTING
+  VENUE
+  EQUIPMENT
+  TRANSPORT
+  OTHER
+}
+
+enum LedgerEntryKind {
+  ENTRY
+  REVERSAL
+}
+
+model Partner {
+  id           String   @id @default(uuid())
+  name         String
+  displayOrder Int      @default(0) @map("display_order")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  shareEntries ShareSetEntry[]
+  paidExpenses Expense[]       @relation("ExpensePaidBy")
+  payouts      Payout[]
+
+  @@map("partners")
+}
+
+// A split that applies to every payment and expense dated on or after
+// `effectiveFrom` (until the next set). Entries always add up to 100%.
+model ShareSet {
+  id              String   @id @default(uuid())
+  effectiveFrom   DateTime @map("effective_from")
+  note            String?
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  entries   ShareSetEntry[]
+  createdBy User?           @relation("ShareSetCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([effectiveFrom])
+  @@map("share_sets")
+}
+
+model ShareSetEntry {
+  id         String  @id @default(uuid())
+  shareSetId String  @map("share_set_id")
+  partnerId  String  @map("partner_id")
+  percent    Decimal @db.Decimal(5, 2)
+
+  shareSet ShareSet @relation(fields: [shareSetId], references: [id], onDelete: Cascade)
+  partner  Partner  @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+
+  @@unique([shareSetId, partnerId])
+  @@map("share_set_entries")
+}
+
+model Expense {
+  id                String          @id @default(uuid())
+  spentAt           DateTime        @map("spent_at")
+  // Positive for an expense; a REVERSAL carries the negated amount.
+  amount            Decimal         @db.Decimal(12, 2)
+  currency          String          @default("LKR")
+  category          ExpenseCategory
+  description       String?
+  // Set → an intake expense (reduces that intake's profit); null → general.
+  intakeId          String?         @map("intake_id")
+  // Null → paid from the business account; set → that partner paid it
+  // personally and is owed the full amount back.
+  paidByPartnerId   String?         @map("paid_by_partner_id")
+  receiptObjectId   String?         @unique @map("receipt_object_id")
+  kind              LedgerEntryKind @default(ENTRY)
+  correctsExpenseId String?         @map("corrects_expense_id")
+  recordedByUserId  String          @map("recorded_by_user_id")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  intake        Intake?       @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  paidBy        Partner?      @relation("ExpensePaidBy", fields: [paidByPartnerId], references: [id], onDelete: Restrict)
+  receiptObject StoredObject? @relation("ExpenseReceiptObject", fields: [receiptObjectId], references: [id], onDelete: SetNull)
+  recordedBy    User          @relation("ExpenseRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  corrects      Expense?      @relation("ExpenseCorrections", fields: [correctsExpenseId], references: [id], onDelete: Restrict)
+  corrections   Expense[]     @relation("ExpenseCorrections")
+
+  @@index([spentAt])
+  @@index([intakeId])
+  @@index([correctsExpenseId])
+  @@map("expenses")
+}
+
+model Payout {
+  id               String          @id @default(uuid())
+  partnerId        String          @map("partner_id")
+  // Positive for a payout; a REVERSAL carries the negated amount.
+  amount           Decimal         @db.Decimal(12, 2)
+  currency         String          @default("LKR")
+  paidAt           DateTime        @map("paid_at")
+  method           PaymentMethod?
+  reference        String?
+  note             String?
+  kind             LedgerEntryKind @default(ENTRY)
+  correctsPayoutId String?         @map("corrects_payout_id")
+  recordedByUserId String          @map("recorded_by_user_id")
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  partner     Partner  @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  recordedBy  User     @relation("PayoutRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  corrects    Payout?  @relation("PayoutCorrections", fields: [correctsPayoutId], references: [id], onDelete: Restrict)
+  corrections Payout[] @relation("PayoutCorrections")
+
+  @@index([paidAt])
+  @@index([partnerId])
+  @@index([correctsPayoutId])
+  @@map("payouts")
 }

@@ -1,7 +1,6 @@
 import prisma from "../../../utils/prisma.js";
 import {
   ConflictError,
-  NotFoundError,
   ValidationError,
   handlePrismaError,
 } from "../../../utils/Errors.js";
@@ -45,6 +44,66 @@ export async function findUserWithPassword(email) {
     where: { email },
     omit: { password: false }, // Bypasses the Global Omit from utils/prisma.js
   });
+}
+
+/** Same as findUserWithPassword, by id (change-password). */
+export async function findUserWithPasswordById(id) {
+  return await prisma.user.findUnique({
+    where: { id },
+    omit: { password: false },
+  });
+}
+
+/**
+ * Re-registration of an address that was never verified: the old row proves
+ * nothing (anyone can type any email), so the new sign-up replaces its
+ * details instead of being refused. Guarded on emailVerified=false so a
+ * verification that lands at the same moment is never overwritten.
+ * @returns {Promise<object|null>} The updated user, or null if it got verified meanwhile.
+ */
+export async function replaceUnverifiedUser(id, data) {
+  try {
+    const { count } = await prisma.user.updateMany({
+      where: { id, emailVerified: false },
+      data,
+    });
+    if (count !== 1) return null;
+    return await prisma.user.findUnique({ where: { id } });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+/**
+ * Change a signed-in user's password and end every other session.
+ * @returns {Promise<object>} { id, email, role, securityVersion } after the change.
+ */
+export async function changeUserPassword(id, hashedPassword) {
+  try {
+    return await prisma.user.update({
+      where: { id },
+      data: { password: hashedPassword, securityVersion: { increment: 1 } },
+      select: { id: true, email: true, role: true, securityVersion: true },
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+/**
+ * Administrator login activity over a recent window: how many login-code
+ * challenges were issued and how many wrong codes were entered across all
+ * of them. Used to cap guessing per account, not just per IP.
+ */
+export async function getRecentLoginChallengeActivity(userId, since) {
+  const [issued, attempts] = await Promise.all([
+    prisma.loginChallenge.count({ where: { userId, createdAt: { gte: since } } }),
+    prisma.loginChallenge.aggregate({
+      where: { userId, createdAt: { gte: since } },
+      _sum: { attempts: true },
+    }),
+  ]);
+  return { issued, failedAttempts: attempts._sum.attempts ?? 0 };
 }
 
 /**
@@ -142,6 +201,8 @@ export async function resetPasswordWithToken(tokenHash, hashedPassword) {
         data: {
           password: hashedPassword,
           securityVersion: { increment: 1 },
+          // Opening the emailed link proves the inbox belongs to this user.
+          emailVerified: true,
         },
         select: { id: true, email: true, securityVersion: true },
       });
@@ -201,7 +262,7 @@ export async function verifyEmailWithOtp(email, codeHashes, maxAttempts) {
         where: { id: otp.id },
         data: { attempts: { increment: 1 } },
       });
-      return { kind: "INVALID" };
+      return { kind: "INVALID", userId: challenge.userId };
     }
 
     const now = new Date();
@@ -217,7 +278,8 @@ export async function verifyEmailWithOtp(email, codeHashes, maxAttempts) {
   });
 
   if (result.kind === "USER_NOT_FOUND") {
-    throw new NotFoundError("This email isn't registered. Please sign up first.");
+    // Same answer as a wrong code, so this endpoint can't reveal accounts.
+    throw new ValidationError("Incorrect code. Please try again.", "code");
   }
   if (result.kind === "ALREADY_VERIFIED") {
     throw new ConflictError("This email is already verified.");
@@ -235,7 +297,10 @@ export async function verifyEmailWithOtp(email, codeHashes, maxAttempts) {
     );
   }
   if (result.kind === "INVALID") {
-    throw new ValidationError("Incorrect code. Please try again.", "code");
+    const error = new ValidationError("Incorrect code. Please try again.", "code");
+    // For the audit trail only; never sent to the client (code review M10-07).
+    error.challengeUserId = result.userId;
+    throw error;
   }
   return result.user;
 }
@@ -310,6 +375,44 @@ async function cleanupOneArtifactTable(model, cutoffFilter, batchSize) {
   });
   if (rows.length === 0) return 0;
   const { count } = await model.deleteMany({ where: { id: { in: rows.map(({ id }) => id) } } });
+  return count;
+}
+
+/**
+ * Deletes student accounts that were never verified and never used, created
+ * before `cutoff`. They can't sign in, so they hold nothing but the personal
+ * details typed at sign-up. Any relation at all keeps the row (belt and
+ * braces: an unverified account shouldn't have any). Their OTP rows cascade.
+ */
+export async function deleteStaleUnverifiedUsers(cutoff, batchSize) {
+  const stale = {
+    role: "STUDENT",
+    emailVerified: false,
+    createdAt: { lte: cutoff },
+    enrollments: { none: {} },
+    managedEnrollments: { none: {} },
+    recordedPayments: { none: {} },
+    studentProjects: { none: {} },
+    studentProfile: { is: null },
+    notificationReceipts: { none: {} },
+    courseInterests: { none: {} },
+    actorAuditLogs: { none: {} },
+    enrollmentRequests: { none: {} },
+    contactedEnrollmentRequests: { none: {} },
+    uploadedObjects: { none: {} },
+  };
+  const rows = await prisma.user.findMany({
+    where: stale,
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+    take: batchSize,
+  });
+  if (rows.length === 0) return 0;
+  // The same filter again on delete, so an account verified or used between
+  // the two queries is left alone.
+  const { count } = await prisma.user.deleteMany({
+    where: { ...stale, id: { in: rows.map(({ id }) => id) } },
+  });
   return count;
 }
 

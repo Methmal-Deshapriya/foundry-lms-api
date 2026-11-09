@@ -19,6 +19,7 @@ export async function findById(id) {
       user: true,
       intake: { include: { course: true } },
       enrollment: true,
+      thumbnailObject: true,
     },
   });
 }
@@ -28,6 +29,7 @@ const publicProjectSelect = {
   title: true,
   description: true,
   thumbnailUrl: true,
+  thumbnailObject: { select: { status: true, objectKey: true } },
   projectUrl: true,
   githubUrl: true,
   demoUrl: true,
@@ -38,7 +40,7 @@ const publicProjectSelect = {
   likeCount: true,
   createdAt: true,
   updatedAt: true,
-  user: { select: { firstName: true, lastName: true } },
+  user: { select: { firstName: true, lastName: true, studentProfile: { select: { slug: true, publishConsentAt: true } } } },
   intake: { select: { course: { select: { title: true } } } },
 };
 
@@ -60,6 +62,7 @@ export async function findByUserId(userId, { limit, cursor }) {
     where: { userId },
     include: {
       intake: { include: { course: true } },
+      thumbnailObject: true,
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
@@ -78,6 +81,8 @@ function projectSharedWhere({ q = "", intakeId }) {
             { user: { firstName: { contains: q, mode: "insensitive" } } },
             { user: { lastName: { contains: q, mode: "insensitive" } } },
             { user: { email: { contains: q, mode: "insensitive" } } },
+            // The admin search box says "title, student, or course" (M08-05).
+            { intake: { course: { title: { contains: q, mode: "insensitive" } } } },
           ],
         }
       : {}),
@@ -97,7 +102,7 @@ export async function findAllAdmin({ q = "", limit, cursor, offset = null, intak
       prisma.studentProject.count({ where }),
       prisma.studentProject.findMany({
         where,
-        include: { user: true, intake: { include: { course: true } } },
+        include: { user: true, intake: { include: { course: true } }, thumbnailObject: true },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit,
         skip: offset,
@@ -108,7 +113,7 @@ export async function findAllAdmin({ q = "", limit, cursor, offset = null, intak
 
   const rows = await prisma.studentProject.findMany({
     where,
-    include: { user: true, intake: { include: { course: true } } },
+    include: { user: true, intake: { include: { course: true } }, thumbnailObject: true },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -146,13 +151,36 @@ export async function updatePendingOwned(id, userId, data) {
       if (current.userId !== userId) {
         throw new ForbiddenError("You can only edit your own projects.");
       }
-      if (current.status !== "PENDING") {
+      // Pending projects can be edited; a rejected one can be edited and is
+      // then resubmitted for review (code review M08-02). Approved projects
+      // are final apart from their public visibility (setVisibilityOwned).
+      if (!["PENDING", "REJECTED"].includes(current.status)) {
         throw new ConflictError(
-          "This project was reviewed while you were editing it. Only pending projects can be changed.",
+          "This project was approved while you were editing it, so it can't be changed.",
           "PROJECT_REVIEW_STATE_CHANGED",
         );
       }
-      return transaction.studentProject.update({ where: { id }, data });
+      const resubmit = current.status === "REJECTED" ? { status: "PENDING", reviewedAt: null } : {};
+      return transaction.studentProject.update({ where: { id }, data: { ...data, ...resubmit } });
+    });
+  } catch (error) {
+    throw handlePrismaError(error);
+  }
+}
+
+/**
+ * Show or hide one of the student's own projects on the public showcase and
+ * their profile — allowed in any status, so an approved project can be taken
+ * down (code review M08-01).
+ */
+export async function setVisibilityOwned(id, userId, isPublic) {
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      await acquireTransactionLock(transaction, `project:${id}`);
+      const current = await transaction.studentProject.findUnique({ where: { id }, select: { id: true, userId: true } });
+      if (!current) throw new NotFoundError("Project not found.");
+      if (current.userId !== userId) throw new ForbiddenError("You can only change your own projects.");
+      return transaction.studentProject.update({ where: { id }, data: { isPublic } });
     });
   } catch (error) {
     throw handlePrismaError(error);
@@ -186,13 +214,13 @@ export async function createForEnrollment(requester, data) {
         where: { id: data.enrollmentId },
         select: {
           intakeId: true,
-          intake: { select: { category: { select: { serviceId: true } } } },
+          intake: { select: { serviceId: true } },
         },
       });
       if (!initial) throw new NotFoundError("Enrollment not found.");
       await acquireTransactionLock(
         transaction,
-        `learning-service:${initial.intake.category.serviceId}`,
+        `learning-service:${initial.intake.serviceId}`,
       );
       await acquireTransactionLock(transaction, `intake:${initial.intakeId}`);
       await acquireTransactionLock(
@@ -207,7 +235,7 @@ export async function createForEnrollment(requester, data) {
       const enrollment = await transaction.enrollment.findUnique({
         where: { id: data.enrollmentId },
         include: {
-          intake: { include: { category: { include: { service: true } } } },
+          intake: { include: { service: true } },
         },
       });
       if (!user || user.role !== "STUDENT" || !user.emailVerified) {
@@ -228,9 +256,22 @@ export async function createForEnrollment(requester, data) {
       if (!["OPEN_ACTIVE", "CLOSED_ACTIVE", "COMPLETED", "ARCHIVED"].includes(enrollment.intake.status)) {
         throw new ForbiddenError("The selected intake does not currently allow project submission.");
       }
-      if (!hasLearningAccess(enrollment, enrollment.intake.category.service)) {
+      if (!hasLearningAccess(enrollment, enrollment.intake.service)) {
         throw new ForbiddenError(
           "The selected enrollment does not have valid learning access.",
+        );
+      }
+      // One project per enrollment — checked under the same enrollment lock
+      // acquired above, so two concurrent submissions against the same
+      // enrollment can't both slip through.
+      const existing = await transaction.studentProject.findFirst({
+        where: { enrollmentId: data.enrollmentId },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new ConflictError(
+          "A project has already been submitted for this enrollment.",
+          "PROJECT_ALREADY_SUBMITTED",
         );
       }
 

@@ -6,11 +6,7 @@ const router = express.Router();
 
 router.get("/services", listPublicLearningServices);
 router.get("/explore", catalogController.getPublicExplore);
-router.get("/:serviceSlug/categories", catalogController.getPublicCategories);
-router.get("/:serviceSlug/categories/:categorySlug", catalogController.getPublicCategory);
-router.get(
-  "/:serviceSlug/categories/:categorySlug/courses/:courseSlug",
-  catalogController.getPublicCourse,
-);
+router.get("/:serviceSlug/courses", catalogController.getPublicCourses);
+router.get("/:serviceSlug/courses/:courseSlug", catalogController.getPublicCourse);
 
 export default router;

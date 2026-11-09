@@ -15,8 +15,10 @@ vi.mock("./enrollment.service.js", () => ({ enrollStudentInCourseService: vi.fn(
 vi.mock("../audit/audit.service.js", () => ({ recordActionService: vi.fn() }));
 vi.mock("../../../utils/email.js", () => ({ sendEnrollmentRequestNotificationEmail: vi.fn() }));
 vi.mock("../../../utils/prisma.js", () => ({
-  default: { $transaction: vi.fn((callback) => callback({})) },
+  default: { $transaction: vi.fn((callback) => callback({})), enrollment: { findUnique: vi.fn(async () => null) } },
 }));
+vi.mock("../../../repositories/v1/enrollments/enrollment.repository.js", () => ({ findById: vi.fn(async (id) => ({ id })) }));
+vi.mock("../../../models/v1/enrollments/enrollment.model.js", () => ({ toAdminEnrollmentResponse: vi.fn((row) => row) }));
 
 import * as repository from "../../../repositories/v1/enrollments/enrollmentRequest.repository.js";
 import * as intakeRepository from "../../../repositories/v1/catalog/intake.repository.js";
@@ -24,6 +26,7 @@ import * as courseRepository from "../../../repositories/v1/catalog/course.repos
 import * as userRepository from "../../../repositories/v1/users/user.repository.js";
 import { enrollStudentInCourseService } from "./enrollment.service.js";
 import { sendEnrollmentRequestNotificationEmail } from "../../../utils/email.js";
+import prisma from "../../../utils/prisma.js";
 import {
   createEnrollmentRequestService,
   enrollFromRequestService,
@@ -60,8 +63,8 @@ function requestFixture(overrides = {}) {
       id: courseId,
       title: "AI/ML Ignition Program",
       slug: "ai-ml-ignition",
-      categoryId,
-      category: { slug: "bootcamps", service: { slug: "professional-workshops" } },
+      serviceId: categoryId,
+      service: { slug: "professional-workshops" },
     },
     intake: { id: intakeId, code: "AI-ML-2026-1", status: "OPEN_ACTIVE" },
     student,
@@ -94,7 +97,7 @@ describe("enrollmentRequest service", () => {
       expect(sendEnrollmentRequestNotificationEmail).toHaveBeenCalledWith(
         "admin@example.com",
         expect.objectContaining({
-          requestUrl: `${process.env.CLIENT_URL?.replace(/\/$/, "") ?? ""}/admin/services/professional-workshops/categories/${categoryId}/courses/${courseId}/intakes/${intakeId}?tab=enrollment-requests&requestId=${requestId}`,
+          requestUrl: `${process.env.CLIENT_URL?.replace(/\/$/, "") ?? ""}/admin/services/professional-workshops/courses/${courseId}/intakes/${intakeId}?tab=enrollment-requests&requestId=${requestId}`,
         }),
       );
     });
@@ -176,9 +179,10 @@ describe("enrollmentRequest service", () => {
 
   describe("enrollFromRequestService", () => {
     it("converts a live (still-open) request through the shared enroll mutation", async () => {
-      repository.findById.mockResolvedValue(requestFixture());
+      repository.findById
+        .mockResolvedValueOnce(requestFixture())
+        .mockResolvedValueOnce(requestFixture({ status: "ENROLLED", enrollmentId }));
       enrollStudentInCourseService.mockResolvedValue({ id: enrollmentId });
-      repository.markEnrolled.mockResolvedValue(requestFixture({ status: "ENROLLED", enrollmentId }));
 
       const result = await enrollFromRequestService(requestId, { paymentStatus: "COMPLETED" }, actorId);
 
@@ -189,6 +193,19 @@ describe("enrollmentRequest service", () => {
       );
       expect(repository.retarget).not.toHaveBeenCalled();
       expect(result.enrollment).toEqual({ id: enrollmentId });
+      expect(result.request.status).toBe("ENROLLED");
+    });
+
+    it("links the student's existing enrollment instead of failing as 'already enrolled' (M05-04)", async () => {
+      repository.findById.mockResolvedValue(requestFixture());
+      prisma.enrollment.findUnique.mockResolvedValueOnce({ id: enrollmentId, status: "ACTIVE" });
+      repository.markEnrolled.mockResolvedValue(requestFixture({ status: "ENROLLED", enrollmentId }));
+
+      const result = await enrollFromRequestService(requestId, { paymentStatus: "COMPLETED" }, actorId);
+
+      expect(enrollStudentInCourseService).not.toHaveBeenCalled();
+      expect(repository.markEnrolled).toHaveBeenCalledWith(expect.anything(), requestId, enrollmentId);
+      expect(result.request.status).toBe("ENROLLED");
     });
 
     it("re-resolves to the course's currently open intake when the original has closed", async () => {

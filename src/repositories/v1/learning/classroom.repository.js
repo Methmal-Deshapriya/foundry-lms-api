@@ -10,8 +10,8 @@ import { hasLearningAccess } from "../../../utils/enrollmentAccessPolicy.js";
 
 const enrollmentInclude = {
   user: true,
-  course: true,
-  intake: { include: { category: { include: { service: true } } } },
+  course: { include: { service: true, thumbnailObject: true } },
+  intake: { include: { service: true } },
   // Not filtered to ISSUED: mirrors enrollment.repository.js's own
   // enrollmentInclude so the classroom can tell "revoked" apart from "never
   // issued" the same way the My Courses list already does.
@@ -19,7 +19,7 @@ const enrollmentInclude = {
 };
 
 const courseSessionInclude = (enrollmentId) => ({
-  session: true,
+  session: { include: { recordingObject: true, materialObject: true } },
   completions: {
     where: { enrollmentId },
     select: { id: true, completedAt: true },
@@ -34,8 +34,14 @@ export function findEnrollmentContext(enrollmentId) {
   });
 }
 
-export function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
-  return prisma.courseSession.findMany({
+/**
+ * Sessions a learner can see, in curriculum order: the live curriculum first
+ * (by position), then any retired-but-still-visible sessions in their former
+ * position. PostgreSQL sorts NULL last on ASC, so ordering by retiredAt put
+ * every retired session first (code review M07-02).
+ */
+export async function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
+  const rows = await prisma.courseSession.findMany({
     where: {
       intakeId,
       deliveryStatus: { in: ["RELEASED", "SCHEDULED"] },
@@ -45,13 +51,14 @@ export function findVisibleSessions(intakeId, enrollmentId, now = new Date()) {
       ],
       session: { status: { in: ["READY", "ARCHIVED"] } },
     },
-    orderBy: [
-      { retiredAt: "asc" },
-      { orderIndex: "asc" },
-      { historicalOrderIndex: "asc" },
-    ],
     include: courseSessionInclude(enrollmentId),
   });
+  return sortCurriculum(rows);
+}
+
+export function sortCurriculum(rows) {
+  const position = (row) => row.orderIndex ?? row.historicalOrderIndex ?? Number.MAX_SAFE_INTEGER;
+  return [...rows].sort((a, b) => Number(Boolean(a.retiredAt)) - Number(Boolean(b.retiredAt)) || position(a) - position(b));
 }
 
 export function findCompletion(enrollmentId, courseSessionId) {
@@ -71,7 +78,7 @@ async function assertCompletionMutationAllowed(
     where: { id: enrollmentId },
     select: {
       intakeId: true,
-      intake: { select: { category: { select: { serviceId: true } } } },
+      intake: { select: { serviceId: true } },
     },
   });
   if (!initial || initial.intakeId !== intakeId) {
@@ -79,7 +86,7 @@ async function assertCompletionMutationAllowed(
   }
   await acquireTransactionLock(
     transaction,
-    `learning-service:${initial.intake.category.serviceId}`,
+    `learning-service:${initial.intake.serviceId}`,
   );
   await acquireTransactionLock(transaction, `intake:${intakeId}`);
   await acquireTransactionLock(transaction, `enrollment:${enrollmentId}`);
@@ -91,7 +98,7 @@ async function assertCompletionMutationAllowed(
       source: true,
       status: true,
       paymentStatus: true,
-      intake: { select: { status: true, category: { select: { service: true } } } },
+      intake: { select: { status: true, service: true } },
     },
   });
   if (!enrollment || enrollment.intakeId !== intakeId) {
@@ -108,7 +115,7 @@ async function assertCompletionMutationAllowed(
       "Learning progress can be changed only while the intake is active.",
     );
   }
-  if (!hasLearningAccess(enrollment, enrollment.intake.category.service)) {
+  if (!hasLearningAccess(enrollment, enrollment.intake.service)) {
     throw new ConflictError("The enrollment does not have valid learning access.");
   }
 

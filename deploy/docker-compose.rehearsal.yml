@@ -1,0 +1,101 @@
+name: foundry-lms-rehearsal
+
+# Local, disposable rehearsal of the production container topology.
+# This file deliberately uses non-secret placeholder credentials and binds
+# application ports to 127.0.0.1 only. It must never be used as the VPS
+# production configuration.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: foundry_rehearsal
+      POSTGRES_USER: foundry_rehearsal
+      POSTGRES_PASSWORD: local-rehearsal-password-not-for-production
+    volumes:
+      - rehearsal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - private
+    logging: *default-logging
+
+  migrate:
+    image: ${API_MIGRATE_IMAGE:-foundry-lms-api-migrate:step3}
+    restart: "no"
+    environment:
+      DIRECT_DATABASE_URL: postgresql://foundry_rehearsal:local-rehearsal-password-not-for-production@db:5432/foundry_rehearsal
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - private
+    logging: *default-logging
+
+  api:
+    image: ${API_IMAGE:-foundry-lms-api:step3}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: postgresql://foundry_rehearsal:local-rehearsal-password-not-for-production@db:5432/foundry_rehearsal
+      DIRECT_DATABASE_URL: postgresql://foundry_rehearsal:local-rehearsal-password-not-for-production@db:5432/foundry_rehearsal
+      JWT_SECRET: local-rehearsal-jwt-secret-with-more-than-32-bytes
+      OTP_HMAC_KEYS: v1:local-rehearsal-otp-secret-with-more-than-32-bytes
+      CLIENT_URL: https://web.rehearsal.invalid
+      CORS_ORIGIN: https://web.rehearsal.invalid
+      TRUST_PROXY_HOPS: 0
+      TRUST_PROXY_DIRECT: "true"
+      API_INSTANCE_COUNT: 1
+      RESEND_API_KEY: re_local_rehearsal_not_used
+      RESEND_FROM_EMAIL: Foundry Rehearsal <no-reply@rehearsal.invalid>
+      PROJECT_THUMBNAIL_HOSTS: cdn.rehearsal.invalid
+      CATALOG_REVALIDATION_SECRET: local-rehearsal-catalog-secret-with-more-than-32-bytes
+      R2_ENABLED: "false"
+    ports:
+      - "127.0.0.1:3411:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+      - edge
+    logging: *default-logging
+
+  web:
+    image: ${WEB_IMAGE:-foundry-lms-web:step3}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      CATALOG_REVALIDATION_SECRET: local-rehearsal-catalog-secret-with-more-than-32-bytes
+    ports:
+      - "127.0.0.1:3410:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - edge
+    logging: *default-logging
+
+networks:
+  private:
+    internal: true
+  edge:
+
+volumes:
+  rehearsal-postgres-data:

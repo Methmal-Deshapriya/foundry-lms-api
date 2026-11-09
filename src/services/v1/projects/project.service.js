@@ -1,7 +1,9 @@
 import * as projectRepo from "../../../repositories/v1/projects/project.repository.js";
 import { createProjectSchema, updateProjectSchema, reviewProjectSchema } from "../../../constants/v1/projects/projects.schema.js";
 import { ALL_PROJECT_STATUSES } from "../../../constants/v1/projects/projects.constants.js";
-import { ValidationError, NotFoundError, ForbiddenError } from "../../../utils/Errors.js";
+import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from "../../../utils/Errors.js";
+import { hasProfile } from "../profiles/profile.service.js";
+import { assertAttachableStoredObject } from "../storage/storedObject.service.js";
 import {
   transformProject,
   transformProjectList,
@@ -26,11 +28,22 @@ export async function submitProjectService(requester, data) {
     const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
+  const input = validation.data;
+  // Public profiles exist only for students who submit projects, so the
+  // profile is set up first (the frontend runs it as the opening stages of
+  // the submission flow) — see the 2026-10-01 public student profile plan.
+  if (!(await hasProfile(requester.id))) {
+    throw new ConflictError("Set up your public profile before submitting a project.", "PROFILE_REQUIRED");
+  }
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "PROJECT_THUMBNAIL", { ownerUserId: requester.id });
+    input.thumbnailUrl = null;
+  }
 
   // Authorization, ownership, and enrollment eligibility are rechecked under
   // the same enrollment lock used by lifecycle commands.
   const project = await projectRepo.createForEnrollment(requester, {
-    ...validation.data,
+    ...input,
     userId: requester.id,
     status: "PENDING",
   });
@@ -42,6 +55,13 @@ export async function submitProjectService(requester, data) {
  * Service: Update a project (Student).
  * Allowed only while status is PENDING.
  */
+/** Service: show or hide the student's own project publicly (M08-01). */
+export async function setProjectVisibilityService(projectId, userId, data) {
+  const isPublic = data?.isPublic;
+  if (typeof isPublic !== "boolean") throw new ValidationError("Say whether the project should be public.", "isPublic");
+  return transformProject(await projectRepo.setVisibilityOwned(projectId, userId, isPublic));
+}
+
 export async function updateProjectService(projectId, userId, data) {
   // Validation happens before the short transaction; ownership and status are
   // rechecked under the same project lock used by administrative review.
@@ -50,11 +70,18 @@ export async function updateProjectService(projectId, userId, data) {
     const firstError = validation.error.issues[0];
     throw new ValidationError(firstError.message, firstError.path[0]);
   }
+  const input = validation.data;
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "PROJECT_THUMBNAIL", { ownerUserId: userId });
+    input.thumbnailUrl = null;
+  } else if (input.thumbnailUrl) {
+    input.thumbnailObjectId = null;
+  }
 
   const updated = await projectRepo.updatePendingOwned(
     projectId,
     userId,
-    validation.data,
+    input,
   );
 
   return transformProject(updated);

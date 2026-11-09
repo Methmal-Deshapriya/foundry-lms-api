@@ -44,10 +44,8 @@ describe("certificate revocation transaction", () => {
       status: "ISSUED",
       enrollment: {
         status: "COMPLETED",
-        intake: {
-          status: "CLOSED_ACTIVE",
-          category: { status: "PUBLISHED" },
-        },
+        intake: { status: "CLOSED_ACTIVE" },
+        course: { status: "PUBLISHED" },
       },
     };
     mocks.transaction.certificate.findUnique
@@ -76,7 +74,7 @@ describe("certificate revocation transaction", () => {
     expect(result.lifecycleContext).toEqual({
       enrollmentStatus: "COMPLETED",
       intakeStatus: "CLOSED_ACTIVE",
-      categoryStatus: "PUBLISHED",
+      courseStatus: "PUBLISHED",
     });
     expect(mocks.transaction.certificate.update).toHaveBeenCalledTimes(1);
   });

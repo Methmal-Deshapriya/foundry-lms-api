@@ -4,9 +4,10 @@ const mocks = vi.hoisted(() => {
   const transaction = {
     $queryRawUnsafe: vi.fn(),
     course: { findUnique: vi.fn(), update: vi.fn() },
-    intake: { findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
+    intake: { findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    notification: { updateMany: vi.fn() },
     courseSession: { findMany: vi.fn(), count: vi.fn() },
-    enrollment: { count: vi.fn() },
+    enrollment: { count: vi.fn(), updateMany: vi.fn() },
   };
   return {
     transaction,
@@ -16,10 +17,10 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("../../../utils/prisma.js", () => ({ default: mocks.prisma }));
 
-import { create, updateSetup } from "./intake.repository.js";
+import { create, transitionStatus, updateSetup } from "./intake.repository.js";
 
 const courseId = "20000000-0000-4000-8000-000000000001";
-const categoryId = "20000000-0000-4000-8000-000000000003";
+const serviceId = "20000000-0000-4000-8000-000000000003";
 const intakeId = "20000000-0000-4000-8000-000000000004";
 
 describe("intake repository invariants", () => {
@@ -30,13 +31,13 @@ describe("intake repository invariants", () => {
 
   it("rejects a second intake under an Evergreen course", async () => {
     mocks.transaction.course.findUnique
-      .mockResolvedValueOnce({ category: { serviceId: "service-free" } })
+      .mockResolvedValueOnce({ serviceId: "service-free" })
       .mockResolvedValueOnce({
         id: courseId,
-        categoryId,
+        serviceId,
         archivedAt: null,
         intakeCodePrefix: "FREE",
-        category: { status: "PUBLISHED", service: { status: "ACTIVE", courseMode: "EVERGREEN" } },
+        service: { status: "ACTIVE", courseMode: "EVERGREEN" },
         intakes: [{ id: "existing-intake" }],
       });
 
@@ -49,13 +50,13 @@ describe("intake repository invariants", () => {
   it("derives the intake code from the course's prefix and the given intake key, and recomputes enrollmentStatus", async () => {
     const newIntake = { id: intakeId, courseId, code: "AI-ML-2026-1" };
     mocks.transaction.course.findUnique
-      .mockResolvedValueOnce({ category: { serviceId: "service-paid" } })
+      .mockResolvedValueOnce({ serviceId: "service-paid" })
       .mockResolvedValueOnce({
         id: courseId,
-        categoryId,
+        serviceId,
         archivedAt: null,
         intakeCodePrefix: "AI-ML",
-        category: { status: "PUBLISHED", service: { status: "ACTIVE", courseMode: "SEASONAL" } },
+        service: { status: "ACTIVE", courseMode: "SEASONAL" },
         intakes: [],
       });
     mocks.transaction.intake.create.mockResolvedValue(newIntake);
@@ -77,7 +78,7 @@ describe("intake repository invariants", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           courseId,
-          categoryId,
+          serviceId,
           intakeKey: "2026-1",
           code: "AI-ML-2026-1",
           status: "DRAFT",
@@ -92,7 +93,7 @@ describe("intake repository invariants", () => {
 
   it("does not reduce capacity below the current non-cancelled learner count", async () => {
     mocks.transaction.intake.findUnique
-      .mockResolvedValueOnce({ categoryId, courseId, category: { serviceId: "service-paid" } })
+      .mockResolvedValueOnce({ serviceId, courseId })
       .mockResolvedValueOnce({ id: intakeId, status: "OPEN_ACTIVE" });
     mocks.transaction.enrollment.count.mockResolvedValue(8);
 
@@ -100,5 +101,34 @@ describe("intake repository invariants", () => {
       code: "INTAKE_CAPACITY_BELOW_ENROLLMENT_COUNT",
       statusCode: 409,
     });
+  });
+});
+
+describe("closing enrollment ends the 'Enrollment is open' notice (M09-03)", () => {
+  const openIntake = { id: intakeId, courseId, serviceId, status: "OPEN_ACTIVE", service: { status: "ACTIVE" }, course: { status: "PUBLISHED" } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.$queryRawUnsafe.mockResolvedValue([{ acquired: 1 }]);
+    mocks.transaction.intake.findUnique.mockResolvedValueOnce({ serviceId, courseId }).mockResolvedValueOnce(openIntake);
+    mocks.transaction.intake.update.mockResolvedValue({ ...openIntake, status: "CLOSED_ACTIVE" });
+    mocks.transaction.intake.findFirst.mockResolvedValue(null);
+  });
+
+  for (const target of ["CLOSED_ACTIVE", "CANCELLED"]) {
+    it(`archives the course's notice when the intake moves to ${target}`, async () => {
+      await transitionStatus(intakeId, "OPEN_ACTIVE", target);
+      expect(mocks.transaction.notification.updateMany).toHaveBeenCalledWith({
+        where: { audience: "COURSE_INTEREST", courseId, status: "PUBLISHED" },
+        data: { status: "ARCHIVED" },
+      });
+    });
+  }
+
+  it("leaves notices alone for intakes that weren't open", async () => {
+    mocks.transaction.intake.findUnique.mockReset();
+    mocks.transaction.intake.findUnique.mockResolvedValueOnce({ serviceId, courseId }).mockResolvedValueOnce({ ...openIntake, status: "CLOSED_ACTIVE" });
+    await transitionStatus(intakeId, "CLOSED_ACTIVE", "CANCELLED");
+    expect(mocks.transaction.notification.updateMany).not.toHaveBeenCalled();
   });
 });

@@ -1,16 +1,18 @@
 import * as repository from "../../../repositories/v1/catalog/course.repository.js";
-import * as categoryRepository from "../../../repositories/v1/catalog/category.repository.js";
+import * as learningServiceRepository from "../../../repositories/v1/catalog/learningService.repository.js";
 import {
   courseAdminFiltersSchema,
   createCourseSchema,
   updateCourseSchema,
 } from "../../../constants/v1/catalog/course.schema.js";
-import { ConflictError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../../../utils/Errors.js";
+import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
 import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { COURSE_CURRENCY } from "../../../constants/v1/catalog/catalog.constants.js";
 import { toAdminCourse } from "../../../models/v1/catalog/catalog.model.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
+import { assertAttachableStoredObject } from "../storage/storedObject.service.js";
 
 function parse(schema, value) {
   const result = schema.safeParse(value);
@@ -21,10 +23,16 @@ function parse(schema, value) {
   return result.data;
 }
 
-function validatePricingPolicy(category, price) {
-  const accessType = category.service.accessType;
+function validatePricingPolicy(service, price, discountAmount = 0) {
+  const accessType = service.accessType;
   if (accessType === "FREE" && Number(price) !== 0) throw new ValidationError("Free Learning courses must have zero price.", "price");
   if (accessType === "PAID" && Number(price) <= 0) throw new ValidationError("Paid courses must have a price greater than zero.", "price");
+  // The discount is fixed at creation and every full payment is
+  // price − discount, so it must stay below the price (code review M06-02).
+  if (accessType === "FREE" && Number(discountAmount) !== 0) throw new ValidationError("Free courses can't have a full-payment discount.", "discountAmount");
+  if (Number(discountAmount) > 0 && Number(price) <= Number(discountAmount)) {
+    throw new ValidationError(`The price must stay above the full-payment discount (${Number(discountAmount)}).`, "price");
+  }
 }
 
 export async function listCoursesAdminService(query) {
@@ -62,7 +70,7 @@ function paymentTypeBreakdown(groups, type) {
 export async function getCourseAnalyticsService(courseId) {
   const data = await repository.getAnalytics(courseId);
   if (!data) throw new NotFoundError("Course not found.");
-  const { course, statusGroups, revenueAgg, paymentTypeGroups, projectGroups, certificatesIssuedCount } = data;
+  const { course, statusGroups, revenueAgg, paymentTypeGroups, alStreamRows, projectGroups, certificatesIssuedCount } = data;
 
   const active = countByKey(statusGroups, "status", "ACTIVE");
   const completed = countByKey(statusGroups, "status", "COMPLETED");
@@ -83,6 +91,7 @@ export async function getCourseAnalyticsService(courseId) {
       certificatesIssued: certificatesIssuedCount,
       certificateEligible: course.certificateEnabled ? completed : 0,
     },
+    alStreams: alStreamRows.map((row) => ({ stream: row.stream, count: row.count })),
     projects: {
       pending: countByKey(projectGroups, "status", "PENDING"),
       approved: countByKey(projectGroups, "status", "APPROVED"),
@@ -93,32 +102,97 @@ export async function getCourseAnalyticsService(courseId) {
 
 export async function createCourseService(data, actorId) {
   const input = parse(createCourseSchema, data);
-  const category = await categoryRepository.findById(input.categoryId);
-  if (!category) throw new NotFoundError("Category not found.");
-  if (category.status === "ARCHIVED") throw new ConflictError("Category is archived.");
-  validatePricingPolicy(category, input.price);
+  const service = await learningServiceRepository.findById(input.serviceId);
+  if (!service) throw new NotFoundError("Learning service not found.");
+  if (service.status === "ARCHIVED") throw new ConflictError("Learning service is archived.");
+  validatePricingPolicy(service, input.price, input.discountAmount);
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
+  }
+  if (input.explainerVideoThumbnailObjectId) {
+    await assertAttachableStoredObject(input.explainerVideoThumbnailObjectId, "COURSE_EXPLAINER_VIDEO_THUMBNAIL");
+  }
   const course = await repository.create({ ...input, currency: COURSE_CURRENCY });
   recordActionService({
     actorUserId: actorId,
     action: AUDIT_ACTIONS.COURSE_CREATED,
     entityType: ENTITY_TYPES.COURSE,
     entityId: course.id,
-    description: `Course "${course.title}" created.`,
-    metadata: { categoryId: course.categoryId, intakeCodePrefix: course.intakeCodePrefix },
+    description: `Course "${course.title}" created as a draft.`,
+    metadata: { serviceId: course.serviceId, serviceKey: service.key, intakeCodePrefix: course.intakeCodePrefix },
   });
-  // A Course is always publicly served once it exists (COMING_SOON at
-  // minimum) — see the 2026-08-30 system guide/audit, Finding B.
-  await revalidatePublicCatalogCache();
+  // A Course is always publicly served once published (COMING_SOON at
+  // minimum) — see the 2026-08-30 system guide/audit, Finding B. It starts
+  // as a Draft, so no cache revalidation is needed until it's published.
   return toAdminCourse(course);
 }
 
-export async function updateCourseService(id, data, actorId) {
+// Once a course has left Draft, its price and its public link are owner
+// decisions: the price drives what every later payment and top-up is
+// recorded at, and the slug is every shared link and search result. Any
+// admin may still edit the rest of a live course (descriptions, images,
+// highlights) — decided 2026-10-01.
+const PUBLISH_GATED_FIELDS = ["price", "slug"];
+
+function changedPublishGatedFields(current, input) {
+  return PUBLISH_GATED_FIELDS.filter((field) => {
+    if (input[field] === undefined) return false;
+    return field === "price" ? Number(input.price) !== Number(current.price) : input[field] !== current[field];
+  });
+}
+
+/**
+ * @param {string} id
+ * @param {object} data
+ * @param {{ id: string, role: string } | string} actor - the signed-in user
+ *   (a bare id is accepted for older callers, and is treated as having no
+ *   publish rights).
+ */
+export async function updateCourseService(id, data, actor) {
+  const actorId = typeof actor === "string" ? actor : actor?.id;
+  const actorRole = typeof actor === "string" ? null : actor?.role;
   const input = parse(updateCourseSchema, data);
   const current = await repository.findById(id);
   if (!current) throw new NotFoundError("Course not found.");
-  if (input.price !== undefined) validatePricingPolicy(current.category, input.price);
+  const gatedChanges = current.status === "DRAFT" ? [] : changedPublishGatedFields(current, input);
+  if (gatedChanges.length && !hasPermission(actorRole, PERMISSIONS.CATALOG_PUBLISH)) {
+    throw new ForbiddenError(
+      `Only a super admin can change the ${gatedChanges.join(" or ")} of a course that has been published.`,
+      "PUBLISHED_COURSE_FIELD_LOCKED",
+    );
+  }
+  // Checked only when the price actually changes (the edit form resends it).
+  if (input.price !== undefined && Number(input.price) !== Number(current.price)) {
+    validatePricingPolicy(current.service, input.price, current.discountAmount);
+  }
+  if (input.thumbnailObjectId) {
+    await assertAttachableStoredObject(input.thumbnailObjectId, "COURSE_THUMBNAIL");
+  }
+  if (input.explainerVideoThumbnailObjectId) {
+    await assertAttachableStoredObject(input.explainerVideoThumbnailObjectId, "COURSE_EXPLAINER_VIDEO_THUMBNAIL");
+  }
+  if (input.thumbnailObjectId) input.thumbnailUrl = null;
+  if (input.thumbnailUrl) input.thumbnailObjectId = null;
   const course = await repository.update(id, input);
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.COURSE_UPDATED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" updated.`, metadata: { changedFields: Object.keys(input) } });
+  if (current.status === "PUBLISHED") {
+    await revalidatePublicCatalogCache();
+  }
+  return toAdminCourse(course);
+}
+
+export async function setCoursePublicationService(id, publish, actorId) {
+  const current = await repository.findById(id);
+  if (!current) throw new NotFoundError("Course not found.");
+  if (current.status === "ARCHIVED") throw new ConflictError("Archived courses cannot be published.");
+  const course = await repository.setPublication(id, publish);
+  recordActionService({
+    actorUserId: actorId,
+    action: publish ? AUDIT_ACTIONS.COURSE_PUBLISHED : AUDIT_ACTIONS.COURSE_UNPUBLISHED,
+    entityType: ENTITY_TYPES.COURSE,
+    entityId: id,
+    description: `Course "${course.title}" ${publish ? "published" : "unpublished"}.`,
+  });
   await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }
@@ -126,7 +200,7 @@ export async function updateCourseService(id, data, actorId) {
 export async function setCourseArchivedService(id, archived, actorId) {
   const course = await repository.setArchived(id, archived);
   if (!course) throw new NotFoundError("Course not found.");
-  recordActionService({ actorUserId: actorId, action: archived ? AUDIT_ACTIONS.COURSE_ARCHIVED : AUDIT_ACTIONS.COURSE_UNARCHIVED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" ${archived ? "archived" : "restored"}.` });
+  recordActionService({ actorUserId: actorId, action: archived ? AUDIT_ACTIONS.COURSE_ARCHIVED : AUDIT_ACTIONS.COURSE_UNARCHIVED, entityType: ENTITY_TYPES.COURSE, entityId: id, description: `Course "${course.title}" ${archived ? "archived" : "restored as a draft"}.` });
   await revalidatePublicCatalogCache();
   return toAdminCourse(course);
 }

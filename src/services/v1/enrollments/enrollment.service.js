@@ -9,6 +9,7 @@ import {
   enrollmentRosterFiltersSchema,
   manualEnrollmentSchema,
   updateEnrollmentSchema,
+  completePaymentSchema,
 } from "../../../constants/v1/enrollments/enrollment.schema.js";
 import { selfHistoryPageSchema } from "../../../constants/v1/shared/pagination.schema.js";
 import { ENROLLMENT_STATUS, ENROLLMENT_STATUS_TRANSITIONS } from "../../../constants/v1/enrollments/enrollment.constants.js";
@@ -18,8 +19,8 @@ import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.c
 
 function parse(schema, value) { const result = schema.safeParse(value); if (!result.success) { const issue = result.error.issues[0]; throw new ValidationError(issue.message, issue.path.join(".")); } return result.data; }
 function assertStudent(user) { if (!user) throw new NotFoundError("Student not found."); if (user.role !== "STUDENT" || !user.emailVerified) throw new ConflictError("Only verified student accounts can be enrolled.", "INELIGIBLE_STUDENT"); }
-function assertPaidOpen(intake) { if (!intake) throw new NotFoundError("Intake not found."); const policy = intake.category.service; if (intake.status !== "OPEN_ACTIVE" || policy.status !== "ACTIVE" || policy.accessType !== "PAID" || policy.courseMode !== "SEASONAL" || policy.enrollmentMode !== "ADMIN" || policy.paymentRequirement !== "REQUIRED") throw new ConflictError("This paid intake is not accepting enrollment.", "COURSE_ENROLLMENT_CLOSED"); }
-function payment(input) { return { paymentStatus: input.paymentStatus, paymentCompletedAt: input.paymentStatus === "COMPLETED" ? new Date() : null, externalPaymentReference: input.externalPaymentReference ?? null, paymentNote: input.paymentNote ?? null }; }
+function assertPaidOpen(intake) { if (!intake) throw new NotFoundError("Intake not found."); const policy = intake.service; if (intake.status !== "OPEN_ACTIVE" || policy.status !== "ACTIVE" || policy.accessType !== "PAID" || policy.courseMode !== "SEASONAL" || policy.enrollmentMode !== "ADMIN" || policy.paymentRequirement !== "REQUIRED") throw new ConflictError("This paid intake is not accepting enrollment.", "COURSE_ENROLLMENT_CLOSED"); }
+function payment(input) { return { paymentStatus: input.paymentStatus, paymentCompletedAt: input.paymentStatus === "COMPLETED" ? new Date() : null, externalPaymentReference: input.externalPaymentReference ?? null, paymentNote: input.paymentNote ?? null, paymentMethod: input.paymentMethod ?? null }; }
 
 export async function enrollStudentInCourseService(intakeId, data, actorId) {
   const input = parse(manualEnrollmentSchema, data);
@@ -41,6 +42,9 @@ export async function bulkEnrollStudentsInCourseService(intakeId, data, actorId)
     if (!student) { results.push({ userId: input.userId, status: "FAILED", code: "INELIGIBLE_STUDENT", error: "Student is missing, unverified, or not a Student." }); continue; }
     try {
       const enrollment = await repository.createPaid(intakeId, input.userId, actorId, payment(input));
+      // One audit row per student, like a single enrollment, so "who
+      // enrolled X, and paid how?" is answerable for bulk too (M05-07).
+      recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.STUDENT_ENROLLED, entityType: ENTITY_TYPES.ENROLLMENT, entityId: enrollment.id, description: `Student ${student.email} enrolled in ${intake.code} (bulk).`, metadata: { studentId: student.id, intakeId, paymentStatus: enrollment.paymentStatus, bulk: true } });
       results.push({ userId: input.userId, status: "CREATED", enrollment: model.toAdminEnrollmentResponse(enrollment) });
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
@@ -52,7 +56,8 @@ export async function bulkEnrollStudentsInCourseService(intakeId, data, actorId)
     }
   }
   const created = results.filter(({ status }) => status === "CREATED").length;
-  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.STUDENTS_BULK_ENROLLED, entityType: ENTITY_TYPES.INTAKE, entityId: intakeId, description: `${created} of ${students.length} students enrolled in ${intake.code}.`, metadata: { intakeId, requested: students.length, created } });
+  const failed = results.filter(({ status }) => status === "FAILED").map(({ userId, code }) => ({ userId, code }));
+  recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.STUDENTS_BULK_ENROLLED, entityType: ENTITY_TYPES.INTAKE, entityId: intakeId, description: `${created} of ${students.length} students enrolled in ${intake.code}.`, metadata: { intakeId, requested: students.length, created, createdUserIds: results.filter(({ status }) => status === "CREATED").map(({ userId }) => userId), failed } });
   return { results, summary: { requested: students.length, created, failed: students.length - created } };
 }
 
@@ -81,11 +86,12 @@ export async function updateEnrollmentService(id, data, actorId) {
 // A PARTIAL enrollment pays the other half of the course price later, at
 // which point it becomes fully paid — the only thing this can ever do,
 // since there's no partial-to-partial or completed-to-partial transition.
-export async function completePaymentService(id, actorId) {
+export async function completePaymentService(id, actorId, data = {}) {
+  const input = parse(completePaymentSchema, data ?? {});
   const current = await repository.findById(id);
   if (!current) throw new NotFoundError("Enrollment not found.");
   if (current.paymentStatus !== "PARTIAL") throw new ConflictError("Only a partially paid enrollment can have its remaining payment recorded.", "PAYMENT_NOT_PARTIAL");
-  const result = await repository.completePayment(id, actorId);
+  const result = await repository.completePayment(id, actorId, { method: input.paymentMethod ?? null, externalReference: input.externalReference ?? null });
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.PAYMENT_STATUS_UPDATED, entityType: ENTITY_TYPES.ENROLLMENT, entityId: id, description: `Remaining payment recorded for enrollment ${id}; payment is now complete.`, metadata: { intakeId: current.intakeId } });
   return model.toAdminEnrollmentResponse(result);
 }
@@ -121,3 +127,45 @@ export async function getEligibleStudentsForCourseService(intakeId, query = {}) 
 }
 
 export const getCourseStudentsService = getCourseEnrollmentsService;
+
+// At-risk students (Phase 4c of the 2026-10-01 next-features plan): in a
+// running intake, enrolled for at least AT_RISK_DAYS, with sessions they
+// could be doing, and no session completed in the last AT_RISK_DAYS.
+// One query plus the shared progress helper — no tracking cost.
+export const AT_RISK_DAYS = 14;
+
+export async function getAtRiskStudentsService() {
+  const now = Date.now();
+  const since = new Date(now - AT_RISK_DAYS * 86_400_000);
+  const found = await repository.findAtRiskCandidates(since);
+  const truncated = found.length > repository.AT_RISK_LIMIT;
+  const candidates = found.slice(0, repository.AT_RISK_LIMIT);
+  const progress = await repository.findProgressForEnrollments(candidates);
+
+  const rows = candidates
+    .map((enrollment) => {
+      const lastCompletedAt = enrollment.sessionCompletions[0]?.completedAt ?? null;
+      const stats = progress.get(enrollment.id) ?? { completedCount: 0, availableSessionCount: 0, progressPercent: 0 };
+      const lastActivity = lastCompletedAt ?? enrollment.createdAt;
+      return {
+        enrollmentId: enrollment.id,
+        student: {
+          id: enrollment.user.id,
+          name: `${enrollment.user.firstName} ${enrollment.user.lastName}`.trim(),
+          email: enrollment.user.email,
+          phone: enrollment.user.phone,
+        },
+        course: { id: enrollment.course.id, title: enrollment.course.title, serviceSlug: enrollment.course.service?.slug ?? null },
+        intake: enrollment.intake,
+        enrolledAt: enrollment.createdAt,
+        lastCompletedAt,
+        daysInactive: Math.floor((now - new Date(lastActivity).getTime()) / 86_400_000),
+        ...stats,
+      };
+    })
+    // Inactive for the threshold, AND something left to do (sessions released, not all done).
+    .filter((row) => row.daysInactive >= AT_RISK_DAYS && row.availableSessionCount > 0 && row.completedCount < row.availableSessionCount)
+    .sort((a, b) => b.daysInactive - a.daysInactive);
+
+  return { thresholdDays: AT_RISK_DAYS, rows, truncated };
+}

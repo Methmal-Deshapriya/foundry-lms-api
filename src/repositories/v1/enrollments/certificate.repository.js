@@ -6,12 +6,17 @@ import {
   handlePrismaError,
 } from "../../../utils/Errors.js";
 
+// Only what admin screens label a certificate with (M08-13). Issue and
+// revoke checks read their own data; nothing here needs the full rows.
 const certificateInclude = {
   enrollment: {
-    include: {
-      user: true,
-      course: true,
-      intake: { include: { category: true } },
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      course: { select: { id: true, title: true, slug: true, status: true } },
+      intake: { select: { id: true, code: true, status: true } },
     },
   },
 };
@@ -115,7 +120,7 @@ export async function findUserCertificates(userId, { limit, cursor }) {
     include: {
       enrollment: {
         include: {
-          course: { include: { category: true } },
+          course: true,
         },
       },
     },
@@ -233,7 +238,7 @@ export async function revokeIssued(id, data) {
       const lifecycleContext = {
         enrollmentStatus: current.enrollment.status,
         intakeStatus: current.enrollment.intake.status,
-        categoryStatus: current.enrollment.intake.category.status,
+        courseStatus: current.enrollment.course.status,
       };
       const certificate = await transaction.certificate.update({
         where: { id },

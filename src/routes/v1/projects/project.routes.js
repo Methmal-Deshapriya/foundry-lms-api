@@ -44,6 +44,12 @@ router.patch(
   requirePermission(PERMISSIONS.PROJECTS_EDIT_OWN),
   projectController.updateProject,
 );
+// Show/hide on the public showcase, in any review status (M08-01).
+router.patch(
+  "/:id/visibility",
+  requirePermission(PERMISSIONS.PROJECTS_EDIT_OWN),
+  projectController.setProjectVisibility,
+);
 
 // Admin routes
 router.get(

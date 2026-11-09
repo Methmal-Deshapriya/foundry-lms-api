@@ -70,4 +70,13 @@ router.patch(
   userController.demoteUserController,
 );
 
+/**
+ * @route   POST /v1/users/:id/revoke-sessions | /suspend | /reactivate
+ * @desc    End every session, or suspend / reactivate the account (M10-05)
+ * @access  Private (SUPER_ADMIN only)
+ */
+router.post("/:id/revoke-sessions", authenticate, requirePermission(PERMISSIONS.USERS_MANAGE_ROLES), userController.revokeSessionsController);
+router.post("/:id/suspend", authenticate, requirePermission(PERMISSIONS.USERS_MANAGE_ROLES), userController.suspendUserController);
+router.post("/:id/reactivate", authenticate, requirePermission(PERMISSIONS.USERS_MANAGE_ROLES), userController.reactivateUserController);
+
 export default router;

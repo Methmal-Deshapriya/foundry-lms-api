@@ -1,4 +1,5 @@
 import prisma from "../../../utils/prisma.js";
+import { colomboDateString, endOfColomboDay, startOfColomboDay } from "../../../utils/colomboTime.js";
 import { findProgressForEnrollments, visibleCourseSessionWhere } from "../enrollments/enrollment.repository.js";
 import { findVisibleSessions } from "../learning/classroom.repository.js";
 
@@ -9,7 +10,7 @@ import { findVisibleSessions } from "../learning/classroom.repository.js";
  * no per-row N+1 work, so this stays fast regardless of platform size.
  */
 
-const HEATMAP_DAYS = 182; // 26 weeks (~6 months) — still one small, cheap, single-user query
+const HEATMAP_DAYS = 364; // 52 weeks (full year) — still one small, cheap, single-user query
 
 export async function getStudentSummary(userId) {
   const [coursesEnrolled, coursesCompleted, certificatesEarned, recentEnrollments, heatmapCompletions, issuedCertificates, reviewedProjects] =
@@ -28,7 +29,13 @@ export async function getStudentSummary(userId) {
           intakeId: true,
           status: true,
           updatedAt: true,
-          course: { select: { title: true, thumbnailUrl: true, category: { select: { visualKey: true } } } },
+          course: {
+            select: {
+              title: true,
+              thumbnailUrl: true,
+              thumbnailObject: { select: { status: true, objectKey: true } },
+            },
+          },
           intake: { select: { code: true } },
         },
       }),
@@ -39,12 +46,9 @@ export async function getStudentSummary(userId) {
       prisma.sessionCompletion.findMany({
         where: {
           enrollment: { userId },
-          completedAt: { gte: (() => {
-            const since = new Date();
-            since.setUTCDate(since.getUTCDate() - (HEATMAP_DAYS - 1));
-            since.setUTCHours(0, 0, 0, 0);
-            return since;
-          })() },
+          // From the start of the Sri Lanka day, HEATMAP_DAYS - 1 days ago
+          // (code review M10-13).
+          completedAt: { gte: startOfColomboDay(new Date(Date.now() - (HEATMAP_DAYS - 1) * 86_400_000)) },
         },
         select: { completedAt: true },
       }),
@@ -67,7 +71,8 @@ export async function getStudentSummary(userId) {
 
   const countsByDate = new Map();
   for (const { completedAt } of heatmapCompletions) {
-    const key = completedAt.toISOString().slice(0, 10);
+    // The Sri Lanka calendar day, the same day the student saw (M10-13).
+    const key = colomboDateString(completedAt);
     countsByDate.set(key, (countsByDate.get(key) ?? 0) + 1);
   }
   const heatmap = Array.from(countsByDate, ([date, count]) => ({ date, count }));
@@ -134,74 +139,68 @@ export async function getStudentSummary(userId) {
 const DEFAULT_TREND_MONTHS = 6;
 const MAX_TREND_MONTHS = 24; // guards a wide-open custom range from seeding an unbounded bucket list
 
-// "yyyy-MM" bucket key in UTC — matches how the buckets below are seeded,
-// so a row's key always finds its pre-built bucket regardless of timezone.
-function monthKey(date) {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+// Trends run on the Sri Lanka calendar, like Payments → Monthly, so the two
+// screens agree on which month a payment or enrollment belongs to (code
+// review M10-03 / M10-13).
+const colomboMonthKey = (date) => colomboDateString(date).slice(0, 7);
+
+function monthIndex(key) {
+  const [year, month] = key.split("-").map(Number);
+  return year * 12 + (month - 1);
 }
 
-function monthsBetween(from, to) {
-  return (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + (to.getUTCMonth() - from.getUTCMonth()) + 1;
-}
-
-// Every month between `from` and `to` (inclusive, oldest first), pre-seeded
-// so a month with zero rows still shows up as a zero bar instead of a gap.
-function seedMonthBuckets(from, to) {
-  const count = Math.min(MAX_TREND_MONTHS, Math.max(1, monthsBetween(from, to)));
+// Every Sri Lanka month between `from` and `to` (inclusive, oldest first),
+// pre-seeded so a month with zero rows still shows up as a zero bar instead
+// of a gap.
+export function seedMonthBuckets(from, to) {
+  const last = monthIndex(colomboMonthKey(to));
+  const count = Math.min(MAX_TREND_MONTHS, Math.max(1, last - monthIndex(colomboMonthKey(from)) + 1));
   const buckets = [];
-  const cursor = new Date(to);
-  cursor.setUTCDate(1);
-  cursor.setUTCHours(0, 0, 0, 0);
-  for (let i = count - 1; i >= 0; i--) {
-    const date = new Date(cursor);
-    date.setUTCMonth(date.getUTCMonth() - i);
-    buckets.push({ key: monthKey(date), label: date.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }) });
+  for (let index = last - count + 1; index <= last; index++) {
+    const date = new Date(Date.UTC(Math.floor(index / 12), index % 12, 1));
+    buckets.push({ key: date.toISOString().slice(0, 7), label: date.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }) });
   }
   return buckets;
 }
 
 // Either an explicit custom range (`from`/`to`, from the calendar picker) or
 // a preset lookback window (`months` — 3/6/12 from the filter pills),
-// never both; `months` is the fallback when neither date is given.
-function resolveTrendWindow({ months, from, to } = {}) {
+// never both; `months` is the fallback when neither date is given. Custom
+// days are whole Sri Lanka days: "1–31 Oct" is 00:00 on 1 Oct to the end of
+// 31 Oct in Colombo (M10-13).
+export function resolveTrendWindow({ months, from, to } = {}) {
   if (from || to) {
-    const start = from ? new Date(from) : new Date(to);
-    const end = to ? new Date(to) : new Date();
-    start.setUTCHours(0, 0, 0, 0);
-    end.setUTCHours(23, 59, 59, 999);
-    return { start, end };
+    return { start: startOfColomboDay(from ?? to), end: endOfColomboDay(to ?? new Date()) };
   }
   const resolvedMonths = Math.min(MAX_TREND_MONTHS, Math.max(1, months ?? DEFAULT_TREND_MONTHS));
   const end = new Date();
-  const start = new Date();
-  start.setUTCMonth(start.getUTCMonth() - (resolvedMonths - 1));
-  start.setUTCDate(1);
-  start.setUTCHours(0, 0, 0, 0);
-  return { start, end };
+  const firstIndex = monthIndex(colomboMonthKey(end)) - (resolvedMonths - 1);
+  const firstDay = `${Math.floor(firstIndex / 12)}-${String((firstIndex % 12) + 1).padStart(2, "0")}-01`;
+  return { start: startOfColomboDay(new Date(`${firstDay}T12:00:00.000Z`)), end };
 }
 
 const toCounts = (rows, key) => Object.fromEntries(rows.map((row) => [row[key], row._count]));
 
-// categoryId/service.slug are selected purely to let the client build the
-// admin intake workspace URL (/admin/services/{slug}/categories/{categoryId}
-// /courses/{courseId}/intakes/{id}) without a second lookup — same pattern
+// serviceId/service.slug are selected purely to let the client build the
+// admin intake workspace URL (/admin/services/{slug}/courses/{courseId}
+// /intakes/{id}) without a second lookup — same pattern
 // sessionLibrary.service.js uses for its own "link straight to the intake"
 // problem. Neither is displayed anywhere.
 const INTAKE_CARD_SELECT = {
   id: true,
   code: true,
   courseId: true,
-  categoryId: true,
+  serviceId: true,
   startDate: true,
   expectedEndDate: true,
   capacity: true,
   status: true,
   course: { select: { title: true } },
-  category: { select: { service: { select: { slug: true } } } },
+  service: { select: { slug: true } },
   _count: { select: { enrollments: true } },
 };
 
-// categoryId/service.slug (via course) are selected purely to let the client
+// serviceId/service.slug (via course) are selected purely to let the client
 // build the admin intake workspace URL, same reasoning as INTAKE_CARD_SELECT
 // above — a pending request is worked from that same enrollment-requests tab
 // (?tab=enrollment-requests&requestId={id}), there's no separate page for it.
@@ -213,7 +212,7 @@ const ENROLLMENT_REQUEST_CARD_SELECT = {
   status: true,
   createdAt: true,
   student: { select: { firstName: true, lastName: true, email: true } },
-  course: { select: { title: true, categoryId: true, category: { select: { service: { select: { slug: true } } } } } },
+  course: { select: { title: true, serviceId: true, service: { select: { slug: true } } } },
 };
 
 function mapEnrollmentRequestRow(row) {
@@ -222,8 +221,8 @@ function mapEnrollmentRequestRow(row) {
     id: row.id,
     intakeId: row.intakeId,
     courseId: row.courseId,
-    categoryId: row.course?.categoryId ?? null,
-    serviceSlug: row.course?.category?.service?.slug ?? null,
+    serviceId: row.course?.serviceId ?? null,
+    serviceSlug: row.course?.service?.slug ?? null,
     courseTitle: row.course?.title ?? "Untitled course",
     studentName: name || row.student?.email || "Unknown student",
     studentEmail: row.student?.email ?? null,
@@ -239,8 +238,8 @@ function mapIntakeRow(row, deliveryStats) {
     id: row.id,
     code: row.code,
     courseId: row.courseId,
-    categoryId: row.categoryId,
-    serviceSlug: row.category?.service?.slug ?? null,
+    serviceId: row.serviceId,
+    serviceSlug: row.service?.slug ?? null,
     title: row.course?.title ?? "Untitled course",
     status: row.status,
     startDate: row.startDate,
@@ -261,7 +260,7 @@ function mapIntakeRow(row, deliveryStats) {
 // orderIndex], SessionCompletion's plain [intakeId], Enrollment's
 // [intakeId, status] — so this stays cheap regardless of platform size; it's
 // never a per-intake query loop.
-async function getIntakeDeliveryStats(intakeIds) {
+export async function getIntakeDeliveryStats(intakeIds) {
   if (intakeIds.length === 0) return new Map();
   const now = new Date();
 
@@ -271,7 +270,19 @@ async function getIntakeDeliveryStats(intakeIds) {
     prisma.courseSession.groupBy({ by: ["intakeId"], where: visibleCourseSessionWhere({ in: intakeIds }, now), _count: true }),
     // Total current (non-retired) curriculum, to turn "released" into a %.
     prisma.courseSession.groupBy({ by: ["intakeId"], where: { intakeId: { in: intakeIds }, retiredAt: null }, _count: true }),
-    prisma.sessionCompletion.groupBy({ by: ["intakeId"], where: { intakeId: { in: intakeIds } }, _count: true }),
+    // Only completions that belong in the denominator below: by ACTIVE
+    // learners, of sessions that are released now. Completed or cancelled
+    // learners and withdrawn sessions used to push this past 100% (code
+    // review M10-14).
+    prisma.sessionCompletion.groupBy({
+      by: ["intakeId"],
+      where: {
+        intakeId: { in: intakeIds },
+        enrollment: { status: "ACTIVE" },
+        courseSession: visibleCourseSessionWhere({ in: intakeIds }, now),
+      },
+      _count: true,
+    }),
     prisma.enrollment.groupBy({ by: ["intakeId"], where: { intakeId: { in: intakeIds }, status: "ACTIVE" }, _count: true }),
   ]);
 
@@ -292,7 +303,7 @@ async function getIntakeDeliveryStats(intakeIds) {
       totalSessions,
       releasedSessions,
       releaseProgressPct: totalSessions > 0 ? Math.round((releasedSessions / totalSessions) * 100) : null,
-      completionPct: possibleCompletions > 0 ? Math.round(((completionsByIntake[id] ?? 0) / possibleCompletions) * 100) : null,
+      completionPct: possibleCompletions > 0 ? Math.min(100, Math.round(((completionsByIntake[id] ?? 0) / possibleCompletions) * 100)) : null,
     });
   }
   return stats;
@@ -338,9 +349,11 @@ export async function getAdminSummary(options = {}) {
       where: { createdAt: { gte: trendSince, lte: trendUntil } },
       select: { createdAt: true },
     }),
+    // By the date the money moved (paidAt), like Payments → Monthly, so the
+    // two screens agree (code review M03-26).
     prisma.payment.findMany({
-      where: { createdAt: { gte: trendSince, lte: trendUntil } },
-      select: { amount: true, createdAt: true },
+      where: { paidAt: { gte: trendSince, lte: trendUntil } },
+      select: { amount: true, paidAt: true },
     }),
     prisma.enrollment.groupBy({ by: ["status"], _count: true }),
     prisma.certificate.groupBy({ by: ["status"], _count: true }),
@@ -372,7 +385,7 @@ export async function getAdminSummary(options = {}) {
     // enrollments only, so this stays a small, cheap fetch.
     prisma.enrollment.findMany({
       where: { status: "ACTIVE" },
-      select: { course: { select: { category: { select: { service: { select: { title: true } } } } } } },
+      select: { course: { select: { service: { select: { title: true } } } } },
     }),
     // Revenue-receivable summary: every non-cancelled, payment-required
     // enrollment's course price/discount, to compute what "everyone paid
@@ -382,7 +395,7 @@ export async function getAdminSummary(options = {}) {
     // (still paying in installments) enrollment owes the plain price.
     prisma.enrollment.findMany({
       where: { status: { not: "CANCELLED" }, paymentStatus: { not: "NOT_REQUIRED" } },
-      select: { paymentStatus: true, course: { select: { price: true, discountAmount: true } } },
+      select: { paymentStatus: true, agreedPrice: true, course: { select: { price: true, discountAmount: true } } },
     }),
     // "Services delivered" — what's actually in progress right now: started,
     // not yet past its expected end. Small bounded list, soonest-ending first.
@@ -437,14 +450,15 @@ export async function getAdminSummary(options = {}) {
 
   const enrollmentCounts = new Map(monthBuckets.map((bucket) => [bucket.key, 0]));
   for (const { createdAt } of enrollmentDates) {
-    const key = monthKey(createdAt);
+    const key = colomboMonthKey(createdAt);
     if (enrollmentCounts.has(key)) enrollmentCounts.set(key, enrollmentCounts.get(key) + 1);
   }
   const enrollmentTrend = monthBuckets.map((bucket) => ({ month: bucket.label, count: enrollmentCounts.get(bucket.key) }));
 
   const revenueTotals = new Map(monthBuckets.map((bucket) => [bucket.key, 0]));
-  for (const { amount, createdAt } of payments) {
-    const key = monthKey(createdAt);
+  for (const { amount, paidAt } of payments) {
+    // Sri Lanka calendar month, matching the Monthly tab's SQL.
+    const key = colomboMonthKey(paidAt);
     if (revenueTotals.has(key)) revenueTotals.set(key, revenueTotals.get(key) + Number(amount));
   }
   const revenueTrend = monthBuckets.map((bucket) => ({ month: bucket.label, amount: revenueTotals.get(bucket.key) }));
@@ -462,7 +476,7 @@ export async function getAdminSummary(options = {}) {
 
   const serviceCounts = new Map();
   for (const { course } of serviceEnrollments) {
-    const title = course?.category?.service?.title ?? "Other";
+    const title = course?.service?.title ?? "Other";
     serviceCounts.set(title, (serviceCounts.get(title) ?? 0) + 1);
   }
   const serviceBreakdown = Array.from(serviceCounts, ([service, count]) => ({ service, count })).sort(
@@ -471,7 +485,7 @@ export async function getAdminSummary(options = {}) {
 
   const availableRevenue = Number(revenueAgg._sum.amount ?? 0);
   const fullPotentialRevenue = payableEnrollments.reduce((sum, enrollment) => {
-    const price = Number(enrollment.course?.price ?? 0);
+    const price = Number(enrollment.agreedPrice ?? enrollment.course?.price ?? 0);
     const discount = Number(enrollment.course?.discountAmount ?? 0);
     const fullAmount = enrollment.paymentStatus === "COMPLETED" ? price - discount : price;
     return sum + Math.max(0, fullAmount);

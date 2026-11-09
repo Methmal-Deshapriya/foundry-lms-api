@@ -1,7 +1,5 @@
-import * as categoryRepo from "../../../repositories/v1/catalog/category.repository.js";
 import * as courseRepo from "../../../repositories/v1/catalog/course.repository.js";
 import {
-  toPublicCategory,
   toPublicCourseCard,
   toPublicCourseDetail,
   toPublicExploreCourseCard,
@@ -25,28 +23,14 @@ async function resolveService(serviceSlug) {
   return service;
 }
 
-export async function getPublicCategoriesService(serviceSlug) {
+export async function getPublicCoursesService(serviceSlug) {
   const service = await resolveService(serviceSlug);
-  const categories = await categoryRepo.findPublicByService(service.id);
+  const courses = await courseRepo.findPublicByService(service.id);
   return {
     serviceId: service.id,
     serviceType: service.key,
     serviceSlug: service.slug,
-    categoryCount: categories.length,
-    categories: categories.map(toPublicCategory),
-  };
-}
-
-export async function getPublicCategoryService(serviceSlug, categorySlug) {
-  const service = await resolveService(serviceSlug);
-  const category = await categoryRepo.findPublicBySlug(service.id, categorySlug);
-  if (!category) {
-    throw new NotFoundError("Category not found.");
-  }
-
-  return {
-    ...toPublicCategory(category),
-    courses: category.courses.map(toPublicCourseCard),
+    courses: courses.map(toPublicCourseCard),
   };
 }
 
@@ -65,17 +49,9 @@ export async function getPublicExploreService(query = {}) {
   };
 }
 
-export async function getPublicCourseService(
-  serviceSlug,
-  categorySlug,
-  courseSlug,
-) {
+export async function getPublicCourseService(serviceSlug, courseSlug) {
   const service = await resolveService(serviceSlug);
-  const course = await courseRepo.findPublicDetail(
-    service.id,
-    categorySlug,
-    courseSlug,
-  );
+  const course = await courseRepo.findPublicDetail(service.id, courseSlug);
   if (!course) {
     throw new NotFoundError("Course not found.");
   }

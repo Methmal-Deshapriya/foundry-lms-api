@@ -9,7 +9,9 @@ import prisma from "../../../utils/prisma.js";
  */
 
 const enrollmentInclude = {
-  course: { include: { category: { include: { service: true } } } },
+  // Category was removed in 20260922120000; the old include made every
+  // user-detail request fail (code review M10-01).
+  course: { include: { service: true } },
   intake: true,
   certificates: { where: { status: "ISSUED" }, orderBy: { issuedDate: "desc" }, take: 1 },
 };

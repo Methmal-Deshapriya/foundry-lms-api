@@ -30,13 +30,13 @@ describe("classroom completion repository", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.enrollment.findUnique
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-1" } })
       .mockResolvedValue({
         intakeId,
         source: "SELF",
         status: "ACTIVE",
         paymentStatus: "NOT_REQUIRED",
-        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
       });
     mocks.transaction.courseSession.findFirst.mockResolvedValue({ id: courseSessionId });
   });
@@ -64,13 +64,13 @@ describe("classroom completion repository", () => {
   it("allows marking completion for a partially paid enrollment, same as a fully paid one", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-1" } })
       .mockResolvedValue({
         intakeId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "PARTIAL",
-        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
       });
     mocks.transaction.courseSession.findFirst.mockResolvedValue({ id: courseSessionId });
     mocks.transaction.sessionCompletion.create.mockResolvedValue({ id: "completion-id" });
@@ -87,13 +87,13 @@ describe("classroom completion repository", () => {
     async (mutate) => {
       mocks.transaction.enrollment.findUnique
         .mockReset()
-        .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
+        .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-1" } })
         .mockResolvedValue({
           intakeId,
           source: "SELF",
           status: "COMPLETED",
           paymentStatus: "NOT_REQUIRED",
-          intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } } },
+          intake: { status: "OPEN_ACTIVE", service: { accessType: "FREE", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
         });
 
       await expect(
@@ -125,13 +125,13 @@ describe("classroom completion repository", () => {
   it("rejects completion after the locked intake delivery has been withdrawn", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-1" } })
       .mockResolvedValue({
         intakeId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        intake: { status: "OPEN_ACTIVE", category: { service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } } },
+        intake: { status: "OPEN_ACTIVE", service: { accessType: "PAID", enrollmentMode: "ADMIN", paymentRequirement: "REQUIRED" } },
       });
     mocks.transaction.courseSession.findFirst.mockResolvedValue(null);
 
@@ -145,13 +145,13 @@ describe("classroom completion repository", () => {
   it("keeps archived history readable but rejects progress changes", async () => {
     mocks.transaction.enrollment.findUnique
       .mockReset()
-      .mockResolvedValueOnce({ intakeId, intake: { category: { serviceId: "service-1" } } })
+      .mockResolvedValueOnce({ intakeId, intake: { serviceId: "service-1" } })
       .mockResolvedValue({
         intakeId,
         source: "ADMIN",
         status: "ACTIVE",
         paymentStatus: "COMPLETED",
-        intake: { status: "ARCHIVED", category: { service: { accessType: "PAID" } } },
+        intake: { status: "ARCHIVED", service: { accessType: "PAID" } },
       });
 
     await expect(

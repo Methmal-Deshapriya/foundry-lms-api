@@ -1,6 +1,6 @@
 import * as projectService from "../../../services/v1/projects/project.service.js";
 import { ApiResponse } from "../../../utils/responseHandler.js";
-import { ROLES } from "../../../constants/v1/users/users.constants.js";
+import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
 
 /**
  * Student Project Controller
@@ -21,6 +21,15 @@ export async function updateProject(req, res, next) {
     const userId = req.user.id;
     const project = await projectService.updateProjectService(id, userId, req.body);
     return ApiResponse.send(res, project, "Project updated successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function setProjectVisibility(req, res, next) {
+  try {
+    const project = await projectService.setProjectVisibilityService(req.params.id, req.user.id, req.body);
+    return ApiResponse.send(res, project, project.isPublic ? "Project shown publicly." : "Project hidden from the public.");
   } catch (error) {
     next(error);
   }
@@ -80,7 +89,7 @@ export async function getProjectDetails(req, res, next) {
   try {
     const { id } = req.params;
     const userId = req.user?.id;
-    const isAdmin = req.user ? [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role) : false;
+    const isAdmin = hasPermission(req.user?.role, PERMISSIONS.PROJECTS_REVIEW);
 
     const project = await projectService.getProjectDetailsService(id, userId, isAdmin);
     return ApiResponse.send(res, project, "Project details fetched successfully");

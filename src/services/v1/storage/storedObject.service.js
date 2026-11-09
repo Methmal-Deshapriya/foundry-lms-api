@@ -1,0 +1,506 @@
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { imageSize } from "image-size";
+import {
+  createDownloadUrl,
+  createUploadUrl,
+  deleteObject,
+  fetchObjectBuffer,
+  getR2Config,
+  inspectObject,
+  isR2Enabled,
+  publicObjectUrl,
+} from "../../../config/r2.js";
+import {
+  createUploadIntentSchema,
+  storedObjectIdSchema,
+} from "../../../constants/v1/storage/storage.schema.js";
+import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
+import { ConflictError, ForbiddenError, NotFoundError, TooManyRequestsError, ValidationError } from "../../../utils/Errors.js";
+import * as repository from "../../../repositories/v1/storage/storedObject.repository.js";
+import { recordActionService } from "../audit/audit.service.js";
+import Logger from "../../../utils/logger.js";
+import { PERMISSIONS, hasPermission } from "../../../constants/v1/auth/permissions.constants.js";
+
+const PURPOSE_POLICIES = Object.freeze({
+  COURSE_THUMBNAIL: {
+    scope: "PUBLIC",
+    prefix: "course-thumbnails",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_IMAGE_BYTES",
+    defaultMaxBytes: 10_485_760,
+  },
+  SESSION_RECORDING: {
+    scope: "PRIVATE",
+    prefix: "session-recordings",
+    contentTypes: ["video/mp4", "video/webm", "video/quicktime"],
+    maxBytesEnv: "R2_MAX_RECORDING_BYTES",
+    defaultMaxBytes: 5_368_709_120,
+  },
+  SESSION_MATERIAL: {
+    scope: "PRIVATE",
+    prefix: "session-materials",
+    contentTypes: [
+      "application/pdf",
+      "application/zip",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+    ],
+    maxBytesEnv: "R2_MAX_MATERIAL_BYTES",
+    defaultMaxBytes: 104_857_600,
+  },
+  PROJECT_THUMBNAIL: {
+    scope: "PUBLIC",
+    prefix: "project-thumbnails",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_PROJECT_THUMBNAIL_BYTES",
+    defaultMaxBytes: 5_242_880,
+  },
+  SERVICE_HERO: {
+    scope: "PUBLIC",
+    prefix: "service-hero-images",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_SERVICE_HERO_BYTES",
+    defaultMaxBytes: 10_485_760,
+    // The service detail page's hero illustration is laid out at a fixed
+    // aspect ratio next to the headline text — an arbitrary size would
+    // either stretch or letterbox, so the exact pixel size is enforced here
+    // rather than left to admin judgement. See the 2026-09-24 dynamic
+    // service content plan.
+    expectedDimensions: { width: 1374, height: 1145 },
+  },
+  SERVICE_CARD: {
+    scope: "PUBLIC",
+    prefix: "service-card-images",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_SERVICE_CARD_BYTES",
+    defaultMaxBytes: 10_485_760,
+    // The home page "What we offer" card image sits in a fixed 16:9 frame —
+    // same reasoning as SERVICE_HERO's expectedDimensions above.
+    expectedDimensions: { width: 1672, height: 941 },
+  },
+  COURSE_EXPLAINER_VIDEO_THUMBNAIL: {
+    scope: "PUBLIC",
+    prefix: "course-explainer-video-thumbnails",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+    maxBytesEnv: "R2_MAX_COURSE_EXPLAINER_THUMBNAIL_BYTES",
+    defaultMaxBytes: 5_242_880,
+    // The course-detail page plays this the same way the landing page's
+    // AboutVideo does — a fixed 16:9 frame (standard YouTube thumbnail
+    // resolution) so it never stretches or letterboxes.
+    expectedDimensions: { width: 1280, height: 720 },
+  },
+  STUDENT_AVATAR: {
+    scope: "PUBLIC",
+    prefix: "student-avatars",
+    contentTypes: ["image/jpeg", "image/png", "image/webp"],
+    maxBytesEnv: "R2_MAX_STUDENT_AVATAR_BYTES",
+    // The client shrinks every avatar to a 512px WebP (~50 KB) before
+    // uploading, so 1 MB is generous headroom while keeping each student's
+    // footprint tiny. Only one avatar per student is ever kept — see
+    // deleteStoredObjectService below.
+    defaultMaxBytes: 1_048_576,
+  },
+  PAYMENT_PROOF: {
+    // Bank slips and receipts: financial records, so PRIVATE (presigned
+    // download URLs only, super admins only). Photos are compressed in the
+    // browser before upload; PDFs are accepted as-is.
+    scope: "PRIVATE",
+    prefix: "payment-proofs",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+    maxBytesEnv: "R2_MAX_PAYMENT_PROOF_BYTES",
+    defaultMaxBytes: 5_242_880,
+  },
+  PROMOTION_IMAGE: {
+    // The landing-page banner's optional image — compressed in the browser
+    // before upload; one per promotion, deleted from R2 when replaced.
+    scope: "PUBLIC",
+    prefix: "promotion-images",
+    contentTypes: ["image/jpeg", "image/png", "image/webp"],
+    maxBytesEnv: "R2_MAX_PROMOTION_IMAGE_BYTES",
+    defaultMaxBytes: 2_097_152,
+  },
+  EXPENSE_RECEIPT: {
+    // Partner earnings: a photo of a bill or receipt — private, like payment proofs.
+    scope: "PRIVATE",
+    prefix: "expense-receipts",
+    contentTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+    maxBytesEnv: "R2_MAX_EXPENSE_RECEIPT_BYTES",
+    defaultMaxBytes: 5_242_880,
+  },
+});
+
+// Every other purpose is admin-only (gated by STORAGE_MANAGE at the route
+// level). Project thumbnails are the one purpose a student uploads directly,
+// so this is the one exception carved out below rather than opening the
+// whole endpoint up by role.
+const SELF_SERVICE_PURPOSES = new Set(["PROJECT_THUMBNAIL", "STUDENT_AVATAR"]);
+
+function parse(schema, value) {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new ValidationError(issue?.message ?? "Validation failed.", issue?.path?.[0]);
+  }
+  return result.data;
+}
+
+function requireR2() {
+  if (!isR2Enabled()) {
+    throw new ConflictError(
+      "Object storage is not configured. Set the server R2 environment variables first.",
+      "STORAGE_NOT_CONFIGURED",
+    );
+  }
+  return getR2Config();
+}
+
+function maxBytes(policy) {
+  const value = Number(process.env[policy.maxBytesEnv] ?? policy.defaultMaxBytes);
+  return Number.isInteger(value) && value > 0 ? value : policy.defaultMaxBytes;
+}
+
+function safeExtension(fileName) {
+  const extension = path.extname(fileName).toLowerCase();
+  return /^\.[a-z0-9]{1,10}$/.test(extension) ? extension : "";
+}
+
+function toResponse(object) {
+  return {
+    id: object.id,
+    purpose: object.purpose,
+    scope: object.scope,
+    status: object.status,
+    fileName: object.originalFileName,
+    contentType: object.contentType,
+    sizeBytes: Number(object.actualSizeBytes ?? object.declaredSizeBytes),
+    publicUrl:
+      object.status === "READY" && object.scope === "PUBLIC"
+        ? publicObjectUrl(object.objectKey)
+        : null,
+    readyAt: object.readyAt,
+    createdAt: object.createdAt,
+  };
+}
+
+const MAX_STUDENT_PENDING_UPLOADS = 5;
+
+// A completed upload that failed a check is removed straight away — bytes
+// and all — so a mismatched or oversized file is never left sitting in the
+// (possibly public) bucket until the nightly cleanup (code review M04-01).
+async function rejectUpload(object, error) {
+  try {
+    await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+  } catch (deleteError) {
+    Logger.error(`[STORAGE_REJECT]: Could not delete rejected upload ${object.objectKey}`, deleteError);
+  }
+  await repository.markFailed(object.id);
+  throw error;
+}
+
+export async function createUploadIntentService(data, actorId, actorRole) {
+  const config = requireR2();
+  const input = parse(createUploadIntentSchema, data);
+  if (!hasPermission(actorRole, PERMISSIONS.STORAGE_MANAGE) && !SELF_SERVICE_PURPOSES.has(input.purpose)) {
+    throw new ForbiddenError("You do not have permission to upload this type of file.");
+  }
+  const policy = PURPOSE_POLICIES[input.purpose];
+  if (!policy.contentTypes.includes(input.contentType.toLowerCase())) {
+    throw new ValidationError(
+      `Unsupported file type for ${input.purpose.toLowerCase().replaceAll("_", " ")}.`,
+      "contentType",
+    );
+  }
+  if (input.sizeBytes > maxBytes(policy)) {
+    throw new ValidationError(
+      `File exceeds the ${Math.floor(maxBytes(policy) / 1_048_576)} MB limit.`,
+      "sizeBytes",
+    );
+  }
+
+  // A student can't stockpile signed upload URLs: at most a few uploads in
+  // flight per hour. Staff are exempt (code review M04-02; the per-hour
+  // request limit is in rateLimiters.js).
+  if (!hasPermission(actorRole, PERMISSIONS.STORAGE_MANAGE)) {
+    const inFlight = await repository.countRecentPending(actorId, new Date(Date.now() - 3_600_000));
+    if (inFlight >= MAX_STUDENT_PENDING_UPLOADS) {
+      throw new TooManyRequestsError("You have several uploads that haven't finished. Wait a little, then try again.", "TOO_MANY_PENDING_UPLOADS");
+    }
+  }
+
+  const id = randomUUID();
+  const now = new Date();
+  const objectKey = `${policy.prefix}/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${id}${safeExtension(input.fileName)}`;
+  const object = await repository.create({
+    id,
+    objectKey,
+    scope: policy.scope,
+    purpose: input.purpose,
+    originalFileName: input.fileName,
+    contentType: input.contentType.toLowerCase(),
+    declaredSizeBytes: BigInt(input.sizeBytes),
+    uploadedByUserId: actorId,
+  });
+
+  let uploadUrl;
+  try {
+    uploadUrl = await createUploadUrl({
+      scope: object.scope,
+      objectKey: object.objectKey,
+      contentType: object.contentType,
+      contentLength: input.sizeBytes,
+    });
+  } catch (error) {
+    await repository.markFailed(object.id);
+    throw error;
+  }
+
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.STORED_OBJECT_UPLOAD_CREATED,
+    entityType: ENTITY_TYPES.STORED_OBJECT,
+    entityId: object.id,
+    description: `Upload created for ${object.originalFileName}.`,
+    metadata: { purpose: object.purpose, scope: object.scope, sizeBytes: input.sizeBytes },
+  });
+
+  return {
+    object: toResponse(object),
+    upload: {
+      method: "PUT",
+      url: uploadUrl,
+      headers: { "Content-Type": object.contentType },
+      expiresAt: new Date(Date.now() + config.uploadTtlSeconds * 1000),
+    },
+  };
+}
+
+export async function completeUploadService(idValue, actorId, actorRole) {
+  requireR2();
+  const id = parse(storedObjectIdSchema, idValue);
+  const object = await repository.findById(id);
+  if (!object) throw new NotFoundError("Stored object not found.");
+  if (!hasPermission(actorRole, PERMISSIONS.STORAGE_MANAGE) && object.uploadedByUserId !== actorId) {
+    throw new ForbiddenError("You can only complete your own uploads.");
+  }
+  if (object.status === "READY") return toResponse(object);
+  if (object.status !== "PENDING") {
+    throw new ConflictError("This upload can no longer be completed.");
+  }
+
+  let head;
+  try {
+    head = await inspectObject({ scope: object.scope, objectKey: object.objectKey });
+  } catch (error) {
+    if (error?.$metadata?.httpStatusCode === 404 || error?.name === "NotFound") {
+      throw new ConflictError("The file has not reached object storage yet.", "UPLOAD_NOT_FOUND");
+    }
+    throw error;
+  }
+  const actualSize = Number(head.ContentLength ?? -1);
+  const declaredSize = Number(object.declaredSizeBytes);
+  if (actualSize !== declaredSize) {
+    await rejectUpload(object, new ConflictError(
+      "Uploaded file size does not match the declared size. Upload the file again.",
+      "UPLOAD_SIZE_MISMATCH",
+    ));
+  }
+  const actualType = String(head.ContentType ?? "").toLowerCase();
+  if (actualType !== object.contentType) {
+    await rejectUpload(object, new ConflictError(
+      "Uploaded file type does not match the declared type. Upload the file again.",
+      "UPLOAD_TYPE_MISMATCH",
+    ));
+  }
+  const expectedDimensions = PURPOSE_POLICIES[object.purpose]?.expectedDimensions;
+  if (expectedDimensions) {
+    const buffer = await fetchObjectBuffer({ scope: object.scope, objectKey: object.objectKey });
+    let dimensions;
+    try {
+      dimensions = imageSize(buffer);
+    } catch {
+      // Not a decodable image at all (corrupt or mislabeled) — a clear 400,
+      // not a 500 (code review M04-08).
+      await rejectUpload(object, new ValidationError("The file is not a valid image.", "dimensions"));
+    }
+    const { width, height } = dimensions;
+    if (width !== expectedDimensions.width || height !== expectedDimensions.height) {
+      await rejectUpload(object, new ValidationError(
+        `Image must be exactly ${expectedDimensions.width}×${expectedDimensions.height}px (uploaded file is ${width}×${height}px).`,
+        "dimensions",
+      ));
+    }
+  }
+  const ready = await repository.markReady(id, {
+    actualSizeBytes: BigInt(actualSize),
+    etag: head.ETag?.replaceAll('"', "") ?? null,
+  });
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.STORED_OBJECT_UPLOAD_COMPLETED,
+    entityType: ENTITY_TYPES.STORED_OBJECT,
+    entityId: id,
+    description: `Upload completed for ${ready.originalFileName}.`,
+    metadata: { purpose: ready.purpose, scope: ready.scope, sizeBytes: actualSize },
+  });
+  return toResponse(ready);
+}
+
+// Money documents belong to the super-admin-only payment ledger and partner
+// earnings; the general admin download route must not hand them out.
+const PAYMENTS_ONLY_PURPOSES = new Set(["PAYMENT_PROOF", "EXPENSE_RECEIPT"]);
+
+export async function getStoredObjectAccessService(idValue, actor) {
+  requireR2();
+  const id = parse(storedObjectIdSchema, idValue);
+  const object = await repository.findById(id);
+  if (!object || object.status !== "READY") throw new NotFoundError("Stored object not found.");
+  if (PAYMENTS_ONLY_PURPOSES.has(object.purpose) && !hasPermission(actor?.role, PERMISSIONS.PAYMENTS_VIEW)) {
+    throw new ForbiddenError("Only a super admin can open payment and expense documents.");
+  }
+  return {
+    object: toResponse(object),
+    url: await createDownloadUrl({
+      scope: object.scope,
+      objectKey: object.objectKey,
+      fileName: object.originalFileName,
+    }),
+  };
+}
+
+/**
+ * Checks that a stored object can be attached to a record: uploaded,
+ * finished, and uploaded for this purpose. With `ownerUserId`, it must also
+ * have been uploaded by that user — for student-owned records (avatars,
+ * project thumbnails), so nobody can attach someone else's file.
+ */
+export async function assertAttachableStoredObject(id, purpose, { ownerUserId } = {}) {
+  if (id == null) return null;
+  requireR2();
+  const field = {
+    COURSE_THUMBNAIL: "thumbnailObjectId",
+    SESSION_RECORDING: "recordingObjectId",
+    SESSION_MATERIAL: "materialObjectId",
+    PROJECT_THUMBNAIL: "thumbnailObjectId",
+    SERVICE_HERO: "heroImageObjectId",
+    SERVICE_CARD: "cardImageObjectId",
+    COURSE_EXPLAINER_VIDEO_THUMBNAIL: "explainerVideoThumbnailObjectId",
+    STUDENT_AVATAR: "avatarObjectId",
+    PAYMENT_PROOF: "proofObjectId",
+    PROMOTION_IMAGE: "imageObjectId",
+    EXPENSE_RECEIPT: "receiptObjectId",
+  }[purpose];
+  const parsedId = parse(storedObjectIdSchema, id);
+  const object = await repository.findById(parsedId);
+  if (!object || object.status !== "READY") {
+    throw new ValidationError("Select a completed upload.", field);
+  }
+  if (object.purpose !== purpose) {
+    throw new ValidationError("The uploaded file has the wrong purpose.", field);
+  }
+  if (ownerUserId && object.uploadedByUserId !== ownerUserId) {
+    throw new ForbiddenError("You can only use a file you uploaded.");
+  }
+  return object;
+}
+
+export function toStoredObjectResponse(object) {
+  return object ? toResponse(object) : null;
+}
+
+export async function privateStoredObjectUrl(object, { inline = false, expiresIn } = {}) {
+  if (!object) return null;
+  if (object.status !== "READY" || object.scope !== "PRIVATE") return null;
+  return createDownloadUrl({
+    scope: object.scope,
+    objectKey: object.objectKey,
+    fileName: object.originalFileName,
+    inline,
+    expiresIn,
+  });
+}
+
+/**
+ * Permanently deletes a stored object — its bytes in R2 and its row. Call
+ * only once nothing references it any more (e.g. after a replacement has
+ * been saved). The R2 delete goes first: if it fails, the row survives and
+ * still points at the bytes, so nothing is silently orphaned.
+ */
+export async function deleteStoredObjectService(object, actorId) {
+  if (!object) return;
+  requireR2();
+  // Row first, and only if nothing references it any more (e.g. another
+  // promotion still uses the same image): then the bytes. An R2 failure
+  // after that leaves a harmless orphan file, never a dangling reference
+  // (code review M04-04/M04-07).
+  if (!(await repository.deleteIfUnreferenced(object.id))) return;
+  try {
+    await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+  } catch (error) {
+    Logger.error(`[STORAGE_ORPHAN]: Row deleted but R2 object ${object.objectKey} could not be removed`, error);
+  }
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.STORED_OBJECT_DELETED,
+    entityType: ENTITY_TYPES.STORED_OBJECT,
+    entityId: object.id,
+    description: `Deleted superseded ${object.purpose.toLowerCase().replaceAll("_", " ")} "${object.originalFileName}".`,
+    metadata: { purpose: object.purpose, scope: object.scope },
+  });
+}
+
+const CLEANUP_GRACE_HOURS = 24;
+const CLEANUP_BATCH = 200;
+
+/**
+ * Deletes files nothing uses any more (Phase 4d of the 2026-10-01 plan), so
+ * R2 stays inside the free tier as the system grows. `dryRun` only lists
+ * them. Runs daily from GitHub Actions and on demand by a super admin.
+ */
+export async function cleanupStorageService({ dryRun = true, actorId = null } = {}) {
+  requireR2();
+  const olderThan = new Date(Date.now() - CLEANUP_GRACE_HOURS * 3_600_000);
+  const candidates = await repository.findCleanupCandidates(olderThan, CLEANUP_BATCH);
+  const summary = candidates.map((object) => ({
+    id: object.id,
+    purpose: object.purpose,
+    status: object.status,
+    fileName: object.originalFileName,
+    sizeBytes: Number(object.actualSizeBytes ?? object.declaredSizeBytes),
+    createdAt: object.createdAt,
+  }));
+  const totalBytes = summary.reduce((sum, object) => sum + object.sizeBytes, 0);
+  if (dryRun) return { dryRun: true, count: summary.length, totalBytes, objects: summary, hasMore: candidates.length === CLEANUP_BATCH };
+
+  let deleted = 0;
+  let failed = 0;
+  for (const object of candidates) {
+    try {
+      // Re-checked at delete time: an object attached since the candidate
+      // query is skipped, and its bytes are kept (code review M04-04).
+      if (!(await repository.deleteIfUnreferenced(object.id))) continue;
+      deleted += 1;
+      try {
+        await deleteObject({ scope: object.scope, objectKey: object.objectKey });
+      } catch (error) {
+        Logger.error(`[STORAGE_ORPHAN]: Row deleted but R2 object ${object.objectKey} could not be removed`, error);
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+  recordActionService({
+    actorUserId: actorId,
+    action: AUDIT_ACTIONS.STORED_OBJECT_DELETED,
+    entityType: ENTITY_TYPES.STORED_OBJECT,
+    entityId: null,
+    description: `Storage cleanup removed ${deleted} unused file(s)${failed ? `; ${failed} failed and will be retried next run` : ""}.`,
+    metadata: { deleted, failed, totalBytes, scheduled: !actorId },
+  });
+  return { dryRun: false, count: summary.length, deleted, failed, totalBytes, hasMore: candidates.length === CLEANUP_BATCH };
+}

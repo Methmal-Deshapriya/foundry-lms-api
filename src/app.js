@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import { getCorsOrigins } from "./config/runtimeConfig.js";
 import { checkDatabaseReadiness } from "./utils/prisma.js";
 import { checkEmailReadiness } from "./utils/email.js";
 import { checkRateLimitStoreReadiness } from "./config/rateLimitStore.js";
@@ -15,7 +16,6 @@ import errorHandler from "./middlewares/errorHandler.js";
 import authRoutes from "./routes/v1/auth/auth.routes.js";
 import userRoutes from "./routes/v1/users/user.routes.js";
 import catalogRoutes from "./routes/v1/catalog/catalog.routes.js";
-import categoryRoutes from "./routes/v1/catalog/category.routes.js";
 import courseRoutes from "./routes/v1/catalog/course.routes.js";
 import intakeRoutes from "./routes/v1/catalog/intake.routes.js";
 import learningServiceRoutes from "./routes/v1/catalog/learningService.routes.js";
@@ -24,10 +24,17 @@ import certificateRoutes from "./routes/v1/enrollments/certificate.routes.js";
 import enrollmentRoutes from "./routes/v1/enrollments/enrollment.routes.js";
 import enrollmentRequestRoutes from "./routes/v1/enrollments/enrollmentRequest.routes.js";
 import projectRoutes from "./routes/v1/projects/project.routes.js";
+import profileRoutes from "./routes/v1/profiles/profile.routes.js";
+import paymentRoutes from "./routes/v1/payments/payment.routes.js";
+import notificationRoutes from "./routes/v1/notifications/notification.routes.js";
+import partnerRoutes from "./routes/v1/partners/partner.routes.js";
 import auditRoutes from "./routes/v1/audit/audit.routes.js";
 import dashboardRoutes from "./routes/v1/dashboard/dashboard.routes.js";
 import apiArtifactRoutes from "./routes/v1/system/apiArtifact.routes.js";
+import storedObjectRoutes from "./routes/v1/storage/storedObject.routes.js";
 import { requestContext } from "./middlewares/requestContext.js";
+import { rejectForeignOrigins } from "./middlewares/originCheck.js";
+import { checkR2Readiness, isR2Enabled } from "./config/r2.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -36,6 +43,23 @@ const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
 if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
   app.set("trust proxy", trustProxyHops);
 }
+
+// Logs how the first request's client IP was resolved, once per process, so
+// a wrong TRUST_PROXY_HOPS shows up in the deploy logs (every rate limit
+// keys on req.ip). Compare `ip` with your own public IP after a deploy.
+let clientIpLogged = false;
+app.use((req, res, next) => {
+  if (!clientIpLogged && process.env.NODE_ENV === "production") {
+    clientIpLogged = true;
+    const forwarded = req.get("x-forwarded-for");
+    Logger.info("Client IP resolution check", {
+      ip: req.ip,
+      trustProxyHops,
+      forwardedHops: forwarded ? forwarded.split(",").length : 0,
+    });
+  }
+  next();
+});
 
 // 3. Base Middlewares. Security and CORS run before body parsing so malformed
 // requests receive the same protective headers as successful requests.
@@ -50,10 +74,11 @@ app.use(
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    origin: process.env.CORS_ORIGIN ? getCorsOrigins() : "http://localhost:3000",
     credentials: true,
   }),
 );
+app.use(rejectForeignOrigins);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
@@ -65,7 +90,6 @@ app.use("/api/v1/auth", (req, res, next) => {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/catalog", catalogRoutes);
-app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/courses", courseRoutes);
 app.use("/api/v1/intakes", intakeRoutes);
 app.use("/api/v1/services", learningServiceRoutes);
@@ -74,9 +98,18 @@ app.use("/api/v1/certificates", certificateRoutes);
 app.use("/api/v1/enrollments", enrollmentRoutes);
 app.use("/api/v1/enrollment-requests", enrollmentRequestRoutes);
 app.use("/api/v1/projects", projectRoutes);
+app.use("/api/v1/profiles", profileRoutes);
+app.use("/api/v1/payments", paymentRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
+app.use("/api/v1/partner-earnings", partnerRoutes);
 app.use("/api/v1/audit", auditRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
-app.use("/api/postman", apiArtifactRoutes);
+app.use("/api/v1/storage", storedObjectRoutes);
+// The Postman collection maps every endpoint and payload. It's a local
+// development aid, so production doesn't serve it at all.
+if (process.env.NODE_ENV !== "production") {
+  app.use("/api/postman", apiArtifactRoutes);
+}
 
 // 5. Health Check
 app.get("/api/health", (req, res) => {
@@ -96,16 +129,21 @@ app.get("/api/ready", async (req, res) => {
     const databaseCheck = checkDatabaseReadiness(2_000);
     const emailCheck = checkEmail ? checkEmailReadiness() : Promise.resolve();
     const rateLimitStoreCheck = checkRateLimitStoreReadiness();
-    const [, , rateLimitStore] = await Promise.all([
+    const storageCheck = isR2Enabled()
+      ? checkR2Readiness()
+      : Promise.resolve("NOT_CONFIGURED");
+    const [, , rateLimitStore, objectStorage] = await Promise.all([
       databaseCheck,
       emailCheck,
       rateLimitStoreCheck,
+      storageCheck,
     ]);
     return ApiResponse.send(res, {
       status: "READY",
       database: "UP",
       email: checkEmail ? "UP" : "NOT_CHECKED",
       rateLimitStore,
+      objectStorage,
     });
   } catch (error) {
     Logger.error("Dependency readiness check failed", error);
@@ -116,6 +154,7 @@ app.get("/api/ready", async (req, res) => {
         database: "UNKNOWN",
         email: checkEmail ? "UNKNOWN" : "NOT_CHECKED",
         rateLimitStore: "UNKNOWN",
+        objectStorage: isR2Enabled() ? "UNKNOWN" : "NOT_CONFIGURED",
       },
       "Dependency readiness check failed",
       503,

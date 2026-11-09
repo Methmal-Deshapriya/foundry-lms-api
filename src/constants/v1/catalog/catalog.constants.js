@@ -38,17 +38,3 @@ export const DURATION_UNITS = Object.freeze([
   "WEEK",
   "MONTH",
 ]);
-
-export const VISUAL_KEYS = Object.freeze([
-  "sparkles",
-  "cpu",
-  "code2",
-  "workflow",
-  "calculator",
-  "atom",
-  "bar-chart3",
-  "terminal",
-  "git-branch",
-  "globe",
-  "languages",
-]);

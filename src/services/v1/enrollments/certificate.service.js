@@ -168,6 +168,10 @@ export async function verifyCertificateService(certificateCode) {
     throw new NotFoundError("Invalid certificate code.");
   }
 
+  // A revoked certificate that was replaced (e.g. to fix a name) points at
+  // its replacement, so an old shared link isn't simply "invalid" (M08-11).
+  const replacement = certificate.status === "REVOKED" ? await certificateRepo.findCurrentByEnrollmentId(certificate.enrollmentId) : null;
+
   return {
     studentName: certificate.studentName,
     courseName: certificate.courseName,
@@ -176,6 +180,7 @@ export async function verifyCertificateService(certificateCode) {
     certificateCode: certificate.certificateCode,
     status: certificate.status,
     skills: certificate.certificateData.skills,
+    supersededByCode: replacement && replacement.certificateCode !== certificate.certificateCode ? replacement.certificateCode : null,
   };
 }
 

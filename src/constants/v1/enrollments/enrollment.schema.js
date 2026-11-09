@@ -9,12 +9,27 @@ import {
 // PENDING isn't a selectable outcome here.
 const paidPaymentStatuses = [PAYMENT_STATUS.PARTIAL, PAYMENT_STATUS.COMPLETED];
 
+// How the money moved. Optional so older clients keep working; the ledger
+// shows "Not recorded" until an admin fills it in.
+export const PAYMENT_METHODS = Object.freeze(["CASH", "BANK_TRANSFER", "ONLINE", "OTHER"]);
+const paymentMethodField = z.enum(PAYMENT_METHODS).nullable().optional();
+
 export const manualEnrollmentSchema = z.object({
   userId: z.string().uuid("Invalid user ID."),
   paymentStatus: z.enum(paidPaymentStatuses).default(PAYMENT_STATUS.COMPLETED),
   externalPaymentReference: z.string().trim().max(160).nullable().optional(),
   paymentNote: z.string().trim().max(1000).nullable().optional(),
+  paymentMethod: paymentMethodField,
 });
+
+// The remaining half of a PARTIAL enrollment: how it was paid, and the
+// bank/transfer reference if there is one.
+export const completePaymentSchema = z
+  .object({
+    paymentMethod: paymentMethodField,
+    externalReference: z.string().trim().max(160).nullable().optional(),
+  })
+  .strict("Only documented payment fields are accepted.");
 
 export const bulkManualEnrollmentSchema = z
   .object({

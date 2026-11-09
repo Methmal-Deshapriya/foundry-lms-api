@@ -23,7 +23,7 @@ const intakeId = "90000000-0000-4000-8000-000000000005";
 
 function intakeFixture(serviceType = "BOOTCAMPS", overrides = {}) {
   const free = serviceType === "FREE_LEARNING";
-  const category = { status: "PUBLISHED", service: { key: serviceType, status: "ACTIVE", accessType: free ? "FREE" : "PAID", courseMode: free ? "EVERGREEN" : "SEASONAL", enrollmentMode: free ? "SELF" : "ADMIN", paymentRequirement: free ? "NOT_REQUIRED" : "REQUIRED" } };
+  const service = { key: serviceType, status: "ACTIVE", accessType: free ? "FREE" : "PAID", courseMode: free ? "EVERGREEN" : "SEASONAL", enrollmentMode: free ? "SELF" : "ADMIN", paymentRequirement: free ? "NOT_REQUIRED" : "REQUIRED" };
   return {
     id: intakeId,
     courseId,
@@ -31,8 +31,8 @@ function intakeFixture(serviceType = "BOOTCAMPS", overrides = {}) {
     intakeKey: free ? "EVERGREEN" : "2026-B1",
     capacity: null,
     status: "OPEN_ACTIVE",
-    category,
-    course: { id: courseId, title: "AI/ML Ignition", slug: "ai-ml-ignition", summary: "Practical foundations", level: "BEGINNER", durationValue: 4, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, category },
+    service,
+    course: { id: courseId, title: "AI/ML Ignition", slug: "ai-ml-ignition", summary: "Practical foundations", level: "BEGINNER", durationValue: 4, durationUnit: "MONTH", price: free ? 0 : 1000, currency: "LKR", certificateEnabled: false, status: "PUBLISHED", archivedAt: null, service },
     ...overrides,
   };
 }
@@ -125,9 +125,16 @@ describe("course enrollment service", () => {
     enrollmentRepository.findById.mockResolvedValue(enrollmentFixture({ paymentStatus: "PARTIAL" }));
     enrollmentRepository.completePayment.mockResolvedValue(enrollmentFixture({ paymentStatus: "COMPLETED" }));
     const result = await completePaymentService("90000000-0000-4000-8000-000000000006", actorId);
-    expect(enrollmentRepository.completePayment).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000006", actorId);
+    expect(enrollmentRepository.completePayment).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000006", actorId, { method: null, externalReference: null });
     expect(result.paymentStatus).toBe("COMPLETED");
     expect(recordActionService).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: actorId, entityId: "90000000-0000-4000-8000-000000000006" }));
+  });
+
+  it("records how the remaining payment was made on the ledger entry", async () => {
+    enrollmentRepository.findById.mockResolvedValue(enrollmentFixture({ paymentStatus: "PARTIAL" }));
+    enrollmentRepository.completePayment.mockResolvedValue(enrollmentFixture({ paymentStatus: "COMPLETED" }));
+    await completePaymentService("90000000-0000-4000-8000-000000000006", actorId, { paymentMethod: "BANK_TRANSFER", externalReference: "BOC-778812" });
+    expect(enrollmentRepository.completePayment).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000006", actorId, { method: "BANK_TRANSFER", externalReference: "BOC-778812" });
   });
 
   it("refuses to complete payment for an enrollment that isn't PARTIAL", async () => {

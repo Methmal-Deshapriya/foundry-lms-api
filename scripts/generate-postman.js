@@ -29,7 +29,7 @@ const captureScripts = new Map([
   ["registerStudent", [["registeredUserId", "id"]]],
   ["verifyEmailOtp", [["currentUserId", "id"]]],
   ["login", [["currentUserId", "id"]]],
-  ["createCategory", [["categoryId", "id"], ["categorySlug", "slug"]]],
+  ["createLearningService", [["learningServiceId", "id"], ["serviceSlug", "slug"]]],
   ["createCourse", [["courseId", "id"], ["courseSlug", "slug"]]],
   ["createIntake", [["intakeId", "id"]]],
   ["createSession", [["sessionId", "id"]]],
@@ -40,6 +40,10 @@ const captureScripts = new Map([
   ["createEnrollmentRequest", [["enrollmentRequestId", "id"]]],
   ["issueCertificate", [["certificateId", "id"], ["certificateCode", "certificateCode"]]],
   ["submitProject", [["projectId", "id"]]],
+  ["createNotification", [["notificationId", "id"]]],
+  ["createPromotion", [["promotionId", "id"]]],
+  ["createExpense", [["expenseId", "id"]]],
+  ["createPayout", [["payoutId", "id"]]],
 ]);
 
 const environmentVariables = [
@@ -53,9 +57,8 @@ const environmentVariables = [
   ["currentUserId", ""],
   ["registeredUserId", ""],
   ["targetUserId", ""],
+  ["learningServiceId", ""],
   ["serviceSlug", "bootcamps"],
-  ["categoryId", ""],
-  ["categorySlug", ""],
   ["courseId", ""],
   ["courseSlug", ""],
   ["intakeId", ""],
@@ -67,6 +70,14 @@ const environmentVariables = [
   ["certificateId", ""],
   ["certificateCode", ""],
   ["projectId", ""],
+  ["newPassword", ""],
+  ["paymentId", ""],
+  ["notificationId", ""],
+  ["promotionId", ""],
+  ["partnerId", ""],
+  ["expenseId", ""],
+  ["payoutId", ""],
+  ["profileSlug", ""],
   ["allowDestructiveRequests", "false"],
 ];
 

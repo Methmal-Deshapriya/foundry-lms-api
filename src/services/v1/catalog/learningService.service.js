@@ -10,8 +10,21 @@ import { ConflictError, NotFoundError, ValidationError } from "../../../utils/Er
 import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
+import { publicObjectUrl } from "../../../config/r2.js";
+import { toStoredObjectSummary } from "../../../utils/thumbnails.js";
+import { assertAttachableStoredObject } from "../storage/storedObject.service.js";
+import { COURSE_CURRENCY } from "../../../constants/v1/catalog/catalog.constants.js";
 
-const EMPTY_STATS = Object.freeze({ categoryTotal: 0, categoryPublished: 0, categoryDraft: 0, categoryArchived: 0, courseTotal: 0, courseDraft: 0, courseArchived: 0, coursesWithoutSessions: 0, curriculumAttachmentCount: 0, activeUniqueLearners: 0, totalUniqueLearners: 0, activeEnrollments: 0, paymentAttentionCount: 0, openActiveCourseCount: 0, closedActiveCourseCount: 0, completedCourseCount: 0 });
+const EMPTY_STATS = Object.freeze({
+  courseTotal: 0, coursePublished: 0, courseDraft: 0, courseArchived: 0,
+  intakeTotal: 0, intakeDraft: 0, intakeArchived: 0, intakesWithoutSessions: 0,
+  curriculumAttachmentCount: 0, activeUniqueLearners: 0, totalUniqueLearners: 0, activeEnrollments: 0,
+  paymentAttentionCount: 0, openActiveIntakeCount: 0, closedActiveIntakeCount: 0, completedIntakeCount: 0,
+  revenueTotal: 0,
+  paymentFullCount: 0, paymentFullAmount: 0, paymentPartialCount: 0, paymentPartialAmount: 0, paymentTopUpCount: 0, paymentTopUpAmount: 0,
+  certificatesIssued: 0, certificatesEligible: 0,
+  projectsPending: 0, projectsApproved: 0, projectsRejected: 0,
+});
 const ALLOWED_TRANSITIONS = Object.freeze({ DRAFT: ["ACTIVE", "ARCHIVED"], ACTIVE: ["DRAFT", "ARCHIVED"], ARCHIVED: ["DRAFT"] });
 
 function parse(schema, value) {
@@ -20,8 +33,22 @@ function parse(schema, value) {
   return result.data;
 }
 
+function resolveObjectUrl(object) {
+  return object?.status === "READY" ? publicObjectUrl(object.objectKey) : null;
+}
+
 function response(service) {
-  return { ...service, categoryCount: service._count?.categories ?? service.categoryCount ?? 0, _count: undefined };
+  const heroImageUrl = resolveObjectUrl(service.heroImageObject);
+  const cardImageUrl = resolveObjectUrl(service.cardImageObject);
+  return {
+    ...service,
+    courseCount: service._count?.courses ?? service.courseCount ?? 0,
+    _count: undefined,
+    heroImageUrl,
+    heroImageObject: toStoredObjectSummary(service.heroImageObject, heroImageUrl),
+    cardImageUrl,
+    cardImageObject: toStoredObjectSummary(service.cardImageObject, cardImageUrl),
+  };
 }
 
 function withSummary(service, stats = EMPTY_STATS) {
@@ -33,12 +60,26 @@ function withSummary(service, stats = EMPTY_STATS) {
     label: service.title,
     instanceKind: service.courseMode,
     requiresCompletedPaymentForAccess: service.paymentRequirement === "REQUIRED",
-    categories: { total: values.categoryTotal, published: values.categoryPublished, draft: values.categoryDraft, archived: values.categoryArchived },
-    courses: { total: values.courseTotal, openActive: values.openActiveCourseCount, closedActive: values.closedActiveCourseCount, completed: values.completedCourseCount, draft: values.courseDraft, archived: values.courseArchived, withoutSessions: values.coursesWithoutSessions },
+    courses: { total: values.courseTotal, published: values.coursePublished, draft: values.courseDraft, archived: values.courseArchived },
+    intakes: { total: values.intakeTotal, openActive: values.openActiveIntakeCount, closedActive: values.closedActiveIntakeCount, completed: values.completedIntakeCount, draft: values.intakeDraft, archived: values.intakeArchived, withoutSessions: values.intakesWithoutSessions },
     learners: { activeUnique: values.activeUniqueLearners, totalUnique: values.totalUniqueLearners, activeEnrollments: values.activeEnrollments },
     curriculumAttachmentCount: values.curriculumAttachmentCount,
     payments: service.paymentRequirement === "REQUIRED" ? { needsAttention: values.paymentAttentionCount } : null,
-    attentionCount: values.categoryDraft + values.courseDraft + values.coursesWithoutSessions + values.paymentAttentionCount,
+    attentionCount: values.courseDraft + values.intakeDraft + values.intakesWithoutSessions + values.paymentAttentionCount,
+    // Revenue/payments/certificates/projects — see the 2026-09-24
+    // hierarchical admin summaries plan. Amount columns come back from
+    // $queryRaw as numeric strings (Postgres `numeric`, not `int`), hence
+    // the explicit Number(...) here — the same conversion
+    // getCourseAnalyticsService/getIntakeAnalyticsService already do for
+    // Prisma's own Decimal aggregate results.
+    revenue: { total: Number(values.revenueTotal), currency: COURSE_CURRENCY },
+    paymentBreakdown: {
+      full: { count: values.paymentFullCount, amount: Number(values.paymentFullAmount) },
+      partial: { count: values.paymentPartialCount, amount: Number(values.paymentPartialAmount) },
+      topUp: { count: values.paymentTopUpCount, amount: Number(values.paymentTopUpAmount) },
+    },
+    certificates: { issued: values.certificatesIssued, eligible: values.certificatesEligible },
+    projects: { pending: values.projectsPending, approved: values.projectsApproved, rejected: values.projectsRejected },
   };
 }
 
@@ -50,8 +91,34 @@ export async function listLearningServicesService(query = {}) {
   return { services: result.services.map((service) => withSummary(service, byId.get(service.id))), pagination: { total: result.total, limit, offset } };
 }
 
+// The public shape: exactly the fields the public site renders, nothing
+// else. Unlike the admin response, a column added to LearningService later
+// never becomes public by accident (code review M06-05).
+function toPublicLearningService(service) {
+  return {
+    id: service.id,
+    key: service.key,
+    slug: service.slug,
+    title: service.title,
+    description: service.description,
+    accessType: service.accessType,
+    courseMode: service.courseMode,
+    enrollmentMode: service.enrollmentMode,
+    paymentRequirement: service.paymentRequirement,
+    sortOrder: service.sortOrder,
+    courseCount: service._count?.courses ?? service.courseCount ?? 0,
+    summary: service.summary ?? null,
+    heroHeadline: service.heroHeadline ?? null,
+    heroTags: service.heroTags ?? [],
+    cardImageUrl: resolveObjectUrl(service.cardImageObject),
+    heroImageUrl: resolveObjectUrl(service.heroImageObject),
+    processSteps: service.processSteps ?? [],
+    faqItems: service.faqItems ?? [],
+  };
+}
+
 export async function listPublicLearningServicesService() {
-  return { services: (await repository.findPublic()).map(response) };
+  return { services: (await repository.findPublic()).map(toPublicLearningService) };
 }
 
 export async function getLearningServiceService(id) {
@@ -62,6 +129,8 @@ export async function getLearningServiceService(id) {
 
 export async function createLearningServiceService(data, actorId) {
   const input = parse(createLearningServiceSchema, data);
+  await assertAttachableStoredObject(input.heroImageObjectId, "SERVICE_HERO");
+  await assertAttachableStoredObject(input.cardImageObjectId, "SERVICE_CARD");
   const service = await repository.create({ ...input, status: "DRAFT" });
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.LEARNING_SERVICE_CREATED, entityType: ENTITY_TYPES.LEARNING_SERVICE, entityId: service.id, description: `Learning service "${service.title}" created as Draft.`, metadata: { key: service.key, slug: service.slug } });
   return response(service);
@@ -73,6 +142,12 @@ export async function updateLearningServiceService(id, data, actorId) {
   if (!current) throw new NotFoundError("Learning service not found.");
   const candidate = { ...current, ...input };
   if (!isSupportedLearningServicePolicy(candidate)) throw new ValidationError("This learning-service policy combination is not supported yet.", "accessType");
+  if (input.heroImageObjectId) {
+    await assertAttachableStoredObject(input.heroImageObjectId, "SERVICE_HERO");
+  }
+  if (input.cardImageObjectId) {
+    await assertAttachableStoredObject(input.cardImageObjectId, "SERVICE_CARD");
+  }
   const service = await repository.update(id, input);
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.LEARNING_SERVICE_UPDATED, entityType: ENTITY_TYPES.LEARNING_SERVICE, entityId: id, description: `Learning service "${service.title}" updated.`, metadata: { changedFields: Object.keys(input) } });
   if (current.status === "ACTIVE") await revalidatePublicCatalogCache();

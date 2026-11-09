@@ -24,6 +24,7 @@ export const PERMISSIONS = Object.freeze({
   SESSIONS_VIEW_LIBRARY: "SESSIONS_VIEW_LIBRARY",
   SESSIONS_MANAGE_LIBRARY: "SESSIONS_MANAGE_LIBRARY",
   SESSIONS_DELETE_PERMANENTLY: "SESSIONS_DELETE_PERMANENTLY",
+  STORAGE_MANAGE: "STORAGE_MANAGE",
   COURSE_CURRICULUM_MANAGE: "COURSE_CURRICULUM_MANAGE",
   COURSE_LIFECYCLE_MANAGE: "COURSE_LIFECYCLE_MANAGE",
   COURSE_SESSIONS_RELEASE: "COURSE_SESSIONS_RELEASE",
@@ -31,6 +32,9 @@ export const PERMISSIONS = Object.freeze({
   CERTIFICATES_MANAGE: "CERTIFICATES_MANAGE",
   PROJECTS_REVIEW: "PROJECTS_REVIEW",
   AUDIT_VIEW: "AUDIT_VIEW",
+  PAYMENTS_VIEW: "PAYMENTS_VIEW",
+  PAYMENTS_MANAGE: "PAYMENTS_MANAGE",
+  NOTIFICATIONS_MANAGE: "NOTIFICATIONS_MANAGE",
 });
 
 const ADMIN_PERMISSIONS = [
@@ -40,12 +44,16 @@ const ADMIN_PERMISSIONS = [
   PERMISSIONS.CATALOG_EDIT_DRAFTS,
   PERMISSIONS.SESSIONS_VIEW_LIBRARY,
   PERMISSIONS.SESSIONS_MANAGE_LIBRARY,
+  PERMISSIONS.STORAGE_MANAGE,
   PERMISSIONS.COURSE_CURRICULUM_MANAGE,
   PERMISSIONS.COURSE_LIFECYCLE_MANAGE,
   PERMISSIONS.COURSE_SESSIONS_RELEASE,
   PERMISSIONS.ENROLLMENTS_MANAGE,
   PERMISSIONS.CERTIFICATES_MANAGE,
   PERMISSIONS.PROJECTS_REVIEW,
+  // Every admin can write student notifications and landing-page promotions
+  // (decided 2026-10-01).
+  PERMISSIONS.NOTIFICATIONS_MANAGE,
 ];
 
 export const ROLE_PERMISSIONS = Object.freeze({
@@ -66,11 +74,23 @@ export const ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.CATALOG_DELETE_PERMANENTLY,
     PERMISSIONS.SESSIONS_DELETE_PERMANENTLY,
     PERMISSIONS.AUDIT_VIEW,
+    // The payment ledger is super-admin only (see the 2026-10-01 plan §4).
+    PERMISSIONS.PAYMENTS_VIEW,
+    PERMISSIONS.PAYMENTS_MANAGE,
   ]),
 });
 
 export function hasPermission(role, permission) {
   return Boolean(role && ROLE_PERMISSIONS[role]?.includes(permission));
+}
+
+/**
+ * A learner account: one that enrolls in courses itself. Used where a rule
+ * is about "the student's own experience" (their notifications, their
+ * session progress) rather than an admin capability.
+ */
+export function isLearnerRole(role) {
+  return hasPermission(role, PERMISSIONS.COURSES_SELF_ENROLL);
 }
 
 export function permissionsForRole(role) {

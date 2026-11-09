@@ -1,0 +1,322 @@
+name: Deploy production
+
+# Disabled by default. Set the repository variable
+# PRODUCTION_DEPLOY_ENABLED=true only after the VPS, Cloudflare Tunnel,
+# production environment, secrets, and first restore test are ready.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      client_ref:
+        description: Client branch, tag, or commit to release
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundry-lms-production-operations
+  cancel-in-progress: false
+
+jobs:
+  release_gate:
+    if: ${{ vars.PRODUCTION_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      client_sha: ${{ steps.release.outputs.client_sha }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry_release_gate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry_release_gate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out API revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: server
+
+      - name: Check out client revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Methmal-Deshapriya/Growth-LMS
+          ref: ${{ inputs.client_ref || vars.PRODUCTION_CLIENT_REF || 'main' }}
+          token: ${{ secrets.CLIENT_REPOSITORY_TOKEN || github.token }}
+          path: client
+
+      - name: Identify the two-repository release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          client_sha=$(git -C client rev-parse HEAD)
+          release_tag="${GITHUB_SHA:0:12}-${client_sha:0:12}"
+          echo "client_sha=${client_sha}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "API revision: ${GITHUB_SHA}"
+          echo "Client revision: ${client_sha}"
+          echo "Release tag: ${release_tag}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Verify API
+        working-directory: server
+        env:
+          DATABASE_URL: prisma+postgres://accelerate.prisma-data.net/?api_key=ci-placeholder
+        run: |
+          npx prisma validate
+          npm test
+          npm audit --omit=dev --audit-level=high
+          npm run api:artifacts:check
+
+      - name: Verify migrations and populated learning pipeline
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_release_gate
+          DIRECT_DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_release_gate
+          JWT_SECRET: foundry-release-gate-secret-with-at-least-32-bytes
+          RUN_DATABASE_INTEGRATION: "1"
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+          npm run test:pipeline
+          DB_STATEMENT_TIMEOUT_MS=1500 npm run test:database-timeout
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Verify client
+        working-directory: client
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api.foundryacademy.lk/api/v1
+          CATALOG_REVALIDATION_SECRET: release-gate-placeholder-secret-with-32-bytes
+          NEXT_PUBLIC_IMAGE_ORIGINS: https://assets.foundryacademy.lk
+          NEXT_PUBLIC_R2_ACCOUNT_ID: release-gate-placeholder
+        run: |
+          npm test
+          npm run lint
+          npm run build
+          npm audit --omit=dev --audit-level=high
+
+      - name: Install Chromium for browser release gates
+        working-directory: client
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser release gates
+        working-directory: client
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api.foundryacademy.lk/api/v1
+          CATALOG_REVALIDATION_SECRET: release-gate-placeholder-secret-with-32-bytes
+          NEXT_PUBLIC_IMAGE_ORIGINS: https://assets.foundryacademy.lk
+          NEXT_PUBLIC_R2_ACCOUNT_ID: release-gate-placeholder
+        run: npm run test:e2e
+
+  build_backup_deploy:
+    needs: release_gate
+    if: ${{ needs.release_gate.result == 'success' }}
+    runs-on: ubuntu-latest
+    # Images are built on the ARM64 Oracle server itself (2 OCPU), which
+    # takes longer than the old x86 runner build.
+    timeout-minutes: 75
+    environment:
+      name: production
+      url: https://foundryacademy.lk
+    env:
+      RELEASE_TAG: ${{ needs.release_gate.outputs.release_tag }}
+      CLIENT_SHA: ${{ needs.release_gate.outputs.client_sha }}
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT || '22' }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+
+    steps:
+      - name: Check out tested API revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: server
+
+      - name: Check out tested client revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Methmal-Deshapriya/Growth-LMS
+          ref: ${{ env.CLIENT_SHA }}
+          token: ${{ secrets.CLIENT_REPOSITORY_TOKEN || github.token }}
+          path: client
+
+      - name: Validate deployment configuration
+        shell: bash
+        env:
+          BACKUP_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          BACKUP_R2_BUCKET: ${{ secrets.BACKUP_R2_BUCKET }}
+          BACKUP_R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          BACKUP_R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          required=(
+            DEPLOY_SSH_HOST DEPLOY_SSH_PORT DEPLOY_SSH_USER
+            DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS
+            BACKUP_R2_ACCOUNT_ID BACKUP_R2_BUCKET
+            BACKUP_R2_ACCESS_KEY_ID BACKUP_R2_SECRET_ACCESS_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required production secret or variable is missing: ${name}" >&2
+              exit 1
+            fi
+          done
+          [[ "$DEPLOY_SSH_PORT" =~ ^[0-9]+$ ]] || { echo "DEPLOY_SSH_PORT must be numeric." >&2; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] || { echo "Invalid release tag." >&2; exit 1; }
+
+      # The production server is ARM64 (Oracle Ampere A1). Instead of
+      # building x86 images here, ship the exact tested source and build the
+      # images natively on the server (deploy/scripts/build-release-on-server.sh).
+      - name: Package the tested source for the server
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C server archive --format=tar.gz -o "$PWD/server-src-${RELEASE_TAG}.tar.gz" HEAD
+          git -C client archive --format=tar.gz -o "$PWD/client-src-${RELEASE_TAG}.tar.gz" HEAD
+          ls -lh ./*-src-"${RELEASE_TAG}".tar.gz
+
+      - name: Configure pinned SSH access
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/foundry_deploy"
+          chmod 600 "$HOME/.ssh/foundry_deploy"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/foundry_deploy" -p "$DEPLOY_SSH_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" 'test -d /opt/foundry-lms/env && test -d /opt/foundry-lms/incoming && test -f /opt/foundry-lms/env/web-build.env'
+
+      - name: Create private-database pre-deploy backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/foundry_deploy" -p "$DEPLOY_SSH_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" 'bash -s' \
+            < server/deploy/scripts/stream-database-backup.sh > backup.dump
+          test -s backup.dump
+          ls -lh backup.dump
+
+      - name: Verify the pre-deploy dump
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/backup:ro" postgres:17.11-alpine \
+            pg_restore --list /backup/backup.dump > backup.toc
+          entries=$(grep -c "TABLE DATA" backup.toc || true)
+          echo "Table data entries: $entries"
+          test "$entries" -gt 0 || { echo "The dump has no table data." >&2; exit 1; }
+
+      - name: Install backup upload dependencies
+        working-directory: server
+        run: npm ci --ignore-scripts
+
+      - name: Upload pre-deploy backup to R2
+        working-directory: server
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+          R2_PRIVATE_BUCKET: ${{ secrets.BACKUP_R2_BUCKET }}
+          BACKUP_PREFIX: backups/
+          BACKUP_RETENTION_COUNT: "14"
+          BACKUP_MONTHLY_RETENTION_COUNT: "12"
+        run: node scripts/upload-database-backup.js ../backup.dump
+
+      - name: Transfer source, build on the server, and deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST"
+          common=(-i "$HOME/.ssh/foundry_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+          server_src="server-src-${RELEASE_TAG}.tar.gz"
+          client_src="client-src-${RELEASE_TAG}.tar.gz"
+
+          scp "${common[@]}" -P "$DEPLOY_SSH_PORT" \
+            "$server_src" "$client_src" \
+            "$remote:/opt/foundry-lms/incoming/"
+
+          ssh "${common[@]}" -p "$DEPLOY_SSH_PORT" "$remote" \
+            "bash -s -- '$RELEASE_TAG' '/opt/foundry-lms/incoming/$server_src' '/opt/foundry-lms/incoming/$client_src'" \
+            < server/deploy/scripts/build-release-on-server.sh
+
+      - name: Verify public production routes or roll back
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_status=0
+
+          api_response=$(curl --fail-with-body --silent --show-error \
+            --retry 20 --retry-delay 3 --retry-all-errors --max-time 15 \
+            https://api.foundryacademy.lk/api/ready) || smoke_status=$?
+          if [[ "$smoke_status" -eq 0 ]]; then
+            echo "$api_response" | jq -e '.data.status == "READY"' >/dev/null || smoke_status=$?
+          fi
+          if [[ "$smoke_status" -eq 0 ]]; then
+            curl --fail-with-body --silent --show-error --output /dev/null \
+              --retry 20 --retry-delay 3 --retry-all-errors --max-time 15 \
+              https://foundryacademy.lk/sign-in || smoke_status=$?
+          fi
+
+          if [[ "$smoke_status" -ne 0 ]]; then
+            echo "Public smoke checks failed; requesting application rollback." >&2
+            ssh -i "$HOME/.ssh/foundry_deploy" -p "$DEPLOY_SSH_PORT" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" \
+              /opt/foundry-lms/rollback-release.sh
+            exit "$smoke_status"
+          fi
+
+      - name: Record release summary
+        shell: bash
+        run: |
+          {
+            echo "## Foundry LMS production release"
+            echo ""
+            echo "- Release tag: \`$RELEASE_TAG\`"
+            echo "- API revision: \`$GITHUB_SHA\`"
+            echo "- Client revision: \`$CLIENT_SHA\`"
+            echo "- Pre-deploy backup verified and uploaded: yes"
+            echo "- API readiness and website checks: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove SSH material from the runner
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f "$HOME/.ssh/foundry_deploy" "$HOME/.ssh/known_hosts"

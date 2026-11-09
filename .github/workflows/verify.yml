@@ -13,7 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      DATABASE_URL: prisma+postgres://accelerate.prisma-data.net/?api_key=ci-placeholder
+      # Unit tests mock the database. A plain address (like production's) is
+      # never contacted; an Accelerate placeholder makes Prisma call out in the
+      # background and fail the run with unhandled errors.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_unused
 
     steps:
       - name: Check out repository
@@ -61,6 +64,8 @@ jobs:
       DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_pipeline_test
       DIRECT_DATABASE_URL: postgresql://foundry:foundry@localhost:5432/foundry_pipeline_test
       JWT_SECRET: foundry-pipeline-ci-secret
+      # Certificates embed a public verification link built from this.
+      CLIENT_URL: https://foundryacademy.lk
       RUN_DATABASE_INTEGRATION: "1"
 
     steps:
@@ -81,6 +86,15 @@ jobs:
 
       - name: Apply migrations to disposable PostgreSQL
         run: npx prisma migrate deploy
+
+      # The migrations are hand-written: prove the migrated database is
+      # exactly what schema.prisma describes (indexes, unique constraints,
+      # foreign-key actions), not just that the migrations apply
+      # (code review M10-12). Prints the difference, then fails on any.
+      - name: Check migrations match schema.prisma
+        run: |
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
 
       - name: Run populated learning pipeline
         run: npm run test:pipeline

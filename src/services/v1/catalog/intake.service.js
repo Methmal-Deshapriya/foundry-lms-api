@@ -12,6 +12,8 @@ import { recordActionService } from "../audit/audit.service.js";
 import { AUDIT_ACTIONS, ENTITY_TYPES } from "../../../constants/v1/audit/audit.constants.js";
 import { hasPermission, PERMISSIONS } from "../../../constants/v1/auth/permissions.constants.js";
 import { revalidatePublicCatalogCache } from "./publicCatalogCache.service.js";
+import { announceCourseOpenService } from "../notifications/notification.service.js";
+import Logger from "../../../utils/logger.js";
 
 const ALLOWED_TRANSITIONS = Object.freeze({
   DRAFT: ["OPEN_ACTIVE", "CANCELLED"],
@@ -60,7 +62,7 @@ export async function createIntakeService(courseId, data, actorId) {
   const intakeKey = input.intakeKey ?? defaults.intakeKey;
   const timezone = input.timezone ?? defaults.timezone;
 
-  if (course.category.service.courseMode === "SEASONAL") {
+  if (course.service.courseMode === "SEASONAL") {
     if (!input.startDate || !input.expectedEndDate) throw new ValidationError("Seasonal intakes require start and expected end dates.", "startDate");
   } else if (input.startDate != null || input.expectedEndDate != null) {
     throw new ValidationError("Evergreen intakes do not use intake dates.", "startDate");
@@ -86,7 +88,7 @@ export async function updateIntakeService(id, data, actorId) {
   const input = parse(updateIntakeSchema, data);
   const current = await intakeRepository.findById(id);
   if (!current) throw new NotFoundError("Intake not found.");
-  if (current.category.service.courseMode === "SEASONAL") {
+  if (current.service.courseMode === "SEASONAL") {
     const nextStart = input.startDate === undefined ? current.startDate : input.startDate;
     const nextEnd = input.expectedEndDate === undefined ? current.expectedEndDate : input.expectedEndDate;
     if (!nextStart || !nextEnd || nextEnd <= nextStart) {
@@ -97,19 +99,30 @@ export async function updateIntakeService(id, data, actorId) {
   }
   const intake = await intakeRepository.updateSetup(id, input);
   recordActionService({ actorUserId: actorId, action: AUDIT_ACTIONS.INTAKE_UPDATED, entityType: ENTITY_TYPES.INTAKE, entityId: id, description: `Intake ${intake.code} updated.`, metadata: { changedFields: Object.keys(input) } });
+  // The public course page shows the open intake's dates and seats.
+  if (current.status === "OPEN_ACTIVE") await revalidatePublicCatalogCache();
   return toAdminIntake(intake);
 }
 
 export async function updateIntakeStatusService(id, data, actor) {
   const { status, expectedStatus } = parse(intakeStatusSchema, data);
   if (!ALLOWED_TRANSITIONS[expectedStatus]?.includes(status)) throw new ConflictError(`Intake cannot move from ${expectedStatus} to ${status}.`, "INVALID_INTAKE_TRANSITION");
-  if (["OPEN_ACTIVE", "CLOSED_ACTIVE", "ARCHIVED"].includes(status) && !hasPermission(actor.role, PERMISSIONS.CATALOG_PUBLISH)) {
-    throw new ForbiddenError("Only a Super Admin can expose, close, or archive an intake.", "INSUFFICIENT_INTAKE_LIFECYCLE_AUTHORITY");
+  // Cancelling is the most destructive move: it cancels every active
+  // enrollment in the intake and can't be reversed, so it's super-admin only
+  // like opening, closing and archiving (code review M06-01).
+  if (["OPEN_ACTIVE", "CLOSED_ACTIVE", "ARCHIVED", "CANCELLED"].includes(status) && !hasPermission(actor.role, PERMISSIONS.CATALOG_PUBLISH)) {
+    throw new ForbiddenError("Only a Super Admin can expose, close, cancel, or archive an intake.", "INSUFFICIENT_INTAKE_LIFECYCLE_AUTHORITY");
   }
   const intake = await intakeRepository.transitionStatus(id, expectedStatus, status);
   if (!intake) throw new NotFoundError("Intake not found.");
   recordActionService({ actorUserId: actor.id, action: AUDIT_ACTIONS.INTAKE_STATUS_CHANGED, entityType: ENTITY_TYPES.INTAKE, entityId: id, description: `Intake ${intake.code} moved from ${expectedStatus} to ${status}.`, metadata: { from: expectedStatus, to: status, courseId: intake.courseId } });
   if ([expectedStatus, status].includes("OPEN_ACTIVE")) await revalidatePublicCatalogCache();
+  // "Notify me" — tell interested students the course is open. Best-effort.
+  if (status === "OPEN_ACTIVE") {
+    announceCourseOpenService({ courseId: intake.courseId, intakeCode: intake.code }, actor.id).catch((error) =>
+      Logger.error(`[COURSE_OPEN_ANNOUNCE_FAILED]: intake ${id}`, error),
+    );
+  }
   return toAdminIntake(intake);
 }
 
@@ -131,6 +144,7 @@ export async function getIntakeAnalyticsService(intakeId) {
     revenueAgg,
     paymentTypeGroups,
     districtRows,
+    alStreamRows,
     sessionRows,
     projectGroups,
     certificatesIssuedCount,
@@ -164,6 +178,7 @@ export async function getIntakeAnalyticsService(intakeId) {
       certificateEligible: intake.course.certificateEnabled ? completed : 0,
     },
     districts: districtRows.map((row) => ({ district: row.district, count: row.count })),
+    alStreams: alStreamRows.map((row) => ({ stream: row.stream, count: row.count })),
     sessionEngagement: sessionRows.map((row) => ({
       courseSessionId: row.id,
       title: row.session.title,
@@ -194,12 +209,16 @@ export async function getIntakeDeletionImpactService(id) {
     // Restrict FK, so even a DECLINED/terminal request blocks the delete at
     // the DB level. See Finding C of the 2026-08-30 system guide/audit.
     enrollmentRequests: intake._count.enrollmentRequests,
+    // Expenses booked against the intake also block the delete (Restrict
+    // FK) — code review M06-08.
+    expenses: intake._count.expenses,
     deletable:
       intake.status === "ARCHIVED" &&
       intake._count.courseSessions === 0 &&
       intake._count.enrollments === 0 &&
       intake._count.studentProjects === 0 &&
-      intake._count.enrollmentRequests === 0,
+      intake._count.enrollmentRequests === 0 &&
+      intake._count.expenses === 0,
   };
 }
 

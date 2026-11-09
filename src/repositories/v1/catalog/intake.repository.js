@@ -4,7 +4,7 @@ import { acquireTransactionLock } from "../learning/transactionLock.repository.j
 import { recomputeCourseEnrollmentStatus } from "./course.repository.js";
 
 export const intakeInclude = {
-  category: { include: { service: true } },
+  service: true,
   course: true,
   _count: {
     select: {
@@ -12,6 +12,7 @@ export const intakeInclude = {
       enrollments: true,
       studentProjects: true,
       enrollmentRequests: true,
+      expenses: true,
     },
   },
 };
@@ -32,8 +33,8 @@ export function findPublishedFreeIntakeById(intakeId) {
     where: {
       id: intakeId,
       status: "OPEN_ACTIVE",
-      course: { archivedAt: null },
-      category: { status: "PUBLISHED", service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" } },
+      course: { archivedAt: null, status: "PUBLISHED" },
+      service: { status: "ACTIVE", accessType: "FREE", courseMode: "EVERGREEN", enrollmentMode: "SELF", paymentRequirement: "NOT_REQUIRED" },
     },
     include: intakeInclude,
   });
@@ -41,10 +42,9 @@ export function findPublishedFreeIntakeById(intakeId) {
 
 export async function findAdmin(filters, limit, offset) {
   const where = {
-    ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+    ...(filters.serviceId ? { serviceId: filters.serviceId } : {}),
     ...(filters.courseId ? { courseId: filters.courseId } : {}),
     ...(filters.status ? { status: filters.status } : {}),
-    ...(filters.serviceId ? { category: { serviceId: filters.serviceId } } : {}),
     ...(filters.q ? { OR: [
       { code: { contains: filters.q, mode: "insensitive" } },
       { intakeKey: { contains: filters.q, mode: "insensitive" } },
@@ -57,7 +57,10 @@ export async function findAdmin(filters, limit, offset) {
       where,
       take: limit,
       skip: offset,
-      orderBy: [{ category: { sortOrder: "asc" } }, { course: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
+      orderBy:
+        filters.sort === "recent"
+          ? [{ startDate: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }]
+          : [{ course: { sortOrder: "asc" } }, { course: { title: "asc" } }, { startDate: "desc" }, { createdAt: "desc" }],
       include: intakeInclude,
     }),
   ]);
@@ -94,25 +97,25 @@ export async function suggestIntakeDefaults(courseId) {
 export async function create(courseId, data) {
   try {
     return await prisma.$transaction(async (transaction) => {
-      const initialCourse = await transaction.course.findUnique({ where: { id: courseId }, select: { category: { select: { serviceId: true } } } });
+      const initialCourse = await transaction.course.findUnique({ where: { id: courseId }, select: { serviceId: true } });
       if (!initialCourse) throw new NotFoundError("Course not found.");
-      await acquireTransactionLock(transaction, `learning-service:${initialCourse.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initialCourse.serviceId}`);
       await acquireTransactionLock(transaction, `course:${courseId}`);
       const course = await transaction.course.findUnique({
         where: { id: courseId },
-        include: { category: { include: { service: true } }, intakes: { select: { id: true } } },
+        include: { service: true, intakes: { select: { id: true } } },
       });
       if (!course) throw new NotFoundError("Course not found.");
-      if (course.archivedAt || course.category.status === "ARCHIVED" || course.category.service.status === "ARCHIVED") {
+      if (course.archivedAt || course.service.status === "ARCHIVED") {
         throw new ConflictError("Archived catalog setup cannot create intakes.");
       }
-      if (course.category.service.courseMode === "EVERGREEN" && course.intakes.length > 0) {
+      if (course.service.courseMode === "EVERGREEN" && course.intakes.length > 0) {
         throw new ConflictError("A Free Learning course can have only one evergreen intake.");
       }
       const intake = await transaction.intake.create({
         data: {
           courseId: course.id,
-          categoryId: course.categoryId,
+          serviceId: course.serviceId,
           intakeKey: data.intakeKey,
           code: `${course.intakeCodePrefix}-${data.intakeKey}`,
           startDate: data.startDate ?? null,
@@ -136,10 +139,10 @@ export async function updateSetup(id, data) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.intake.findUnique({
         where: { id },
-        select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+        select: { serviceId: true, courseId: true },
       });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `intake:${id}`);
       const current = await transaction.intake.findUnique({ where: { id } });
@@ -194,18 +197,18 @@ export async function transitionStatus(id, expectedStatus, targetStatus) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.intake.findUnique({
         where: { id },
-        select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+        select: { serviceId: true, courseId: true },
       });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `intake:${id}`);
-      const intake = await transaction.intake.findUnique({ where: { id }, include: { category: { include: { service: true } }, course: true } });
+      const intake = await transaction.intake.findUnique({ where: { id }, include: { service: true, course: true } });
       if (!intake) return null;
       if (intake.status !== expectedStatus) throw new ConflictError("Intake status changed. Refresh and try again.", "STALE_INTAKE_STATUS");
       if (targetStatus === "OPEN_ACTIVE") {
-        if (intake.category.service.status !== "ACTIVE" || intake.category.status !== "PUBLISHED" || intake.course.archivedAt) throw new ConflictError("Only an intake under an active service/course and published category can be opened.");
-        if (intake.category.service.courseMode === "EVERGREEN") {
+        if (intake.service.status !== "ACTIVE" || intake.course.status !== "PUBLISHED" || intake.course.archivedAt) throw new ConflictError("Only an intake under an active service and a published course can be opened.");
+        if (intake.service.courseMode === "EVERGREEN") {
           const visible = await transaction.courseSession.count({
             where: {
               intakeId: id,
@@ -223,6 +226,15 @@ export async function transitionStatus(id, expectedStatus, targetStatus) {
         await transaction.intake.updateMany({
           where: { courseId: intake.courseId, status: "OPEN_ACTIVE", id: { not: id } },
           data: { status: "CLOSED_ACTIVE" },
+        });
+      }
+      // The "Enrollment is open" notice ends when enrollment does, so it
+      // doesn't stay pinned for a course that can't be joined (code review
+      // M09-03). Only one intake per course is open at a time.
+      if (intake.status === "OPEN_ACTIVE" && targetStatus !== "OPEN_ACTIVE") {
+        await transaction.notification.updateMany({
+          where: { audience: "COURSE_INTEREST", courseId: intake.courseId, status: "PUBLISHED" },
+          data: { status: "ARCHIVED" },
         });
       }
       if (targetStatus === "COMPLETED") await assertCompletionReady(transaction, intake);
@@ -250,6 +262,7 @@ export async function getAnalytics(intakeId) {
     revenueAgg,
     paymentTypeGroups,
     districtRows,
+    alStreamRows,
     sessionRows,
     projectGroups,
     certificatesIssuedCount,
@@ -266,6 +279,13 @@ export async function getAnalytics(intakeId) {
       FROM enrollments e JOIN users u ON u.id = e.user_id
       WHERE e.intake_id = ${intakeId} AND e.status != 'CANCELLED' AND u.district IS NOT NULL
       GROUP BY u.district ORDER BY count DESC
+    `,
+    // Same shape as the district breakdown above, grouped on A/L stream instead.
+    prisma.$queryRaw`
+      SELECT u.al_stream AS stream, COUNT(*)::int AS count
+      FROM enrollments e JOIN users u ON u.id = e.user_id
+      WHERE e.intake_id = ${intakeId} AND e.status != 'CANCELLED' AND u.al_stream IS NOT NULL
+      GROUP BY u.al_stream ORDER BY count DESC
     `,
     prisma.courseSession.findMany({
       where: { intakeId, retiredAt: null },
@@ -288,6 +308,7 @@ export async function getAnalytics(intakeId) {
     revenueAgg,
     paymentTypeGroups,
     districtRows,
+    alStreamRows,
     sessionRows,
     projectGroups,
     certificatesIssuedCount,
@@ -300,15 +321,15 @@ export async function removePermanently(id) {
     return await prisma.$transaction(async (transaction) => {
       const initial = await transaction.intake.findUnique({
         where: { id },
-        select: { categoryId: true, courseId: true, category: { select: { serviceId: true } } },
+        select: { serviceId: true, courseId: true },
       });
       if (!initial) return null;
-      await acquireTransactionLock(transaction, `learning-service:${initial.category.serviceId}`);
+      await acquireTransactionLock(transaction, `learning-service:${initial.serviceId}`);
       await acquireTransactionLock(transaction, `course:${initial.courseId}`);
       await acquireTransactionLock(transaction, `intake:${id}`);
       const intake = await transaction.intake.findUnique({
         where: { id },
-        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true, enrollmentRequests: true } } },
+        include: { _count: { select: { enrollments: true, courseSessions: true, studentProjects: true, enrollmentRequests: true, expenses: true } } },
       });
       if (!intake) return null;
       if (intake.status !== "ARCHIVED") throw new ConflictError("Archive the intake first.");
@@ -321,6 +342,9 @@ export async function removePermanently(id) {
       // 2026-08-30 system guide/audit.
       if (intake._count.enrollmentRequests) {
         throw new ConflictError("An intake with enrollment request history cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
+      }
+      if (intake._count.expenses) {
+        throw new ConflictError("An intake with recorded expenses cannot be permanently deleted.", "CATALOG_DELETION_BLOCKED");
       }
       await transaction.intake.delete({ where: { id } });
       await recomputeCourseEnrollmentStatus(transaction, intake.courseId);
